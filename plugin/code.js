@@ -338,6 +338,15 @@ function getLayoutVars(node) {
         else out.align = "center"
 
         out.wrap = node.layoutWrap === "WRAP" ? "wrap" : "nowrap"
+
+        // flex + 고정 w/h + 정렬 모두 center + padding 있음 → padding 제거 (시각적 동일)
+        var fixedW = node.layoutSizingHorizontal === "FIXED" || (typeof node.width === "number" && node.width > 0)
+        var fixedH = node.layoutSizingVertical === "FIXED" || (typeof node.height === "number" && node.height > 0)
+        var allCenter = out.justify === "center" && out.align === "center"
+        var hasPadding = (Number(out.pt) || 0) > 0 || (Number(out.pr) || 0) > 0 || (Number(out.pb) || 0) > 0 || (Number(out.pl) || 0) > 0
+        if (fixedW && fixedH && allCenter && hasPadding) {
+            out.pt = out.pr = out.pb = out.pl = "0"
+        }
     } catch (e) {}
     return out
 }
@@ -1269,7 +1278,18 @@ function normalizeProjectName(s) {
     return s || "project"
 }
 
-/** nodeId당 1회 할당. page_{project}_sec{01}_img{01}.{ext} */
+/** 문자열 해시 (동일 SVG 내용 → 동일 파일 재사용용) */
+function simpleHash(str) {
+    if (str == null || str.length === 0) return "0"
+    var h = 0
+    for (var i = 0; i < str.length; i++) {
+        h = ((h << 5) - h) + str.charCodeAt(i)
+        h = h & h
+    }
+    return (h >>> 0).toString(36)
+}
+
+/** nodeId당 1회 할당. page_{project}_sec{01}_img{01}.{ext} (SVG는 내용 해시로 동일 벡터 공유) */
 function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
     opts = opts || {}
     if (!cache) return ""
@@ -1279,6 +1299,14 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
 
     var key = nodeId != null ? nodeId : dataUrl ? "_" + (Math.random() + "") : null
     if (key == null) return ""
+
+    var isSvg = dataUrl && dataUrl.indexOf("image/svg+xml") >= 0
+    var svgHash = isSvg && dataUrl ? simpleHash(dataUrl) : null
+    if (isSvg && !cache.svgByHash) cache.svgByHash = {}
+    if (svgHash && cache.svgByHash[svgHash]) {
+        cache.imageName[key] = cache.svgByHash[svgHash].name
+        return cache.imageName[key]
+    }
 
     if (!cache.imageName[key]) {
         var ext = ".jpg"
@@ -1298,7 +1326,10 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
         cache.imageName[key] = ASSETS_IMAGES_PREFIX + fileName
         var isSvgMo = dataUrl && cache.imageSuffix === "_mo" && dataUrl.indexOf("image/svg+xml") >= 0
         var skipExport = opts.skipExport || isSvgMo
-        if (dataUrl && !skipExport) cache.imageList.push({name: cache.imageName[key], dataUrl: dataUrl})
+        if (dataUrl && !skipExport) {
+            cache.imageList.push({name: cache.imageName[key], dataUrl: dataUrl})
+            if (svgHash && cache.svgByHash) cache.svgByHash[svgHash] = { name: cache.imageName[key], dataUrl: dataUrl }
+        }
     }
     return cache.imageName[key]
 }

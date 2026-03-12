@@ -1,5 +1,5 @@
 {
-    "name": "Figma to AP HTML - layer",
+    "name": "Figma HTML Export",
     "id": "figma-to-ap-html",
     "api": "1.0.0",
     "main": "code.js",
