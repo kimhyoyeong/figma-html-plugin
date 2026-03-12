@@ -1,0 +1,860 @@
+<!-- ui.html -->
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body{margin:0;font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+    header{display:flex;gap:8px;align-items:center;padding:10px;border-bottom:1px solid #e7e7e7;}
+    button{border:1px solid #0d99ff;background:#0d99ff;color:#fff;padding:7px 12px;border-radius:6px;cursor:pointer;font-weight:700;}
+    button.gray{border-color:#cfd8dc;background:#f6f7f8;color:#111;}
+    button:disabled{opacity:.6;cursor:not-allowed;}
+    .wrap{display:flex;flex-direction:column;height:calc(100vh - 60px);min-height:0;}
+    .tabs{display:flex;flex-shrink:0;border-bottom:1px solid #e0e4e8;}
+    .tabs button{padding:8px 14px;border:0;background:transparent;cursor:pointer;font-size:12px;font-weight:600;color:#666;}
+    .tabs button.active{color:#0d99ff;border-bottom:2px solid #0d99ff;margin-bottom:-1px;}
+    .panel{display:none;flex:1;min-height:0;min-width:0;flex-direction:column;}
+    .panel.active{display:flex;}
+    textarea{flex:1;min-height:0;border:0;outline:0;padding:12px;resize:none;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;font-size:11px;line-height:1.5;}
+    .hint{margin-left:auto;color:#666;font-size:11px;}
+    .mobileOpt{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#333;}
+    .mobileOpt input[type="checkbox"]{margin:0;cursor:pointer;}
+    .field{
+      border:1px solid #cfd8dc; background:#fff; color:#111;
+      padding:6px 10px; border-radius:8px; outline:0; font-size:12px;
+      width:180px;
+    }
+    .fontRow{
+      padding:8px 10px; border-bottom:1px solid #e0e4e8; background:#f7fafc;
+      display:flex; flex-wrap:wrap; align-items:center; gap:10px;
+    }
+    .fontRowLabel{ font-size:11px; font-weight:600; color:#555; flex-shrink:0; }
+    .fontCheckboxes{ display:flex; flex-wrap:wrap; gap:6px 14px; max-height:72px; overflow-y:auto; }
+    .fontCheckboxes label{ display:inline-flex; align-items:center; gap:5px; font-size:11px; color:#333; cursor:pointer; white-space:nowrap; }
+    .fontCheckboxes input{ margin:0; cursor:pointer; }
+
+    /* ====== DATA TREE VIEW ====== */
+    .dataWrap{flex:1;min-height:0;display:flex;flex-direction:column;}
+    .dataToolbar{
+      flex-shrink:0; padding:10px 14px; border-bottom:1px solid #e0e4e8;
+      display:flex; flex-wrap:wrap; gap:16px; align-items:center; background:#f7fafc;
+    }
+    .dataToolbarGroup{display:flex; align-items:center; gap:12px; flex-wrap:wrap;}
+    .dataToolbarGroup + .dataToolbarGroup{border-left:1px solid #e0e4e8; padding-left:16px;}
+    .dataToolbarGroup.actions{gap:8px;}
+    .dataToolbar input,.dataToolbar select{
+      border:1px solid #cfd8dc; background:#fff; color:#111;
+      padding:6px 10px; border-radius:8px; outline:0; font-size:12px;
+    }
+    .dataToolbarStatus{
+      margin-left:auto; padding:10px 12px; border-radius:8px;
+       color:#0d6db7; font-size:12px; font-weight:600;
+    }
+    .dataToolbarStatus.waiting{ color:#666; font-weight:500;}
+    .dataToolbarStatus.error{color:#c53030;}
+    .dataMain{
+      flex:1; min-height:0; display:grid; grid-template-columns: 1.15fr 0.85fr; gap:10px;
+      padding:10px 12px; box-sizing:border-box;
+    }
+    .box{
+      min-height:0; border:1px solid #e0e4e8; border-radius:10px; overflow:hidden;
+      display:flex; flex-direction:column; background:#fff;
+    }
+    .boxHd{
+      flex-shrink:0; padding:8px 10px; border-bottom:1px solid #eef2f6;
+      display:flex; gap:8px; align-items:center; background:#fafcff;
+      font-size:11px; color:#333;
+    }
+    .boxBd{flex:1; min-height:0; overflow:auto; padding:10px;}
+    .tree{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;line-height:1.55;}
+    details{border-left:1px solid transparent;}
+    details[open]{border-left-color:#e7edf6;}
+    details.secMismatch{border-left:3px solid #c53030;}
+    details.secMismatch[open]{border-left-color:#c53030;}
+    .secMismatchBadge{font-size:9px;padding:1px 5px;border-radius:4px;background:#fde8e8;color:#c53030;border:1px solid #feb2b2;font-weight:600;}
+    summary{list-style:none; cursor:pointer; padding:6px 8px; border-radius:8px; display:flex; align-items:center; gap:8px;}
+    summary::-webkit-details-marker{display:none;}
+    summary:hover{background:#f2f7ff;}
+    summary.selected{outline:1px solid rgba(13,153,255,.35); background:rgba(13,153,255,.12);}
+    .childPad{padding-left:14px;}
+    .badge{
+      font-size:10px; padding:1px 6px; border:1px solid #d7dee7; border-radius:999px; color:#445; background:#fff;
+      flex-shrink:0;
+    }
+    .badge.flex{border-color:#cfe2ff;color:#1f4b99;}
+    .badge.abs{border-color:#e3d3ff;color:#5b2aa6;}
+    .badge.img{border-color:#cdeed9;color:#1c6b3b;}
+    .badge.vec{border-color:#ffe2c7;color:#7a3f09;}
+    .badge.txt{border-color:#ffd1de;color:#8a2340;}
+    .name{color:#111;}
+    .muted{color:#667; opacity:.95;}
+
+    .detail{
+      font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+      font-size:11px; line-height:1.6; padding:2px 0;
+    }
+    .detailHead{
+      padding-bottom:10px; margin-bottom:10px; border-bottom:1px solid #e0e4e8;
+    }
+    .detail h3{
+      margin:0 0 8px 0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+      font-size:14px; font-weight:700; color:#111; letter-spacing:-0.02em;
+    }
+    .detailFlags{ display:flex; flex-wrap:wrap; gap:6px; margin:0; }
+    .detailFlags .badge{ font-size:10px; }
+    .detail .kv{ margin-top:12px; padding-top:12px; border-top:1px solid #eef2f6; }
+    .detail .row{
+      display:grid; grid-template-columns:120px 1fr; gap:10px 14px; align-items:start;
+      padding:8px 10px; margin:0 -10px; border-radius:6px;
+      border-bottom:1px solid rgba(0,0,0,.06);
+      font-size:11px;
+    }
+    .detail .row:nth-child(even){ background:#f8fafc; }
+    .detail .row .k{
+      color:#555; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.03em;
+      word-break:break-word;
+    }
+    .detail .row .v{
+      color:#111; white-space:pre-wrap; word-break:break-word; line-height:1.5;
+    }
+    .detail .row.rowLabel .v{ font-size:10px; color:#333; }
+    .detail .row.rowOutputClass .v{ font-family:ui-monospace,monospace; color:#0d6db7; font-weight:600; }
+    .detail .row:last-child{ border-bottom:0; }
+    .rawArea{display:none; flex:1; min-height:0;}
+    .previewToolbar{ display:flex; gap:6px; align-items:center; flex-shrink:0; padding:8px 12px; border-bottom:1px solid #e7e7e7; }
+    .previewToolbar .viewBtn{ padding:6px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; border:1px solid #cfd8dc; background:#f6f7f8; color:#666; }
+    .previewToolbar .viewBtn.active{ border-color:#0d99ff; background:#0d99ff; color:#fff; }
+    .previewToolbar .viewBtn:hover:not(.active){ background:#eef1f3; }
+    #previewViewport{ flex:1; min-height:0; display:flex; flex-direction:column; align-items:center; background:#e0e4e8; overflow:auto; }
+    #previewViewport.viewMo{ padding:12px 0; }
+    #previewViewport.viewMo iframe{ width:374px; max-width:100%; flex:1; min-height:0; box-shadow:0 2px 12px rgba(0,0,0,.15); border-radius:8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <button id="runDesktop">PC 분석</button>
+    <button id="runMobile" class="gray">MO 분석</button>
+    
+    <input id="projectName" class="field" placeholder="project (ex: iope)" />
+    <span class="hint" id="rootHint">PC: ROOT 1개 선택 | MO: ROOT 2개 선택 후 브레이크포인트 매칭</span>
+  </header>
+  <div id="fontRow" class="fontRow" style="display:none;">
+    <span class="fontRowLabel">폰트 (체크=텍스트로 처리, 미체크=이미지로 처리)</span>
+    <div id="fontCheckboxes" class="fontCheckboxes"></div>
+  </div>
+
+  <div class="wrap">
+    <div class="tabs">
+      <button type="button" class="tab active" data-tab="data">데이터</button>
+      <button type="button" class="tab" data-tab="code">코드</button>
+      <button type="button" class="tab" data-tab="preview">미리보기</button>
+      <span class="dataToolbarStatus waiting" id="dataStatus">분석 대기 중…</span>
+    </div>
+
+    <!-- ===== DATA ===== -->
+    <div id="panel-data" class="panel active">
+      <div class="dataWrap">
+        <div class="dataToolbar">
+          <div class="dataToolbarGroup actions">
+            <button type="button" id="openAll" class="gray">모두 펼치기</button>
+            <button type="button" id="closeAll" class="gray">모두 접기</button>
+          </div>  
+        </div>
+
+        <div class="dataMain">
+          <!-- left: tree -->
+          <div class="box">
+            <div class="boxHd">
+              <b>Tree</b>
+              <span class="muted" id="treeMeta">-</span>
+            </div>
+            <div class="boxBd">
+              <div id="tree" class="tree"></div>
+              <textarea id="out" class="rawArea" placeholder="선택 분석 후 덤프 결과가 표시됩니다"></textarea>
+            </div>
+          </div>
+
+          <!-- right: detail -->
+          <div class="box">
+            <div class="boxHd">
+              <b>Detail</b>
+              <span class="muted" id="selPill">선택 없음</span>
+            </div>
+            <div class="boxBd">
+              <div id="detail" class="detail">
+                <div class="muted">트리에서 노드를 선택하면 상세 정보가 표시됩니다</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== CODE ===== -->
+    <div id="panel-code" class="panel">
+      <div style="display:flex;flex-direction:column;flex:1;min-height:0;">
+        <div style="flex-shrink:0;padding:8px 12px 0;display:flex;gap:8px;align-items:center;">
+          <button type="button" id="exportZip" class="gray">Export ZIP</button>
+          <span class="hint" style="margin-left:0;">_cms.html + assets/images/page_{project}_secXX_imgYY</span>
+        </div>
+        <textarea id="codeOut" placeholder="선택 분석 후 섹션 코드가 표시됩니다" style="flex:1;"></textarea>
+      </div>
+    </div>
+
+    <!-- ===== PREVIEW ===== -->
+    <div id="panel-preview" class="panel">
+      <div class="previewToolbar">
+        <button type="button" class="viewBtn active" id="previewViewPc" data-view="pc">PC</button>
+        <button type="button" class="viewBtn" id="previewViewMo" data-view="mo">MO</button>
+        <span class="previewToolbarHint" id="previewStructureHint" style="display:none;font-size:11px;color:#b8860b;margin-left:8px;">레이어 구조가 다르면 PC/MO를 각각 표시합니다</span>
+      </div>
+      <div id="previewViewport">
+        <iframe id="previewFrame" style="flex:1;min-height:0;width:100%;border:0;background:#fff;" sandbox="allow-same-origin" title="미리보기"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script>
+    /* =========================================================
+       UI (ui.html)
+       - RESULT payload 표시/프리뷰/트리뷰/ZIP 다운로드 담당
+       - code.js 에서 postMessage로 전달받은 데이터를 렌더링만 함
+       ========================================================= */
+
+    // ====== dom helpers ======
+    function $(s){ return document.querySelector(s); }
+
+    function getProjectName(){
+      var v = ($("#projectName") && $("#projectName").value) || "";
+      return v.trim() || "project";
+    }
+    var usedFonts = [];
+    var fontChecked = {};
+    function getAllowedFonts(){
+      return usedFonts.filter(function(f){ return fontChecked[f]; });
+    }
+    function renderFontCheckboxes(){
+      var wrap = $("#fontCheckboxes");
+      var row = $("#fontRow");
+      if (!wrap || !row) return;
+      if (!usedFonts.length) { row.style.display = "none"; wrap.innerHTML = ""; return; }
+      row.style.display = "flex";
+      wrap.innerHTML = usedFonts.map(function(f){
+        var id = "font_" + f.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
+        var checked = fontChecked[f] !== false;
+        return "<label><input type='checkbox' id='" + escapeHtml(id) + "' data-font='" + escapeHtml(f) + "' " + (checked ? "checked" : "") + ">" + escapeHtml(f) + "</label>";
+      }).join("");
+      wrap.querySelectorAll("input[type=checkbox]").forEach(function(cb){
+        cb.onchange = function(){ fontChecked[this.getAttribute("data-font")] = this.checked; };
+      });
+    }
+
+    function setLoading(on, desktopBtnLabel, mobileBtnLabel) {
+      var btnPc = $("#runDesktop");
+      var btnMo = $("#runMobile");
+      if (btnPc) {
+        btnPc.disabled = !!on;
+        btnPc.textContent = desktopBtnLabel != null ? desktopBtnLabel : (on ? "분석 중…" : "PC 분석");
+      }
+      if (btnMo) {
+        btnMo.disabled = !!on;
+        btnMo.textContent = mobileBtnLabel != null ? mobileBtnLabel : (on ? "분석 중…" : "MO 분석");
+      }
+      var st = $("#dataStatus");
+      if (st) {
+        st.textContent = on ? "분석 중…" : st.textContent;
+        st.classList.toggle("waiting", !!on);
+      }
+    }
+
+    function setProgress(phase, current, total) {
+      var st = $("#dataStatus");
+      if (!st || !st.classList.contains("waiting")) return;
+      var phaseLabel = phase === "mobile" ? "MO" : "PC";
+      if (total > 0 && current >= 0) {
+        st.textContent = phaseLabel + " 분석 중… (섹션 " + current + "/" + total + ")";
+      } else {
+        st.textContent = phaseLabel + " 분석 중…";
+      }
+    }
+
+    $("#runDesktop").onclick = function(){
+      if (this.disabled) return;
+      setLoading(true, "PC 분석 중…", "MO 분석");
+      parent.postMessage({ pluginMessage: { type: "RUN_DESKTOP", projectName: getProjectName(), allowedFonts: getAllowedFonts() } }, "*");
+    };
+    $("#runMobile").onclick = function(){
+      if (this.disabled) return;
+      setLoading(true, "PC 분석", "MO 분석 중…");
+      parent.postMessage({ pluginMessage: { type: "RUN_MOBILE", projectName: getProjectName(), allowedFonts: getAllowedFonts() } }, "*");
+    };
+
+    document.querySelectorAll(".tab").forEach(function(btn){
+      btn.onclick = function(){
+        var t = this.getAttribute("data-tab");
+        document.querySelectorAll(".tab").forEach(function(b){ b.classList.remove("active"); });
+        document.querySelectorAll(".panel").forEach(function(p){ p.classList.remove("active"); });
+        this.classList.add("active");
+        var panel = document.getElementById("panel-" + t);
+        if(panel) panel.classList.add("active");
+        if (t === "preview") refreshPreview();
+      };
+    });
+
+    function setPreviewView(mode) {
+      var viewport = document.getElementById("previewViewport");
+      var frame = document.getElementById("previewFrame");
+      var btnPc = document.getElementById("previewViewPc");
+      var btnMo = document.getElementById("previewViewMo");
+      previewViewMode = mode === "mo" ? "mo" : "pc";
+      if (mode === "mo") {
+        if (viewport) viewport.classList.add("viewMo");
+        if (frame) { frame.style.width = "375px"; frame.style.maxWidth = "100%"; frame.style.flex = "1"; }
+        if (btnPc) btnPc.classList.remove("active");
+        if (btnMo) btnMo.classList.add("active");
+      } else {
+        if (viewport) viewport.classList.remove("viewMo");
+        if (frame) { frame.style.width = "100%"; frame.style.maxWidth = ""; frame.style.flex = "1"; }
+        if (btnPc) btnPc.classList.add("active");
+        if (btnMo) btnMo.classList.remove("active");
+      }
+      refreshPreview();
+    }
+    document.getElementById("previewViewPc").onclick = function() { setPreviewView("pc"); };
+    document.getElementById("previewViewMo").onclick = function() { setPreviewView("mo"); };
+
+    function updatePreviewToolbar() {
+      var hint = document.getElementById("previewStructureHint");
+      var btnMo = document.getElementById("previewViewMo");
+      if (hint) hint.style.display = separateViews ? "inline" : "none";
+      // MO 버튼: mobile 데이터가 있고, 이미지 청크 수신이 끝난 경우에만 표시 (미수신 시 MO 탭에서 _mo 배경 이미지가 깨짐)
+      if (btnMo) btnMo.style.display = mobileDataTree && previewImagesReady ? "" : "none";
+    }
+
+    // ====== state (code.js RESULT를 UI에서 유지) ======
+
+    var previewImages = [];
+    var zipImagesBuffer = [];
+    var resultImagesBuffer = [];
+    /** MO 분석 시 이미지 청크 수신 완료 여부. true일 때만 MO 미리보기에서 _mo 배경 이미지가 정상 표시됨 */
+    var previewImagesReady = true;
+    var zipImagesCode = "";
+    var payloadText = "";
+    var dataTree = null;
+    var mobileDataTree = null;
+    var separateViews = false;
+    /** PC/MO 구조 불일치 섹션 번호 (예: ["03"]) — 데이터 탭 레드라인 표시용 */
+    var hybridMismatchSecs = [];
+    var selectedNode = null;
+    /** code.js RESULT에서 전달 (벡터 타입 목록 단일 정의) */
+    var vectorTypes = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "LINE", "ELLIPSE", "POLYGON", "RECTANGLE"];
+
+    function escapeHtml(s){
+      if(s==null) return "";
+      return String(s)
+        .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+        .replace(/"/g,"&quot;");
+    }
+
+    function setStatusText(t){
+      var st = $("#dataStatus");
+      if (!st) return;
+      st.textContent = t || "";
+      var isWaiting = !t || t === "분석 대기 중…" || (t && t.indexOf("분석 중") === 0);
+      st.classList.toggle("waiting", isWaiting);
+      st.classList.toggle("error", t === "ERROR");
+    }
+
+    $("#openAll").onclick = function(){ toggleAll(true); };
+    $("#closeAll").onclick = function(){ toggleAll(false); };
+
+    // ====== plugin -> UI message handler ======
+    onmessage = function(e){
+      var msg = e.data.pluginMessage;
+      if(!msg) return;
+
+      if (msg.type === "LOADING") setLoading(!!msg.value);
+      if (msg.type === "PROGRESS") setProgress(msg.phase, msg.current, msg.total);
+
+      if(msg.type==="RESULT"){
+        setLoading(false);
+
+        payloadText = msg.text || "";
+        dataTree = msg.dataTree || null;
+        mobileDataTree = msg.mobileDataTree || null;
+        separateViews = !!msg.separateViews;
+        hybridMismatchSecs = msg.hybridMismatchSecs && Array.isArray(msg.hybridMismatchSecs) ? msg.hybridMismatchSecs : [];
+        if (msg.vectorTypes && msg.vectorTypes.length) vectorTypes = msg.vectorTypes;
+
+        usedFonts = msg.usedFonts || [];
+        usedFonts.forEach(function(f){ if (fontChecked[f] === undefined) fontChecked[f] = true; });
+        renderFontCheckboxes();
+
+        $("#out").value = payloadText;
+        $("#codeOut").value = msg.code != null ? msg.code : "";
+
+        previewImages = msg.images || [];
+        resultImagesBuffer = [];
+        previewImagesReady = (msg.imageCount || 0) <= 0;
+        if ((msg.imageCount || 0) <= 0) refreshPreview();
+
+        renderDataTree(dataTree);
+        updatePreviewToolbar();
+        var sectionCount = dataTree && dataTree.sections ? dataTree.sections.length : 0;
+        var statusBase = sectionCount > 0 ? ("완료 · 섹션 " + sectionCount + "개") : "완료 · 섹션 0개 (보이는 자식 없음)";
+        setStatusText(separateViews ? statusBase + " · 레이어 구조가 다르면 PC/MO를 각각 표시합니다" : statusBase);
+      }
+
+      if (msg.type === "RESULT_IMAGES_CHUNK") {
+        resultImagesBuffer.push({ name: msg.name || ("img_" + (msg.index ?? 0) + ".png"), dataUrl: msg.dataUrl || "" });
+      }
+      if (msg.type === "RESULT_IMAGES_END") {
+        previewImages = resultImagesBuffer.slice();
+        resultImagesBuffer = [];
+        previewImagesReady = true;
+        refreshPreview();
+        updatePreviewToolbar();
+      }
+
+      if (msg.type === "ZIP_IMAGES") {
+        setLoading(false);
+        zipImagesBuffer = [];
+        zipImagesCode = msg.code != null ? msg.code : (($("#codeOut") && $("#codeOut").value) || "");
+        if ($("#codeOut")) $("#codeOut").value = zipImagesCode;
+      }
+
+      if (msg.type === "ZIP_IMAGES_CHUNK") {
+        zipImagesBuffer.push({ name: msg.name || ("img_" + (msg.index ?? 0) + ".png"), dataUrl: msg.dataUrl || "" });
+      }
+
+      if (msg.type === "ZIP_IMAGES_END") {
+        setExportZipReady();
+        var zipImages = zipImagesBuffer.slice();
+        var exportHtml = getPreviewHtml(true);
+        if (!exportHtml || !zipImagesCode.trim()) return;
+
+        var zip = new JSZip();
+        zip.file("_cms.html", exportHtml);
+        zipImages.forEach(function (item) {
+          var base64 = (item.dataUrl || "").replace(/^data:image\/[^;]+;base64,/, "");
+          if (base64) zip.file(item.name, base64, { base64: true });
+        });
+        zip.generateAsync({ type: "blob" }).then(function (blob) {
+          var now = new Date();
+          var y = now.getFullYear();
+          var m = String(now.getMonth() + 1).padStart(2, "0");
+          var d = String(now.getDate()).padStart(2, "0");
+          var h = String(now.getHours()).padStart(2, "0");
+          var min = String(now.getMinutes()).padStart(2, "0");
+          var sec = String(now.getSeconds()).padStart(2, "0");
+          var dateTime = y + "-" + m + "-" + d + "_" + h + min + sec;
+          var a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "export_" + dateTime + ".zip";
+          a.click();
+          URL.revokeObjectURL(a.href);
+        });
+        previewImages = zipImages;
+        refreshPreview();
+        zipImagesBuffer = [];
+      }
+
+      if(msg.type==="ERROR"){
+        setLoading(false);
+        setExportZipReady();
+
+        payloadText = "ERROR: " + (msg.message || "");
+        dataTree = null;
+        mobileDataTree = null;
+        separateViews = false;
+        hybridMismatchSecs = [];
+        selectedNode = null;
+        usedFonts = [];
+        renderFontCheckboxes();
+
+        $("#out").value = payloadText;
+        $("#codeOut").value = "";
+
+        $("#tree").innerHTML = "";
+        $("#detail").innerHTML = "<div class='detailHead'><h3>에러</h3><div class='muted'>" + escapeHtml(msg.message || "") + "</div></div>";
+        $("#selPill").textContent = "선택 없음";
+        $("#treeMeta").textContent = "-";
+
+        previewImages = [];
+        previewImagesReady = true;
+        refreshPreview();
+        updatePreviewToolbar();
+
+        setStatusText("ERROR");
+      }
+    };
+
+    // ====== Tree rendering ======
+    function renderDataTree(dt){
+      $("#tree").innerHTML = "";
+      selectedNode = null;
+      updateDetail(null);
+
+      if (!dt || !dt.sections || !dt.sections.length){
+        $("#treeMeta").textContent = "-";
+        var emptyMsg = document.createElement("div");
+        emptyMsg.className = "muted";
+        emptyMsg.style.cssText = "padding:12px; line-height:1.5;";
+        emptyMsg.innerHTML =
+          "섹션이 없습니다.<br><br>" +
+          "• ROOT로 선택한 프레임의 <b>보이는 자식 레이어</b>가 각각 섹션이 됩니다.<br>" +
+          "• 자식이 없거나 모두 숨김(visible=false)이면 표시되지 않습니다.<br>" +
+          "• 프레임 1개만 선택했는지, 자식 레이어가 보이도록 설정되어 있는지 확인하세요.";
+        $("#tree").appendChild(emptyMsg);
+        return;
+      }
+
+      $("#treeMeta").textContent = "sections=" + dt.sections.length;
+
+      dt.sections.forEach(function(sec){
+        var rootNode = sec.node;
+        var secClass = (sec.title || "").replace(/^Section\s+/i, "").trim();
+        var isMismatch = hybridMismatchSecs && hybridMismatchSecs.indexOf(secClass) >= 0;
+
+        var secWrap = document.createElement("details");
+        secWrap.open = true;
+        if (isMismatch) secWrap.className = "secMismatch";
+
+        var sum = document.createElement("summary");
+        sum.innerHTML =
+          '<span class="badge">SECTION</span>' +
+          '<span class="name">' + escapeHtml(sec.title || "") + '</span>' +
+          (isMismatch ? '<span class="secMismatchBadge">PC/MO 불일치</span>' : '');
+
+        secWrap.appendChild(sum);
+
+        var body = document.createElement("div");
+        body.className = "childPad";
+        body.appendChild(renderNode(rootNode));
+        secWrap.appendChild(body);
+
+        $("#tree").appendChild(secWrap);
+      });
+    }
+
+    function renderNode(node){
+      var d = document.createElement("details");
+      d.open = false;
+
+      var sum = document.createElement("summary");
+      var meta = parseMetaFromLabel(node.label || "");
+
+      sum.dataset.type = meta.type;
+      sum.dataset.flags = meta.flags.join(",");
+      sum.dataset.name = meta.name;
+      sum.dataset.search = buildSearchBlob(node, meta);
+
+      sum.innerHTML =
+        meta.flags.map(function(f){ return badgeHtml(f); }).join("") +
+        '<span class="name">' + escapeHtml(meta.type) + '</span>' +
+        '<span class="muted">"' + escapeHtml(meta.name) + '"</span>';
+
+      sum.addEventListener("click", function(){
+        markSelected(sum);
+        selectedNode = node;
+        updateDetail(node);
+      });
+
+      d.appendChild(sum);
+
+      var children = node.children || [];
+      if (children.length){
+        var body = document.createElement("div");
+        body.className = "childPad";
+        children.forEach(function(ch){ body.appendChild(renderNode(ch)); });
+        d.appendChild(body);
+      }
+
+      return d;
+    }
+
+    function badgeHtml(flag){
+      var cls = "";
+      if(flag==="FLEX") cls="flex";
+      else if(flag==="ABS") cls="abs";
+      else if(flag==="IMG_FILL" || flag==="COMPOSITE?") cls="img";
+      else if(flag==="VEC_ONLY") cls="vec";
+      else if(flag==="TEXT") cls="txt";
+      return '<span class="badge ' + cls + '">' + escapeHtml(flag) + '</span>';
+    }
+
+    function getNodeByPath(dt, path){
+      if (!dt || !dt.sections || !path || !path.length) return null;
+      var secIdx = path[0] - 1;
+      if (secIdx < 0 || secIdx >= dt.sections.length) return null;
+      var n = dt.sections[secIdx].node;
+      for (var i = 1; i < path.length; i++) {
+        if (!n.children || path[i] >= n.children.length) return null;
+        n = n.children[path[i]];
+      }
+      return n;
+    }
+
+    function normNameForMatch(s) {
+      var t = String(s || "").trim();
+      if (t.length >= 2 && ((t.charAt(0) === "'" && t.charAt(t.length - 1) === "'") || (t.charAt(0) === '"' && t.charAt(t.length - 1) === '"')))
+        return t.slice(1, -1).trim();
+      return t;
+    }
+    function getNodeByTypeAndName(dt, type, name) {
+      if (!dt || !dt.sections || type == null || name == null) return null;
+      var typeStr = String(type);
+      var nameNorm = normNameForMatch(name);
+      function walk(n) {
+        if (!n) return null;
+        var m = parseMetaFromLabel(n.label || "");
+        if (m.type === typeStr && normNameForMatch(m.name) === nameNorm) return n;
+        if (n.children) for (var i = 0; i < n.children.length; i++) { var r = walk(n.children[i]); if (r) return r; }
+        return null;
+      }
+      for (var s = 0; s < dt.sections.length; s++) {
+        var r = walk(dt.sections[s].node);
+        if (r) return r;
+      }
+      return null;
+    }
+
+    function parseMetaFromLabel(label){
+      var s = String(label || "").trim();
+      var m = s.match(/([A-Z_]+)\s+"([^"]*)"(?:\s+\[([^\]]+)\])?.*$/);
+      var type = m ? m[1] : "NODE";
+      var name = m ? m[2] : s;
+      var flags = (m && m[3]) ? m[3].split(",").map(function(x){return x.trim();}).filter(Boolean) : [];
+      return { type:type, name:name, flags:flags };
+    }
+
+    function buildSearchBlob(node, meta){
+      var parts = [];
+      parts.push(meta.type, meta.name, meta.flags.join(" "));
+      (node.props || []).forEach(function(p){ parts.push(p); });
+      return parts.join(" ").toLowerCase();
+    }
+
+    function markSelected(sumEl){
+      document.querySelectorAll("summary.selected").forEach(function(x){ x.classList.remove("selected"); });
+      sumEl.classList.add("selected");
+      $("#selPill").textContent = '선택: ' + (sumEl.dataset.type||"NODE") + ' "' + (sumEl.dataset.name||"") + '"';
+    }
+
+    function updateDetail(node){
+      if(!node){
+        $("#detail").innerHTML = "<div class='detailHead'><h3>노드 상세 정보</h3><div class='muted'>트리에서 항목을 클릭하면 상세 정보가 표시됩니다</div></div>";
+        $("#selPill").textContent = "선택 없음";
+        return;
+      }
+      var meta = parseMetaFromLabel(node.label || "");
+      var props = node.props || [];
+      var childrenCount = (node.children || []).length;
+
+      var html = "";
+      html += "<div class='detailHead'>";
+      html += "<h3>" + escapeHtml(meta.type) + " \"" + escapeHtml(meta.name) + "\"</h3>";
+      if (meta.flags && meta.flags.length) {
+        html += "<div class='detailFlags'>";
+        meta.flags.forEach(function(f){ html += badgeHtml(f); });
+        html += "</div>";
+      }
+      html += "</div>";
+      html += "<div class='kv'>";
+
+      html += row("타입", meta.type);
+      html += row("이름", meta.name);
+      html += row("자식 수", String(childrenCount));
+
+      if (node.textMeta) {
+        var tm = node.textMeta;
+        var parts = [];
+        if (tm.fs !== undefined && tm.fs !== "") parts.push("font-size:" + tm.fs + "px");
+        if (tm.lh !== undefined && tm.lh !== "") parts.push("line-height:" + tm.lh + (Number(tm.lh) <= 3 ? "" : "px"));
+        if (tm.fontFamily !== undefined && tm.fontFamily !== "") parts.push("font:" + (tm.fontFamily || "") + (tm.fontStyle ? " " + tm.fontStyle : ""));
+        if (tm.fw !== undefined && tm.fw !== "") parts.push("font-weight:" + tm.fw);
+        if (tm.ta !== undefined && tm.ta !== "") parts.push("text-align:" + tm.ta);
+        if (tm.clr !== undefined && tm.clr !== "") parts.push("color:" + tm.clr);
+        if (tm.sizeW !== undefined && tm.sizeH !== undefined) parts.push("size:" + tm.sizeW + "×" + tm.sizeH);
+        if (tm.ls !== undefined && tm.ls !== "") parts.push("letter-spacing:" + tm.ls + "em");
+        html += row("텍스트 스타일", parts.join("; "));
+      }
+
+      var keyOrder = ["sectionRelative", "position", "flex", "layoutChild", "bg", "bgImage", "text", "vector"];
+      var keyLabel = {
+        sectionRelative: "섹션 기준", position: "위치", flex: "플렉스", layoutChild: "레이아웃",
+        bg: "배경", bgImage: "배경 이미지", text: "내용", vector: "벡터"
+      };
+      var parsed = props.map(function(p){ var kv = parsePropLine(p); return { key: kv.key, value: kv.value }; });
+
+      function getParsed(key) { for (var i = 0; i < parsed.length; i++) if (parsed[i].key === key) return parsed[i].value; return null; }
+      var bgVal = getParsed("bg");
+      var bgImageVal = getParsed("bgImage");
+      if (bgVal || bgImageVal) {
+        html += row("배경", [bgVal, bgImageVal].filter(Boolean).join("; "));
+      }
+
+      keyOrder.forEach(function(orderedKey){
+        if (orderedKey === "bg" || orderedKey === "bgImage") return;
+        for (var i = 0; i < parsed.length; i++) {
+          if (parsed[i].key === orderedKey) {
+            html += row(keyLabel[orderedKey] || orderedKey, parsed[i].value);
+            return;
+          }
+        }
+      });
+      parsed.forEach(function(kv){
+        if (kv.key !== "bg" && kv.key !== "bgImage" && keyOrder.indexOf(kv.key) === -1) html += row(keyLabel[kv.key] || kv.key, kv.value);
+      });
+
+      if (mobileDataTree && node.path && node.path.length) {
+        if (separateViews) {
+          html += "<div class='kv' style='margin-top:12px;padding-top:12px;border-top:1px solid #e0e4e8;'><h4 style='margin:0 0 8px 0;font-size:12px;color:#b8860b;'>MO</h4>";
+          html += row("상태", "레이어 구조가 달라 매칭 불가");
+          html += "</div>";
+        } else {
+        var moNode = getNodeByPath(mobileDataTree, node.path);
+        if (moNode) {
+          html += "<div class='kv' style='margin-top:12px;padding-top:12px;border-top:1px solid #e0e4e8;'><h4 style='margin:0 0 8px 0;font-size:12px;color:#0d6db7;'>MO (매칭)</h4>";
+          var hasMoContent = false;
+          if (moNode.textMeta) {
+            var tm = moNode.textMeta;
+            var moParts = [];
+            if (tm.fs !== undefined && tm.fs !== "") moParts.push("font-size:" + tm.fs + "px");
+            if (tm.lh !== undefined && tm.lh !== "") moParts.push("line-height:" + tm.lh + (Number(tm.lh) <= 3 ? "" : "px"));
+            if (tm.fontFamily !== undefined && tm.fontFamily !== "") moParts.push("font:" + (tm.fontFamily || "") + (tm.fontStyle ? " " + tm.fontStyle : ""));
+            if (tm.fw !== undefined && tm.fw !== "") moParts.push("font-weight:" + tm.fw);
+            if (tm.ta !== undefined && tm.ta !== "") moParts.push("text-align:" + tm.ta);
+            if (tm.clr !== undefined && tm.clr !== "") moParts.push("color:" + tm.clr);
+            if (moParts.length) { html += row("텍스트 스타일", moParts.join("; ")); hasMoContent = true; }
+          }
+          if (moNode.props && moNode.props.length) {
+            var moParsed = moNode.props.map(function(p){ var kv = parsePropLine(p); return { key: kv.key, value: kv.value }; });
+            keyOrder.forEach(function(orderedKey){
+              for (var i = 0; i < moParsed.length; i++) {
+                if (moParsed[i].key === orderedKey) {
+                  html += row((keyLabel[orderedKey] || orderedKey), moParsed[i].value);
+                  hasMoContent = true;
+                  return;
+                }
+              }
+            });
+            moParsed.forEach(function(kv){
+              if (keyOrder.indexOf(kv.key) === -1) { html += row(keyLabel[kv.key] || kv.key, kv.value); hasMoContent = true; }
+            });
+          }
+          if (!hasMoContent) html += row("상태", "인덱스 매칭 (레이어 순서 동일)");
+          html += "</div>";
+        }
+        }
+      }
+      html += "</div>";
+
+      $("#detail").innerHTML = html;
+    }
+
+    function parsePropLine(p){
+      if (typeof p !== "string") return { key: "prop", value: String(p) };
+      var idx = p.indexOf(":");
+      if (idx === -1) return { key: "prop", value: p.trim() };
+      var k = p.substring(0, idx).trim();
+      var v = p.substring(idx + 1).trim();
+      return { key: k || "prop", value: v };
+    }
+
+    function row(k, v, rowClass){
+      var cls = "row" + (rowClass ? " " + rowClass : "");
+      return "<div class='" + cls + "'><div class='k'>" + escapeHtml(k) + "</div><div class='v'>" + escapeHtml(v) + "</div></div>";
+    }
+
+    function toggleAll(open){
+      $("#tree").querySelectorAll("details").forEach(function(d){ d.open = open; });
+    }
+
+    // ====== Preview ======
+    var previewBlobUrl = null;
+    var previewViewMode = "pc";
+
+    function getPreviewHtml(forExport, forceViewportWidth) {
+      var raw = ($("#codeOut") && $("#codeOut").value) || "";
+      if (!raw.trim()) return "";
+
+      // preview에서 assets/images/... 를 dataUrl로 치환
+      var styleMatches = raw.match(/<style>[\s\S]*?<\/style>/ig) || [];
+      var style = styleMatches.join("\n");
+      var body = raw.replace(/<style>[\s\S]*?<\/style>/ig, "").replace(/^\s+/, "");
+
+      if (!forExport && previewImages.length) {
+        var pathToDataUrl = {};
+        previewImages.forEach(function (item) {
+          pathToDataUrl[item.name] = item.dataUrl;
+          if (item.name && item.name.toLowerCase) pathToDataUrl[item.name.toLowerCase()] = item.dataUrl;
+        });
+        var imgRe = /\b(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(_mo)?\.(?:png|jpg|jpeg|svg))\b/gi;
+        function replacePath(m) {
+          var data = pathToDataUrl[m] || pathToDataUrl[m.toLowerCase()];
+          if (data) return data;
+          if (/_mo\.(png|jpg|jpeg|svg)$/i.test(m)) {
+            var pcPath = m.replace(/_mo\.(png|jpg|jpeg|svg)$/i, ".$1");
+            return pathToDataUrl[pcPath] || pathToDataUrl[pcPath.toLowerCase()] || m;
+          }
+          return m;
+        }
+        body  = body.replace(imgRe,  replacePath);
+        style = style.replace(imgRe, replacePath);
+      }
+
+      var baseStyle = "<style>body{margin:0;min-height:100vh;background:#f5f5f5;}</style>";
+      var viewport = (forceViewportWidth > 0)
+        ? '<meta name="viewport" content="width=' + forceViewportWidth + ', initial-scale=1">'
+        : '<meta name="viewport" content="width=device-width, initial-scale=1">';
+      return '<!DOCTYPE html><html><head><meta charset="utf-8">' + viewport + baseStyle + "</head><body>" + style + "\n\n" + body + "</body></html>";
+    }
+
+    function refreshPreview() {
+      var frame = $("#previewFrame");
+      if (!frame) return;
+
+      if (previewBlobUrl) {
+        URL.revokeObjectURL(previewBlobUrl);
+        previewBlobUrl = null;
+      }
+
+      var viewportWidth = (previewViewMode === "mo") ? 375 : 0;
+      var html = getPreviewHtml(false, viewportWidth);
+      if (html) {
+        try {
+          frame.removeAttribute("src");
+          frame.srcdoc = html;
+        } catch (e) {
+          var blob = new Blob([html], { type: "text/html;charset=utf-8" });
+          previewBlobUrl = URL.createObjectURL(blob);
+          frame.src = previewBlobUrl;
+        }
+      } else {
+        frame.removeAttribute("src");
+        frame.srcdoc = "<p style='padding:12px;color:#666'>분석 후 생성된 코드가 있으면 미리보기가 표시됩니다.</p>";
+      }
+    }
+
+    // ====== Export ZIP ======
+    $("#exportZip").onclick = function() {
+      var code = ($("#codeOut") && $("#codeOut").value) || "";
+      if (!code.trim()) return;
+      var btn = this;
+      btn.disabled = true;
+      btn.textContent = "내보내는 중…";
+      parent.postMessage({ pluginMessage: { type: "EXPORT_ZIP", projectName: getProjectName(), allowedFonts: getAllowedFonts() } }, "*");
+    };
+
+    function setExportZipReady() {
+      var btn = $("#exportZip");
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Export ZIP";
+      }
+    }
+  </script>
+</body>
+</html>
