@@ -196,7 +196,7 @@ function buildTextPartInnerHtml(ts) {
         var chunk = p.characters || text.substring(from, to)
         var escaped = textToHtmlWithBreaks(chunk)
         var vars = []
-        if (p.clr && baseClr && p.clr !== baseClr) vars.push("--ap-clr:" + p.clr)
+        if (p.clr && (p.clr !== baseClr)) vars.push("--ap-clr:" + p.clr)
         if (p.fs != null && p.fs > 0 && (!baseFs || Math.abs(p.fs - baseFs) >= 1)) vars.push("--ap-fs:" + Math.round(p.fs))
         if (p.fw != null && p.fw !== baseFw) vars.push("--ap-fw:" + Number(p.fw))
         if (Math.abs((p.ls || 0) - baseLsEm) >= 0.001) vars.push("--ap-ls:" + (Number(p.ls) || 0).toFixed(3) + "em")
@@ -1020,7 +1020,11 @@ function getTextSummaryAsync(tn) {
         }
 
         try {
-            out.fs = tn.fontSize === figma.mixed ? "" : String(Number(tn.fontSize) || 0)
+            if (tn.fontSize !== figma.mixed) {
+                out.fs = String(Number(tn.fontSize) || 0)
+            } else {
+                out.fs = ""
+            }
         } catch (e) {
             out.fs = ""
         }
@@ -1038,7 +1042,7 @@ function getTextSummaryAsync(tn) {
 
         try {
             var ls = tn.letterSpacing
-            var fsNum = tn.fontSize === figma.mixed ? 0 : Number(tn.fontSize) || 0
+            var fsNum = tn.fontSize !== figma.mixed ? Number(tn.fontSize) || 0 : 0
             if (!ls || ls === figma.mixed || !fsNum) out.ls = ""
             else if (typeof ls === "object") {
                 if (ls.unit === "PERCENT") out.ls = "0"
@@ -1091,7 +1095,7 @@ function getTextSummaryAsync(tn) {
 
         var isMixed = false
         try {
-            if (tn.fontName === figma.mixed || tn.fontSize === figma.mixed) isMixed = true
+            if (tn.fontName === figma.mixed || tn.fontSize === figma.mixed || tn.fills === figma.mixed) isMixed = true
         } catch (eMixed) {}
         var len = 0
         try {
@@ -1120,7 +1124,7 @@ function getTextSummaryAsync(tn) {
                                 if (lso.unit === "PERCENT") segLsEm = (Number(lso.value) || 0) / 100
                                 else if (lso.unit === "PIXELS" && segFs > 0) segLsEm = (Number(lso.value) || 0) / segFs
                             }
-                            if (segClr && baseClr && segClr !== baseClr) hasAnyDiff = true
+                            if (segClr && segClr !== baseClr) hasAnyDiff = true
                             if (segFs && baseFs && Math.abs(segFs - baseFs) >= 1) hasAnyDiff = true
                             if (segFw !== baseFw) hasAnyDiff = true
                             if (Math.abs(segLsEm - baseLsEm) >= 0.001) hasAnyDiff = true
@@ -1154,11 +1158,29 @@ function getTextSummaryAsync(tn) {
                                 }
                             })
                         }
+                        if (out.fs === "" && out.parts && out.parts.length > 0) {
+                            var firstFs = out.parts[0].fs
+                            if (firstFs != null && firstFs > 0) out.fs = String(Math.round(firstFs))
+                        }
+                        if (out.fs === "" && rawSegs.length > 0) {
+                            var r0 = rawSegs[0]
+                            var r0fs = r0.fontSize
+                            if (r0fs != null && r0fs !== figma.mixed) out.fs = String(Math.round(Number(r0fs) || 0))
+                            if (out.fs === "" && typeof tn.getRangeFontSize === "function") {
+                                try {
+                                    var rf = tn.getRangeFontSize(r0.start, r0.end)
+                                    if (rf != null && rf !== figma.mixed) out.fs = String(Math.round(Number(rf) || 0))
+                                } catch (eR) {}
+                            }
+                        }
                     }
                 } else {
                     var runs = extractTextStyleRunsFromRangeApi(tn, len)
                     if (runs && runs.length > 1) {
                         out.parts = runs
+                        if (out.fs === "" && runs[0] && runs[0].fs > 0) out.fs = String(Math.round(runs[0].fs))
+                    } else if (out.fs === "" && runs && runs.length === 1 && runs[0].fs > 0) {
+                        out.fs = String(Math.round(runs[0].fs))
                     }
                 }
             } catch (ePart) {
@@ -1231,19 +1253,36 @@ function buildTextVarsDeclDiff(tsD, tsM) {
     return parts.join(";")
 }
 
-/** TextNode → ts 객체 (동기, 폰트 로드 가정) */
+/** TextNode → ts 객체 (동기, 폰트 로드 가정). mixed fontSize는 getStyledTextSegments로 첫 구간 값 사용 */
 function getTextSummarySync(tn) {
     if (!tn || tn.type !== "TEXT") return null
     try {
         var out = {fs: "", lh: "", ls: "", fw: "", ta: "", clr: ""}
-        out.fs = tn.fontSize === figma.mixed ? "" : String(Number(tn.fontSize) || 0)
+        if (tn.fontSize !== figma.mixed) {
+            out.fs = String(Number(tn.fontSize) || 0)
+        } else {
+            if (typeof tn.getStyledTextSegments === "function") {
+                try {
+                    var segs = tn.getStyledTextSegments(["fontSize"])
+                    if (segs && segs.length > 0 && segs[0].fontSize != null && segs[0].fontSize !== figma.mixed) {
+                        out.fs = String(Math.round(Number(segs[0].fontSize) || 0))
+                    }
+                } catch (eSeg) {}
+            }
+            if (out.fs === "" && typeof tn.getRangeFontSize === "function" && tn.characters.length > 0) {
+                try {
+                    var rangeFs = tn.getRangeFontSize(0, 1)
+                    if (rangeFs != null && rangeFs !== figma.mixed) out.fs = String(Math.round(Number(rangeFs) || 0))
+                } catch (eRange) {}
+            }
+        }
         var lh = tn.lineHeight
         if (lh && lh !== figma.mixed && typeof lh === "object") {
             if (lh.unit === "PERCENT") out.lh = String(r2((lh.value || 0) / 100))
             else out.lh = String(r2(lh.value || 0))
         }
+        var fsNum = out.fs !== "" ? Number(out.fs) || 0 : 0
         var ls = tn.letterSpacing
-        var fsNum = tn.fontSize === figma.mixed ? 0 : Number(tn.fontSize) || 0
         if (ls && ls !== figma.mixed && typeof ls === "object" && fsNum) {
             if (ls.unit !== "PERCENT") out.ls = String(r2((Number(ls.value) || 0) / fsNum))
         }
@@ -2341,7 +2380,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                             if (imgDecl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-image img[data-node-id="' + id + '"]'), imgDecl)
                             var altText = getImageAltText(node)
                             if (id) ctx.ownImageNodeIds[id] = true
-                            return wrapIfBtn(node, indent(depth) + '<figure class="ap-image"' + dataIdAttr + '><img src="' + (path || "") + '" alt="' + altText + '"' + dataIdAttr + " /></figure>", depth)
+                            return wrapIfBtn(node, indent(depth) + '<div class="ap-image"' + dataIdAttr + '><img src="' + (path || "") + '" alt="' + altText + '"' + dataIdAttr + " /></div>", depth)
                         })
                         .catch(function () {
                             var decl = buildTextVarsDecl(ts)
@@ -2412,7 +2451,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
                 var altText = getImageAltText(node)
                 if (id) ctx.ownImageNodeIds[id] = true
-                var html = indent(depth) + '<figure class="ap-image"' + dataIdAttr + '><img src="' + (path || "") + '" alt="' + altText + '"' + dataIdAttr + " /></figure>"
+                var html = indent(depth) + '<div class="ap-image"' + dataIdAttr + '><img src="' + (path || "") + '" alt="' + altText + '"' + dataIdAttr + " /></div>"
                 return wrapIfBtn(node, html, depth)
             })
         }
@@ -2474,7 +2513,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                 var altText = getImageAltText(node)
                 if (id) ctx.ownImageNodeIds[id] = true
                 var figureCls = "ap-image" + (imgAbs ? " ap-abs" : "")
-                var figureHtml = '<figure class="' + figureCls + '"' + dataIdAttr + '><img src="' + (path || "") + '" alt="' + altText + '"' + dataIdAttr + " /></figure>"
+                var figureHtml = '<div class="' + figureCls + '"' + dataIdAttr + '><img src="' + (path || "") + '" alt="' + altText + '"' + dataIdAttr + " /></div>"
                 return wrapIfBtn(node, indent(depth) + figureHtml, depth)
             })
         }
@@ -2513,14 +2552,12 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                 }
             }
 
-            // frame 배경 + border (배경 있으면 width/height 넣어서 배경 안 짤리게)
+            // frame 배경 + border (배경 있으면 width 넣어서 배경 안 짤리게). height는 항상 box 있으면 넣음.
+            if (box && box.h != null) declParts.push("height:calc(" + box.h + "/var(--ap-width)*100cqi)")
             return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl) {
                 if (bgDecl) {
                     declParts.push(bgDecl)
-                    if (box) {
-                        if (box.w != null) declParts.push("width:calc(" + box.w + "/var(--ap-width)*100cqi)")
-                        if (box.h != null) declParts.push("height:calc(" + box.h + "/var(--ap-width)*100cqi)")
-                    }
+                    if (box && box.w != null) declParts.push("width:calc(" + box.w + "/var(--ap-width)*100cqi)")
                 }
                 var strokeDecl = buildStrokeDecl(node)
                 if (strokeDecl) declParts.push(strokeDecl)
