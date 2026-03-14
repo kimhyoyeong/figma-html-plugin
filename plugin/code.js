@@ -144,11 +144,12 @@ function wrapIfBtn(node, html, depth) {
     return indent(depth) + '<a href="#">' + "\n" + html + "\n" + indent(depth) + "</a>"
 }
 
-/** TEXT 노드용 태그: btn이면 <a href="#" class="ap-text">, 아니면 <span class="ap-text"> */
-function textNodeTag(node, textCls, dataIdAttr, depth) {
+/** TEXT 노드용 태그: btn이면 <a href="#" class="ap-text">, 아니면 <span class="ap-text">. parentStyle 있으면 open에 style 속성 추가 */
+function textNodeTag(node, textCls, dataIdAttr, depth, parentStyle) {
+    var styleAttr = (parentStyle && String(parentStyle).trim()) ? ' style="' + String(parentStyle).trim() + '"' : ""
     var open = isBtnNode(node)
-        ? '<a href="#" class="' + textCls + '"' + dataIdAttr + ">"
-        : '<span class="' + textCls + '"' + dataIdAttr + ">"
+        ? '<a href="#" class="' + textCls + '"' + dataIdAttr + styleAttr + ">"
+        : '<span class="' + textCls + '"' + dataIdAttr + styleAttr + ">"
     var close = isBtnNode(node) ? "</a>" : "</span>"
     return { open: open, close: close }
 }
@@ -173,7 +174,7 @@ function textToHtmlWithBreaks(s) {
     var t = String(s).replace(/\u2028/g, "\n").replace(/\u2029/g, "\n")
     return t.split(/\r?\n/).map(escapeHtml).join("<br>")
 }
-/** mixed 텍스트: parts 있으면 ap-text__part span으로 출력 (--ap-fs, --ap-fw, --ap-clr, --ap-ls 로 부모 변수 오버라이드) */
+/** mixed 텍스트: parts 있으면 ap-text__part span으로 출력 (--ap-fs, --ap-fw, --ap-clr, --ap-ls 로 부모 변수 오버라이드). 모든 part가 동일한 값이면 부모 style로만 출력 */
 function buildTextPartInnerHtml(ts) {
     if (!ts) return ""
     var parts = ts.parts
@@ -183,6 +184,33 @@ function buildTextPartInnerHtml(ts) {
     var baseFs = ts.fs !== "" ? Number(ts.fs) || 0 : 0
     var baseFw = ts.fw !== "" ? Number(ts.fw) || 400 : 400
     var baseLsEm = ts.ls !== "" ? Number(ts.ls) || 0 : 0
+    var partLs = [], partFw = [], partClr = [], partFs = []
+    for (var i = 0; i < parts.length; i++) {
+        var p = parts[i]
+        if (Math.abs((p.ls || 0) - baseLsEm) >= 0.001) partLs.push("--ap-ls:" + (Number(p.ls) || 0).toFixed(3) + "em")
+        else partLs.push(null)
+        if (p.fw != null && p.fw !== baseFw) partFw.push("--ap-fw:" + Number(p.fw))
+        else partFw.push(null)
+        if (p.clr && (p.clr !== baseClr)) partClr.push("--ap-clr:" + p.clr)
+        else partClr.push(null)
+        if (p.fs != null && p.fs > 0 && (!baseFs || Math.abs(p.fs - baseFs) >= 1)) partFs.push("--ap-fs:" + Math.round(p.fs))
+        else partFs.push(null)
+    }
+    function allSame(arr) {
+        var first = null
+        for (var j = 0; j < arr.length; j++) {
+            if (arr[j] == null) return null
+            if (first === null) first = arr[j]
+            else if (arr[j] !== first) return null
+        }
+        return first
+    }
+    var commonLs = allSame(partLs)
+    var commonFw = allSame(partFw)
+    var commonClr = allSame(partClr)
+    var commonFs = allSame(partFs)
+    var parentVars = [commonLs, commonFw, commonClr, commonFs].filter(Boolean)
+    var parentStyle = parentVars.length ? parentVars.join(";") : ""
     var out = ""
     var pos = 0
     for (var i = 0; i < parts.length; i++) {
@@ -196,10 +224,10 @@ function buildTextPartInnerHtml(ts) {
         var chunk = p.characters || text.substring(from, to)
         var escaped = textToHtmlWithBreaks(chunk)
         var vars = []
-        if (p.clr && (p.clr !== baseClr)) vars.push("--ap-clr:" + p.clr)
-        if (p.fs != null && p.fs > 0 && (!baseFs || Math.abs(p.fs - baseFs) >= 1)) vars.push("--ap-fs:" + Math.round(p.fs))
-        if (p.fw != null && p.fw !== baseFw) vars.push("--ap-fw:" + Number(p.fw))
-        if (Math.abs((p.ls || 0) - baseLsEm) >= 0.001) vars.push("--ap-ls:" + (Number(p.ls) || 0).toFixed(3) + "em")
+        if (partClr[i] != null && partClr[i] !== commonClr) vars.push(partClr[i])
+        if (partFs[i] != null && partFs[i] !== commonFs) vars.push(partFs[i])
+        if (partFw[i] != null && partFw[i] !== commonFw) vars.push(partFw[i])
+        if (partLs[i] != null && partLs[i] !== commonLs) vars.push(partLs[i])
         var leadingBr = ""
         if (vars.length > 0) {
             var brMatch = escaped.match(/^(\s*<br\s*\/?>\s*)+/i)
@@ -216,7 +244,7 @@ function buildTextPartInnerHtml(ts) {
         pos = to
     }
     if (pos < text.length) out += textToHtmlWithBreaks(text.substring(pos))
-    return out
+    return parentStyle ? { inner: out, parentStyle: parentStyle } : out
 }
 /** Figma textAlignHorizontal → CSS text-align 값 */
 function normTextAlign(a) {
@@ -745,7 +773,7 @@ function hasTextInSubtree(node) {
 function getLeafSelectorForNode(ch) {
     if (!ch || !ch.id) return ""
     var id = String(ch.id)
-    if (ch.type === "TEXT") return '.ap-text[data-node-id="' + id + '"], .ap-image[data-node-id="' + id + '"]'
+    if (ch.type === "TEXT") return '.ap-text[data-node-id="' + id + '"]'
     if (isVideoNode(ch)) return '.ap-video[data-node-id="' + id + '"]'
     if (isImageCandidate(ch) || isVectorOnlyTree(ch)) return '.ap-image[data-node-id="' + id + '"]'
     if (ch.type === "LINE" || isLineLikeNode(ch)) return '.ap-line[data-node-id="' + id + '"]'
@@ -787,7 +815,7 @@ function collectTextNodesByName(root) {
     return map
 }
 
-var IMAGE_EXPORT_MAX_WIDTH = 500   // 미리보기
+var IMAGE_EXPORT_MAX_WIDTH = 200   // 미리보기
 var IMAGE_EXPORT_ZIP_WIDTH = 1200  // ZIP 내보내기
 var _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
 
@@ -1301,11 +1329,29 @@ function pushDeferredStyle(ctx, sel, decl) {
     for (var i = 0; i < ctx.deferredStyles.length; i++) {
         if (ctx.deferredStyles[i].sel === sel) {
             var prev = ctx.deferredStyles[i].decl || ""
-            ctx.deferredStyles[i].decl = prev ? prev + ";" + decl : decl
+            var merged = prev ? prev + ";" + decl : decl
+            ctx.deferredStyles[i].decl = dedupeCssDecl(merged)
             return
         }
     }
     ctx.deferredStyles.push({sel: sel, decl: decl})
+}
+
+/** CSS 선언 문자열에서 동일 속성 중복 제거 (마지막 값 유지) */
+function dedupeCssDecl(decl) {
+    if (!decl || !String(decl).trim()) return decl
+    var parts = String(decl).split(";")
+    var map = {}
+    for (var i = 0; i < parts.length; i++) {
+        var p = parts[i].trim()
+        if (!p) continue
+        var colon = p.indexOf(":")
+        if (colon === -1) continue
+        var key = p.substring(0, colon).trim()
+        var value = p.substring(colon + 1).trim()
+        map[key] = value
+    }
+    return Object.keys(map).map(function (k) { return k + ":" + map[k] }).join(";")
 }
 
 var ASSETS_IMAGES_PREFIX = "assets/images/"
@@ -2209,7 +2255,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
     codeLines.push(".ap-post__inner {")
     codeLines.push("  container:article/inline-size;")
     codeLines.push("  --ap-width:" + baseWidth + ";")
-    codeLines.push("  max-width:" + baseWidth + "px;")
+    codeLines.push("  max-width:" + baseWidth + "px;width:100%;")
     codeLines.push("  margin:0 auto;")
     codeLines.push("}")
     codeLines.push("")
@@ -2356,8 +2402,12 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                             var textAbsDecl = buildAbsDecl(node, parent)
                             if (textAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-text[data-node-id="' + id + '"]'), textAbsDecl)
                         }
+                        var partResult = buildTextPartInnerHtml(ts)
+                        var innerHtml = typeof partResult === "string" ? partResult : partResult.inner
+                        var parentStyle = typeof partResult === "string" ? "" : (partResult.parentStyle || "")
+                        if (parentStyle && id) pushDeferredStyle(ctx, selInSection(secClass, '.ap-text[data-node-id="' + id + '"]'), parentStyle)
                         var tag = textNodeTag(node, textCls, dataIdAttr, depth)
-                        var html = indent(depth) + tag.open + buildTextPartInnerHtml(ts) + tag.close
+                        var html = indent(depth) + tag.open + innerHtml + tag.close
                         return isBtnNode(node) ? html : wrapIfBtn(node, html, depth)
                     }
 
@@ -2370,8 +2420,12 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                                     var textAbsDecl = buildAbsDecl(node, parent)
                                     if (textAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-text[data-node-id="' + id + '"]'), textAbsDecl)
                                 }
+                                var partResult = buildTextPartInnerHtml(ts)
+                                var innerHtml = typeof partResult === "string" ? partResult : partResult.inner
+                                var parentStyle = typeof partResult === "string" ? "" : (partResult.parentStyle || "")
+                                if (parentStyle && id) pushDeferredStyle(ctx, selInSection(secClass, '.ap-text[data-node-id="' + id + '"]'), parentStyle)
                                 var tag = textNodeTag(node, textCls, dataIdAttr, depth)
-                                var html = indent(depth) + tag.open + buildTextPartInnerHtml(ts) + tag.close
+                                var html = indent(depth) + tag.open + innerHtml + tag.close
                                 return isBtnNode(node) ? html : wrapIfBtn(node, html, depth)
                             }
                             if (node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
@@ -2385,8 +2439,12 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                         .catch(function () {
                             var decl = buildTextVarsDecl(ts)
                             if (decl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-text[data-node-id="' + id + '"]'), decl)
+                            var partResult = buildTextPartInnerHtml(ts)
+                            var innerHtml = typeof partResult === "string" ? partResult : partResult.inner
+                            var parentStyle = typeof partResult === "string" ? "" : (partResult.parentStyle || "")
+                            if (parentStyle && id) pushDeferredStyle(ctx, selInSection(secClass, '.ap-text[data-node-id="' + id + '"]'), parentStyle)
                             var tag = textNodeTag(node, textCls, dataIdAttr, depth)
-                            var html = indent(depth) + tag.open + buildTextPartInnerHtml(ts) + tag.close
+                            var html = indent(depth) + tag.open + innerHtml + tag.close
                             return isBtnNode(node) ? html : wrapIfBtn(node, html, depth)
                         })
                 })
@@ -2552,17 +2610,24 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                 }
             }
 
-            // frame 배경 + border (배경 있으면 width 넣어서 배경 안 짤리게). height는 항상 box 있으면 넣음.
-            if (box && box.h != null) declParts.push("height:calc(" + box.h + "/var(--ap-width)*100cqi)")
+            // frame height: 배경(fill/이미지) 또는 stroke가 있을 때만 고정. 없으면 생략해 콘텐츠 증가 시 유지보수에 유리.
             return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl) {
                 if (bgDecl) {
                     declParts.push(bgDecl)
-                    if (box && box.w != null) declParts.push("width:calc(" + box.w + "/var(--ap-width)*100cqi)")
+                    var hasWidth = declParts.some(function (s) { return String(s).indexOf("width:") !== -1 })
+                    if (box && box.w != null && !hasWidth) declParts.push("width:calc(" + box.w + "/var(--ap-width)*100cqi)")
                 }
                 var strokeDecl = buildStrokeDecl(node)
                 if (strokeDecl) declParts.push(strokeDecl)
                 var radiusDecl = buildCornerRadiusDecl(node)
                 if (radiusDecl) declParts.push(radiusDecl)
+                // height 고정: 시각적 영역이 있는 경우만. 없으면 생략 → 콘텐츠 증가 시 유지보수 유리.
+                // ・배경(fill/이미지): bgDecl
+                // ・테두리: strokeDecl
+                // ・모서리 둥글기: radiusDecl (박스 느낌 있음)
+                // ・추가 고려: overflow(clipContent) 처리 로직 추가 시 clipDecl 등 조건에 포함 가능.
+                // ・추가 고려: box-shadow 내보내기 추가 시 (shadowDecl) 조건에 포함 가능.
+                if (box && box.h != null && (bgDecl || strokeDecl || radiusDecl)) declParts.push("height:calc(" + box.h + "/var(--ap-width)*100cqi)")
 
                 // abs 좌표(부모 기준)
                 if (abs) {
