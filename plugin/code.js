@@ -21,32 +21,21 @@ function sectionClassPrefix(oneBasedIndex) {
     var n = Math.max(1, Math.floor(oneBasedIndex))
     return (n < 10 ? "0" : "") + n
 }
+/** 레이어 이름이 지정 문자열과 일치하는지 (대소문자 무관, trim) */
+function isNodeName(node, name) {
+    return !!(node && String(node.name || "").trim().toLowerCase() === name)
+}
 /** 레이어 이름이 btn이면 링크로 감쌀지 여부 (대소문자 무관: btn, Btn, BTN 등) */
 function isBtnNode(node) {
-    return !!(
-        node &&
-        String(node.name || "")
-            .trim()
-            .toLowerCase() === "btn"
-    )
+    return isNodeName(node, "btn")
 }
 /** 레이어 이름이 video이면 비디오 영역 플레이스홀더 (대소문자 무관: video, Video, VIDEO 등) */
 function isVideoNode(node) {
-    return !!(
-        node &&
-        String(node.name || "")
-            .trim()
-            .toLowerCase() === "video"
-    )
+    return isNodeName(node, "video")
 }
 /** 레이어 이름이 slide이면 Swiper 구조로 감쌈 */
 function isSlideNode(node) {
-    return !!(
-        node &&
-        String(node.name || "")
-            .trim()
-            .toLowerCase() === "slide"
-    )
+    return isNodeName(node, "slide")
 }
 /** 섹션에서 swiper-slide 대상 노드들 반환. null이면 슬라이드 모드 아님.
  * - 섹션 자식 중 slide 1개(그룹) → 그 그룹의 자식들이 각각 swiper-slide
@@ -70,13 +59,7 @@ function getSlideItems(sectionNode) {
 function isLineLikeNode(node) {
     if (!node) return false
     if (node.type === "LINE") return true
-    if (
-        isVectorOnlyTree(node) &&
-        String(node.name || "")
-            .trim()
-            .toLowerCase() === "line"
-    )
-        return true
+    if (isVectorOnlyTree(node) && isNodeName(node, "line")) return true
     return false
 }
 
@@ -334,6 +317,11 @@ function isAbsoluteByParentNotFlex(node, parent) {
     }
 }
 
+/** 절대 위치 계열 판별 (in-parent / self absolute / parent not flex) 통합 */
+function isAbsoluteLike(node, parent) {
+    return isAbsoluteInParent(node, parent) || isAbsolutePositioned(node) || isAbsoluteByParentNotFlex(node, parent)
+}
+
 /** Auto Layout 설정을 CSS 변수용 객체로 추출. isFlex(node)일 때만 값 채움 */
 function getLayoutVars(node) {
     var out = {direction: "", gap: "", pt: "", pr: "", pb: "", pl: "", justify: "", align: "", wrap: ""}
@@ -367,12 +355,13 @@ function getLayoutVars(node) {
 
         out.wrap = node.layoutWrap === "WRAP" ? "wrap" : "nowrap"
 
-        // flex + 고정 w/h + 정렬 모두 center + padding 있음 → padding 제거 (시각적 동일)
+        // 고정 크기 + 양축 center + 패딩 있음 → 시각 요소 없는 순수 레이아웃일 때만 패딩 제거 (배지/카드는 stroke·fill로 패딩 유지)
         var fixedW = node.layoutSizingHorizontal === "FIXED" || (typeof node.width === "number" && node.width > 0)
         var fixedH = node.layoutSizingVertical === "FIXED" || (typeof node.height === "number" && node.height > 0)
         var allCenter = out.justify === "center" && out.align === "center"
         var hasPadding = (Number(out.pt) || 0) > 0 || (Number(out.pr) || 0) > 0 || (Number(out.pb) || 0) > 0 || (Number(out.pl) || 0) > 0
-        if (fixedW && fixedH && allCenter && hasPadding) {
+        var hasFrameVisual = !!(getFirstSolidStroke(node) || getFirstSolidFill(node) || hasImageFill(node))
+        if (fixedW && fixedH && allCenter && hasPadding && !hasFrameVisual) {
             out.pt = out.pr = out.pb = out.pl = "0"
         }
     } catch (e) {}
@@ -769,17 +758,27 @@ function hasTextInSubtree(node) {
     return false
 }
 
+/** data-node-id 기반 selector 조각 (selInSection(secClass, xxxSel(id)) 조합용) */
+function textSel(id) { return '.ap-text[data-node-id="' + id + '"]' }
+function frameSel(id) { return '.ap-frame[data-node-id="' + id + '"]' }
+function imageSel(id) { return '.ap-image[data-node-id="' + id + '"]' }
+function imageImgSel(id) { return '.ap-image img[data-node-id="' + id + '"]' }
+function videoSel(id) { return '.ap-video[data-node-id="' + id + '"]' }
+function lineSel(id) { return '.ap-line[data-node-id="' + id + '"]' }
+function ellipseSel(id) { return '.ap-ellipse[data-node-id="' + id + '"]' }
+function layerSel(id) { return '.ap-layer[data-node-id="' + id + '"]' }
+
 /** 리프 노드용 스타일 selector (ap-item 제거 후 직접 적용) */
 function getLeafSelectorForNode(ch) {
     if (!ch || !ch.id) return ""
     var id = String(ch.id)
-    if (ch.type === "TEXT") return '.ap-text[data-node-id="' + id + '"]'
-    if (isVideoNode(ch)) return '.ap-video[data-node-id="' + id + '"]'
-    if (isImageCandidate(ch) || isVectorOnlyTree(ch)) return '.ap-image[data-node-id="' + id + '"]'
-    if (ch.type === "LINE" || isLineLikeNode(ch)) return '.ap-line[data-node-id="' + id + '"]'
-    if (ch.type === "ELLIPSE") return '.ap-ellipse[data-node-id="' + id + '"]'
-    if (isContainer(ch)) return '.ap-group[data-node-id="' + id + '"]'
-    return '.ap-layer[data-node-id="' + id + '"]'
+    if (ch.type === "TEXT") return textSel(id)
+    if (isVideoNode(ch)) return videoSel(id)
+    if (isImageCandidate(ch) || isVectorOnlyTree(ch)) return imageSel(id)
+    if (ch.type === "LINE" || isLineLikeNode(ch)) return lineSel(id)
+    if (ch.type === "ELLIPSE") return ellipseSel(id)
+    if (isContainer(ch)) return frameSel(id)
+    return layerSel(id)
 }
 
 /** 섹션 서브트리에서 .ap-image로 출력되는 노드들을 레이어 name 기준으로 수집 (MO 이미지 이름 매칭용) */
@@ -1512,10 +1511,12 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
       var sectionBox = getAbs(sectionNode)
       if (!sectionBox || children.length === 0) return {decl: decl, bgChildId: null}
 
+      // 90% 이상 덮는 이미지만 배경 승격. 자식이 있는 프레임(배너 등)은 제외 → 내부 텍스트/버튼 누락 방지
       var fullBleedChild = null
       for (var i = 0; i < children.length; i++) {
           var ch = children[i]
           if (!ch || !isVisible(ch) || !isImageCandidate(ch)) continue
+          if (isContainer(ch) && ch.children && ch.children.length > 0) continue
           var chBox = getAbs(ch)
           if (!chBox) continue
           if (chBox.w >= sectionBox.w * 0.9 && chBox.h >= sectionBox.h * 0.9) {
@@ -1723,12 +1724,12 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             var sel = ""
             var declParts = []
             if (d.type === "FRAME" && isContainer(d)) {
-                sel = ".ap-section--" + secClass + ' .ap-frame[data-node-id="' + String(d.id) + '"]'
+                sel = ".ap-section--" + secClass + " " + frameSel(String(d.id))
                 if (isFlex(m)) {
                     var flexDiff = buildFlexVarsDeclDiff(isFlex(d) ? getLayoutVars(d) : null, getLayoutVars(m))
                     if (flexDiff) declParts.push(flexDiff)
                 }
-                var mAbs = isAbsoluteInParent(m, mNode) || isAbsolutePositioned(m) || isAbsoluteByParentNotFlex(m, mNode)
+                var mAbs = isAbsoluteLike(m, mNode)
                 if (mAbs) {
                     var ad = buildAbsDeclDiff(d, dNode, m, mNode)
                     if (ad) declParts.push(ad)
@@ -1746,7 +1747,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var strokeDiff = buildStrokeDeclDiff(d, m)
                 if (strokeDiff) declParts.push(strokeDiff)
             } else if (d.type === "TEXT" && m.type === "TEXT") {
-                sel = ".ap-section--" + secClass + ' .ap-text[data-node-id="' + String(d.id) + '"]'
+                sel = ".ap-section--" + secClass + " " + textSel(String(d.id))
                 var tsD = getTextSummarySync(d)
                 var tsM = getTextSummarySync(m)
                 if (tsM) {
@@ -1764,7 +1765,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var fillW2 = getFillFlexStartWidthDecl(m, mNode)
                 var fillW2D = getFillFlexStartWidthDecl(d, dNode)
                 if (fillW2 && fillW2 !== fillW2D) declParts.push(fillW2)
-                var mAbs2 = isAbsoluteInParent(m, mNode) || isAbsolutePositioned(m) || isAbsoluteByParentNotFlex(m, mNode)
+                var mAbs2 = isAbsoluteLike(m, mNode)
                 if (mAbs2) {
                     var ad2 = buildAbsDeclDiff(d, dNode, m, mNode)
                     if (ad2) declParts.push(ad2)
@@ -1775,23 +1776,23 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             if (declParts.length && isExported(d.id)) lines.push("  " + sel + "{ " + declParts.join(";") + " }")
             if ((isVectorOnlyTree(d) || hasImageFill(d) || isImageCandidate(d)) && isExported(d.id) && hasOwnImageFigure(d.id)) {
                 var sizeDecl = ""
-                var sizeSel = ""
+                var leafSel = ""
                 if (isLineLikeNode(d)) {
                     sizeDecl = buildLineVarsDeclDiff(d, m)
-                    sizeSel = ".ap-line"
+                    leafSel = lineSel(String(d.id))
                 } else if (d.type === "ELLIPSE") {
                     sizeDecl = buildEllipseVarsDeclDiff(d, m)
-                    sizeSel = ".ap-ellipse"
+                    leafSel = ellipseSel(String(d.id))
                 } else if (isVideoNode(d)) {
                     sizeDecl = getVideoSizeDeclDiff(d, m)
-                    sizeSel = ".ap-video"
+                    leafSel = videoSel(String(d.id))
                 } else {
                     sizeDecl = getImageSizeDeclDiff(d, m)
-                    sizeSel = ".ap-image img"
+                    leafSel = imageImgSel(String(d.id))
                     if (imageOverrideDone && d.id != null) imageOverrideDone[String(d.id)] = true
                 }
-                if (sizeDecl && sizeSel) {
-                    lines.push("  .ap-section--" + secClass + " " + sizeSel + '[data-node-id="' + String(d.id) + '"]{ ' + sizeDecl + " }")
+                if (sizeDecl && leafSel) {
+                    lines.push("  .ap-section--" + secClass + " " + leafSel + "{ " + sizeDecl + " }")
                 }
             }
             if (d.type === "FRAME" && isContainer(d)) walkPair(d, m, m, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone)
@@ -1827,7 +1828,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var mImg = key !== "" && imgByName ? imgByName[key] : null
                 if (mImg) {
                     var decl = getImageSizeDeclDiff(dNode, mImg)
-                    if (decl) lines.push("  .ap-section--" + secCls + " .ap-image img[data-node-id=\"" + String(dNode.id) + "\"]{ " + decl + " }")
+                    if (decl) lines.push("  .ap-section--" + secCls + " " + imageImgSel(String(dNode.id)) + "{ " + decl + " }")
                 }
             }
             if (isContainer(dNode)) for (var j = 0; j < dNode.children.length; j++) pushImageOverridesByName(dNode.children[j], secCls, imgByName, overrideDone)
@@ -1845,7 +1846,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                     if (tsM) {
                         var textDecl = buildTextVarsDeclDiff(tsD, tsM)
                         if (textDecl) {
-                            lines.push("  .ap-section--" + secCls + " .ap-text[data-node-id=\"" + String(dNode.id) + "\"]{ " + textDecl + " }")
+                            lines.push("  .ap-section--" + secCls + " " + textSel(String(dNode.id)) + "{ " + textDecl + " }")
                         }
                     }
                 }
@@ -2287,8 +2288,6 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
     codeLines.push(".ap-frame { position:relative; }")
     codeLines.push("")
-    codeLines.push(".ap-group { position:relative; }")
-    codeLines.push("")
 
     codeLines.push(".ap-abs{ position:absolute; }")
     codeLines.push("")
@@ -2366,6 +2365,27 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
         return ".ap-section--" + secClass + " " + innerSel.replace(/,/g, ", .ap-section--" + secClass + " ")
     }
 
+    function pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, includeAbs) {
+        if (includeAbs === undefined) includeAbs = true
+        var decl = buildTextVarsDecl(ts)
+        if (decl) pushDeferredStyle(ctx, selInSection(secClass, textSel(id)), decl)
+        if (includeAbs && textAbs && id) {
+            var textAbsDecl = buildAbsDecl(node, parent)
+            if (textAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, textSel(id)), textAbsDecl)
+        }
+        var partResult = buildTextPartInnerHtml(ts)
+        var parentStyle = typeof partResult === "string" ? "" : (partResult.parentStyle || "")
+        if (parentStyle && id) pushDeferredStyle(ctx, selInSection(secClass, textSel(id)), parentStyle)
+    }
+
+    function buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth) {
+        var partResult = buildTextPartInnerHtml(ts)
+        var innerHtml = typeof partResult === "string" ? partResult : partResult.inner
+        var tag = textNodeTag(node, textCls, dataIdAttr, depth)
+        var html = indent(depth) + tag.open + innerHtml + tag.close
+        return isBtnNode(node) ? html : wrapIfBtn(node, html, depth)
+    }
+
     // 개별 노드를 HTML로 렌더링 (abs/flex/text/img 등)
     function renderNodeAsync(node, parent, secNo, secClass, depth, opts) {
         if (!node) return Promise.resolve("")
@@ -2381,7 +2401,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
         // TEXT: 허용 폰트 목록에 없으면 이미지로 내보냄 (project 이미지와 동일하게 path 사용)
         if (node.type === "TEXT") {
-            var textAbs = isAbsoluteInParent(node, parent) || isAbsolutePositioned(node) || isAbsoluteByParentNotFlex(node, parent)
+            var textAbs = isAbsoluteLike(node, parent)
             var textCls = "ap-text" + (textAbs ? " ap-abs" : "")
             return getTextSummaryAsync(node)
                 .then(function (ts) {
@@ -2396,56 +2416,27 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                             }))
 
                     if (fontAllowed) {
-                        var decl = buildTextVarsDecl(ts)
-                        if (decl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-text[data-node-id="' + id + '"]'), decl)
-                        if (textAbs && id) {
-                            var textAbsDecl = buildAbsDecl(node, parent)
-                            if (textAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-text[data-node-id="' + id + '"]'), textAbsDecl)
-                        }
-                        var partResult = buildTextPartInnerHtml(ts)
-                        var innerHtml = typeof partResult === "string" ? partResult : partResult.inner
-                        var parentStyle = typeof partResult === "string" ? "" : (partResult.parentStyle || "")
-                        if (parentStyle && id) pushDeferredStyle(ctx, selInSection(secClass, '.ap-text[data-node-id="' + id + '"]'), parentStyle)
-                        var tag = textNodeTag(node, textCls, dataIdAttr, depth)
-                        var html = indent(depth) + tag.open + innerHtml + tag.close
-                        return isBtnNode(node) ? html : wrapIfBtn(node, html, depth)
+                        pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs)
+                        return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                     }
 
                     return exportNodeImageAsync(node)
                         .then(function (dataUrl) {
                             if (!dataUrl) {
-                                var decl = buildTextVarsDecl(ts)
-                                if (decl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-text[data-node-id="' + id + '"]'), decl)
-                                if (textAbs && id) {
-                                    var textAbsDecl = buildAbsDecl(node, parent)
-                                    if (textAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-text[data-node-id="' + id + '"]'), textAbsDecl)
-                                }
-                                var partResult = buildTextPartInnerHtml(ts)
-                                var innerHtml = typeof partResult === "string" ? partResult : partResult.inner
-                                var parentStyle = typeof partResult === "string" ? "" : (partResult.parentStyle || "")
-                                if (parentStyle && id) pushDeferredStyle(ctx, selInSection(secClass, '.ap-text[data-node-id="' + id + '"]'), parentStyle)
-                                var tag = textNodeTag(node, textCls, dataIdAttr, depth)
-                                var html = indent(depth) + tag.open + innerHtml + tag.close
-                                return isBtnNode(node) ? html : wrapIfBtn(node, html, depth)
+                                pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs)
+                                return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                             }
                             if (node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
                             var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, { skipExport: isVideoNode(node) }) : dataUrl
                             var imgDecl = getImageSizeDecl(node)
-                            if (imgDecl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-image img[data-node-id="' + id + '"]'), imgDecl)
+                            if (imgDecl) pushDeferredStyle(ctx, selInSection(secClass, imageImgSel(id)), imgDecl)
                             var altText = getImageAltText(node)
                             if (id) ctx.ownImageNodeIds[id] = true
                             return wrapIfBtn(node, indent(depth) + '<div class="ap-image"' + dataIdAttr + '><img src="' + (path || "") + '" alt="' + altText + '"' + dataIdAttr + " /></div>", depth)
                         })
                         .catch(function () {
-                            var decl = buildTextVarsDecl(ts)
-                            if (decl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-text[data-node-id="' + id + '"]'), decl)
-                            var partResult = buildTextPartInnerHtml(ts)
-                            var innerHtml = typeof partResult === "string" ? partResult : partResult.inner
-                            var parentStyle = typeof partResult === "string" ? "" : (partResult.parentStyle || "")
-                            if (parentStyle && id) pushDeferredStyle(ctx, selInSection(secClass, '.ap-text[data-node-id="' + id + '"]'), parentStyle)
-                            var tag = textNodeTag(node, textCls, dataIdAttr, depth)
-                            var html = indent(depth) + tag.open + innerHtml + tag.close
-                            return isBtnNode(node) ? html : wrapIfBtn(node, html, depth)
+                            pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, false)
+                            return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                         })
                 })
                 .catch(function () {
@@ -2456,15 +2447,15 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
         // 레이어 이름이 video면 그룹/프레임 여부와 관계없이 비디오 플레이스홀더로 출력
         if (isVideoNode(node)) {
-            var videoAbs = isAbsoluteInParent(node, parent) || isAbsolutePositioned(node) || isAbsoluteByParentNotFlex(node, parent)
+            var videoAbs = isAbsoluteLike(node, parent)
             var videoParentWraps = parent && parent.type === "FRAME" && isContainer(parent)
             var videoNeedWrapper = videoAbs && (!videoParentWraps || (node.type === "FRAME" && isContainer(node)))
             if (videoAbs && id) {
                 var videoAbsDecl = buildAbsDecl(node, parent)
-                if (videoAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-video[data-node-id="' + id + '"]'), videoAbsDecl)
+                if (videoAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, videoSel(id)), videoAbsDecl)
             } else if (id) {
                 var videoSizeDecl = getImageSizeDecl(node)
-                if (videoSizeDecl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-video[data-node-id="' + id + '"]'), videoSizeDecl)
+                if (videoSizeDecl) pushDeferredStyle(ctx, selInSection(secClass, videoSel(id)), videoSizeDecl)
             }
             var videoCls = "ap-video" + (videoNeedWrapper ? " ap-abs" : "")
             var videoHtml = '<div class="' + videoCls + '"' + dataIdAttr + '><video src="" controls playsinline muted loop autoplay preload="metadata"></video></div>'
@@ -2474,29 +2465,29 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
         // VECTOR — LINE/line/ELLIPSE는 CSS로 그리기, 나머지는 SVG export
         if (isVectorOnlyTree(node)) {
             if (isLineLikeNode(node)) {
-                var lineAbs = isAbsoluteInParent(node, parent) || isAbsolutePositioned(node) || isAbsoluteByParentNotFlex(node, parent)
+                var lineAbs = isAbsoluteLike(node, parent)
                 var lineParentWraps = parent && parent.type === "FRAME" && isContainer(parent)
                 var lineNeedWrapper = lineAbs && (!lineParentWraps || (node.type === "FRAME" && isContainer(node)))
                 if (lineAbs && id) {
                     var lineAbsDecl = buildAbsDecl(node, parent)
-                    if (lineAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-line[data-node-id="' + id + '"]'), lineAbsDecl)
+                    if (lineAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, lineSel(id)), lineAbsDecl)
                 }
                 var lineVars = buildLineVarsDecl(node)
-                if (lineVars) pushDeferredStyle(ctx, selInSection(secClass, '.ap-line[data-node-id="' + id + '"]'), lineVars)
+                if (lineVars) pushDeferredStyle(ctx, selInSection(secClass, lineSel(id)), lineVars)
                 var lineCls = "ap-line" + (lineNeedWrapper ? " ap-abs" : "")
                 var lineHtml = '<div class="' + lineCls + '"' + dataIdAttr + "></div>"
                 return Promise.resolve(wrapIfBtn(node, indent(depth) + lineHtml, depth))
             }
             if (node.type === "ELLIPSE") {
-                var ellipseAbs = isAbsoluteInParent(node, parent) || isAbsolutePositioned(node) || isAbsoluteByParentNotFlex(node, parent)
+                var ellipseAbs = isAbsoluteLike(node, parent)
                 var ellipseParentWraps = parent && parent.type === "FRAME" && isContainer(parent)
                 var ellipseNeedWrapper = ellipseAbs && (!ellipseParentWraps || (node.type === "FRAME" && isContainer(node)))
                 if (ellipseAbs && id) {
                     var ellipseAbsDecl = buildAbsDecl(node, parent)
-                    if (ellipseAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-ellipse[data-node-id="' + id + '"]'), ellipseAbsDecl)
+                    if (ellipseAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, ellipseSel(id)), ellipseAbsDecl)
                 }
                 var ellipseVars = buildEllipseVarsDecl(node)
-                if (ellipseVars) pushDeferredStyle(ctx, selInSection(secClass, '.ap-ellipse[data-node-id="' + id + '"]'), ellipseVars)
+                if (ellipseVars) pushDeferredStyle(ctx, selInSection(secClass, ellipseSel(id)), ellipseVars)
                 var ellipseCls = "ap-ellipse" + (ellipseNeedWrapper ? " ap-abs" : "")
                 var ellipseHtml = '<div class="' + ellipseCls + '"' + dataIdAttr + "></div>"
                 return Promise.resolve(wrapIfBtn(node, indent(depth) + ellipseHtml, depth))
@@ -2505,7 +2496,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                 if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
                 var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, { skipExport: isVideoNode(node) }) : dataUrl || ""
                 var imgDecl = getImageSizeDecl(node)
-                if (imgDecl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-image img[data-node-id="' + id + '"]'), imgDecl)
+                if (imgDecl) pushDeferredStyle(ctx, selInSection(secClass, imageImgSel(id)), imgDecl)
 
                 var altText = getImageAltText(node)
                 if (id) ctx.ownImageNodeIds[id] = true
@@ -2516,10 +2507,10 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
         // IMAGE (단일 이미지 또는 컴포지트 → 하나의 이미지로 export)
         // 컨테이너에 텍스트가 있으면 이미지로 내보내지 않고 자식 재귀 렌더 (텍스트 유지)
-        // 겹친 composite(clipsContent)일 때만 한 장으로 export. 분리된 이미지 2개 이상이면 ap-group으로 풀어서 각각 figure로
+        // 겹친 composite(clipsContent)일 때만 한 장으로 export. 분리된 이미지 2개 이상이면 ap-frame으로 풀어서 각각 figure로
         if (isImageCandidate(node) && !(isContainer(node) && hasTextInSubtree(node))) {
             if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeOneImage(node)) {
-                var absImgGrp = isAbsoluteInParent(node, parent) || isAbsolutePositioned(node) || isAbsoluteByParentNotFlex(node, parent)
+                var absImgGrp = isAbsoluteLike(node, parent)
                 var declPartsImgGrp = []
                 return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgImgGrp) {
                     if (bgImgGrp) declPartsImgGrp.push(bgImgGrp)
@@ -2537,10 +2528,10 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                     var fillWImgGrp = getFillFlexStartWidthDecl(node, parent)
                     if (fillWImgGrp) declPartsImgGrp.push(fillWImgGrp)
                     if (declPartsImgGrp.length && id) {
-                        pushDeferredStyle(ctx, selInSection(secClass, '.ap-group[data-node-id="' + id + '"]'), declPartsImgGrp.join(";"))
+                        pushDeferredStyle(ctx, selInSection(secClass, frameSel(id)), declPartsImgGrp.join(";"))
                     }
                     var linesImgGrp = []
-                    linesImgGrp.push(indent(depth) + '<div class="ap-group' + (absImgGrp ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : "") + '"' + dataIdAttr + ">")
+                    linesImgGrp.push(indent(depth) + '<div class="ap-frame' + (absImgGrp ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : "") + '"' + dataIdAttr + ">")
                     var childrenImgGrp = node.children || []
                     var idxImg = 0
                     function nextImgCh() {
@@ -2558,15 +2549,15 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                     return nextImgCh()
                 })
             }
-            var imgAbs = isAbsoluteInParent(node, parent) || isAbsolutePositioned(node) || isAbsoluteByParentNotFlex(node, parent)
+            var imgAbs = isAbsoluteLike(node, parent)
             return exportNodeImageAsync(node).then(function (dataUrl) {
                 if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
                 var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, { skipExport: isVideoNode(node) }) : dataUrl || ""
                 var imgDecl = getImageSizeDecl(node)
-                if (imgDecl && !imgAbs) pushDeferredStyle(ctx, selInSection(secClass, '.ap-image img[data-node-id="' + id + '"]'), imgDecl)
+                if (imgDecl && !imgAbs) pushDeferredStyle(ctx, selInSection(secClass, imageImgSel(id)), imgDecl)
                 if (imgAbs && id) {
                     var imgAbsDecl = buildAbsDecl(node, parent)
-                    if (imgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, '.ap-image[data-node-id="' + id + '"]'), imgAbsDecl)
+                    if (imgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, imageSel(id)), imgAbsDecl)
                 }
                 var altText = getImageAltText(node)
                 if (id) ctx.ownImageNodeIds[id] = true
@@ -2577,7 +2568,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
         }
 
         if (node.type === "FRAME" && isContainer(node)) {
-            var abs = isAbsoluteInParent(node, parent) || isAbsolutePositioned(node) || isAbsoluteByParentNotFlex(node, parent)
+            var abs = isAbsoluteLike(node, parent)
             var flex = isFlex(node)
             var box = getAbs(node)
             var parentBox = parent ? getAbs(parent) : null
@@ -2636,7 +2627,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                 }
 
                 if (declParts.length) {
-                    pushDeferredStyle(ctx, selInSection(secClass, '.ap-frame[data-node-id="' + id + '"]'), declParts.join(";"))
+                    pushDeferredStyle(ctx, selInSection(secClass, frameSel(id)), declParts.join(";"))
                 }
 
                 var isFrameBtn = isBtnNode(node)
@@ -2658,7 +2649,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                     if (!ch || !isVisible(ch)) return nextChild()
 
                     // AutoLayout parent 안에서 ABS면 child가 FRAME이 아니어도 ap-abs wrapper 필요. 부모가 non-flex면 전부 absolute 처리.
-                    var chAbs = isAbsoluteInParent(ch, node) || isAbsolutePositioned(ch) || isAbsoluteByParentNotFlex(ch, node)
+                    var chAbs = isAbsoluteLike(ch, node)
 
                     // child가 FRAME이면 자체가 wrapper라서 추가 wrapper 없이 처리해도 되지만,
                     // TEXT/IMAGE/기타 컨테이너는 wrapper(div)로 abs/배경 처리
@@ -2705,7 +2696,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                             pushDeferredStyle(ctx, selInSection(secClass, leafSel), itemDecl)
                         }
 
-                        // GROUP 등 컨테이너는 renderNodeAsync가 ap-group 래퍼를 이미 출력
+                        // GROUP 등 컨테이너는 renderNodeAsync가 ap-frame 래퍼를 이미 출력
                         if (isChContainer) {
                             return renderNodeAsync(ch, node, secNo, secClass, depth + 1, opts).then(function (innerHtml) {
                                 if (innerHtml) lines.push(innerHtml)
@@ -2725,8 +2716,8 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
         // 기타 컨테이너: wrapper로 children 탐색
         if (isContainer(node)) {
-            var abs2 = isAbsoluteInParent(node, parent) || isAbsolutePositioned(node) || isAbsoluteByParentNotFlex(node, parent)
-            var declParts2Visual = []  // 배경/테두리/abs → 있으면 반드시 ap-group 유지
+            var abs2 = isAbsoluteLike(node, parent)
+            var declParts2Visual = []  // 배경/테두리/abs → 있으면 반드시 ap-frame 유지
             var declParts2Flex = []
 
             return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl2) {
@@ -2757,7 +2748,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                 var skipGroupWrapper = singleChild && !groupHasVisualAttrs
 
                 if (groupHasAttrs && id && !skipGroupWrapper) {
-                    pushDeferredStyle(ctx, selInSection(secClass, '.ap-group[data-node-id="' + id + '"]'), declParts2.join(";"))
+                    pushDeferredStyle(ctx, selInSection(secClass, frameSel(id)), declParts2.join(";"))
                 }
 
                 if (skipGroupWrapper) {
@@ -2770,8 +2761,8 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
                 var isGroupBtn = isBtnNode(node)
                 var groupTag = isGroupBtn ? "a" : "div"
-                var groupCls = "ap-group" + (abs2 ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : "")
-                var groupTagOpen = "<" + groupTag + (isGroupBtn ? ' href="#"' : "") + ' class="' + groupCls + '"' + dataIdAttr + ">"
+                var frameCls = "ap-frame" + (abs2 ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : "")
+                var groupTagOpen = "<" + groupTag + (isGroupBtn ? ' href="#"' : "") + ' class="' + frameCls + '"' + dataIdAttr + ">"
                 var lines2 = []
                 lines2.push(indent(depth) + groupTagOpen)
                 var j = 0
@@ -2793,7 +2784,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
         }
 
         // leaf 기타 (absolute면 ap-abs + 좌표)
-        var absLeaf = isAbsoluteInParent(node, parent) || isAbsolutePositioned(node) || isAbsoluteByParentNotFlex(node, parent)
+        var absLeaf = isAbsoluteLike(node, parent)
         var leafCls = "ap-layer" + (absLeaf ? " ap-abs" : "")
         return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl) {
             var declParts = []
@@ -2804,7 +2795,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                 var absDeclLeaf = buildAbsDecl(node, parent)
                 if (absDeclLeaf) declParts.push(absDeclLeaf)
             }
-            if (declParts.length && id) pushDeferredStyle(ctx, selInSection(secClass, '.ap-layer[data-node-id="' + id + '"]'), declParts.join(";"))
+            if (declParts.length && id) pushDeferredStyle(ctx, selInSection(secClass, layerSel(id)), declParts.join(";"))
             return wrapIfBtn(node, indent(depth) + '<div class="' + leafCls + '"' + dataIdAttr + "></div>", depth)
         })
     }
@@ -2815,11 +2806,11 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
         if (ch.type === "FRAME" && isContainer(ch)) {
             return renderNodeAsync(ch, sectionNode, secNo, secClass, depth, opts)
         }
-        var chAbsVirtual = isAbsoluteInParent(ch, sectionNode) || isAbsolutePositioned(ch) || isAbsoluteByParentNotFlex(ch, sectionNode)
+        var chAbsVirtual = isAbsoluteLike(ch, sectionNode)
         if (!chAbsVirtual && (ch.type === "LINE" || ch.type === "ELLIPSE" || isLineLikeNode(ch))) {
             return renderNodeAsync(ch, sectionNode, secNo, secClass, depth, opts)
         }
-        var chAbs = isAbsoluteInParent(ch, sectionNode) || isAbsolutePositioned(ch) || isAbsoluteByParentNotFlex(ch, sectionNode)
+        var chAbs = isAbsoluteLike(ch, sectionNode)
         var itemId = ch.id ? String(ch.id) : ""
         if (itemId) ctx.exportedNodeIds[itemId] = true
         var leafSel = getLeafSelectorForNode(ch)
@@ -2929,7 +2920,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                     })
                 }
 
-                var chAbsVirtual = isAbsoluteInParent(ch, sectionNode) || isAbsolutePositioned(ch) || isAbsoluteByParentNotFlex(ch, sectionNode)
+                var chAbsVirtual = isAbsoluteLike(ch, sectionNode)
                 if (!chAbsVirtual && (ch.type === "LINE" || ch.type === "ELLIPSE" || isLineLikeNode(ch))) {
                     return renderNodeAsync(ch, sectionNode, secNo, secClass, 3, {includeHidden: true}).then(function (html) {
                         if (html) contentLines.push(html)
@@ -2939,7 +2930,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
                 var secChildDepth = 3
                 return (function () {
-                    var chAbs = isAbsoluteInParent(ch, sectionNode) || isAbsolutePositioned(ch) || isAbsoluteByParentNotFlex(ch, sectionNode)
+                    var chAbs = isAbsoluteLike(ch, sectionNode)
                     var itemId = ch.id ? String(ch.id) : ""
                     if (itemId) ctx.exportedNodeIds[itemId] = true
                     var leafSel = getLeafSelectorForNode(ch)

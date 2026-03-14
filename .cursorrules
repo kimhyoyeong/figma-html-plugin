@@ -126,6 +126,7 @@ Figma 또는 디자인 툴에서 export된 HTML을 정리할 때 아래 규칙�
 
 반복되는 속성: width, height, gap, padding, font-size, line-height, color, border, display, flex 관련 속성
 
+
 ---
 
 ## 2. CSS 공통화 판단 규칙
@@ -176,7 +177,6 @@ CSS 변수도 역할·값이 동일하면 동일 선언으로 판단한다.
 - 가능한 경우 **CSS로 이동** (레이아웃/위치와 무관한 font, color, padding 등)
 - 레이아웃/위치 계산에 필요한 값(top, left, width, height 등)은 유지 가능
 - **의미 없는 inline style**: export 과정에서만 생긴 중복·임시값(예: 동일한 값이 CSS에 이미 있을 때)은 제거
-- **ap-image**: 사이즈(width, height 등)는 **inline style=""에만** 둔다. 동일한 사이즈를 CSS에 따로 선언하지 않는다.
 
 ### data-node-id
 
