@@ -1,5 +1,5 @@
 // code.js — Figma → HTML/CMS Export Plugin
-figma.showUI(__html__, {width: 800, height: 800})
+figma.showUI(__html__, {width: 1000, height: 700})
 
 /**
  * 흐름: UI onmessage → 선택 노드 검사/매칭(PC/MO) → buildCodeAsync → 이미지 export → 결과 전달
@@ -363,6 +363,11 @@ function getLayoutVars(node) {
         var hasFrameVisual = !!(getFirstSolidStroke(node) || getFirstSolidFill(node) || hasImageFill(node))
         if (fixedW && fixedH && allCenter && hasPadding && !hasFrameVisual) {
             out.pt = out.pr = out.pb = out.pl = "0"
+        }
+        // 버튼 노드이고 주축 정렬이 center일 때 좌우 패딩 0 (텍스트 중앙 정렬 시 시각적 균형)
+        if (isBtnNode(node) && out.justify === "center") {
+            out.pr = "0"
+            out.pl = "0"
         }
     } catch (e) {}
     return out
@@ -1807,7 +1812,11 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         if (!mSec || !isVisible(mSec) || dSec.type !== mSec.type) continue
         var secClass = sectionClassPrefix(s + 1)
         var mSecBox = getAbs(mSec)
-        if (mSecBox && mSecBox.h != null) lines.push("  .ap-section--" + secClass + "{ --ap-section-h:" + r2(mSecBox.h) + "; }")
+        if (isSlideNode(mSec)) {
+            lines.push("  .ap-section--" + secClass + "{ min-height:auto; }")
+        } else if (mSecBox && mSecBox.h != null) {
+            lines.push("  .ap-section--" + secClass + "{ --ap-section-h:" + r2(mSecBox.h) + "; }")
+        }
         if (isFlex(mSec)) {
             var secLvDiff = buildFlexVarsDeclDiff(isFlex(dSec) ? getLayoutVars(dSec) : null, getLayoutVars(mSec))
             if (secLvDiff) lines.push("  .ap-section--" + secClass + ".ap-flex{ " + secLvDiff + " }")
@@ -2612,13 +2621,12 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                 if (strokeDecl) declParts.push(strokeDecl)
                 var radiusDecl = buildCornerRadiusDecl(node)
                 if (radiusDecl) declParts.push(radiusDecl)
-                // height 고정: 시각적 영역이 있는 경우만. 없으면 생략 → 콘텐츠 증가 시 유지보수 유리.
+                // min-height: 시각적 영역이 있을 때 최소 높이만 지정 → 콘텐츠가 늘어나도 잘리지 않고 유연하게 확장.
                 // ・배경(fill/이미지): bgDecl
                 // ・테두리: strokeDecl
                 // ・모서리 둥글기: radiusDecl (박스 느낌 있음)
-                // ・추가 고려: overflow(clipContent) 처리 로직 추가 시 clipDecl 등 조건에 포함 가능.
-                // ・추가 고려: box-shadow 내보내기 추가 시 (shadowDecl) 조건에 포함 가능.
-                if (box && box.h != null && (bgDecl || strokeDecl || radiusDecl)) declParts.push("height:calc(" + box.h + "/var(--ap-width)*100cqi)")
+                // ・height 대신 min-height 사용 시 다국어/긴 텍스트 오버플로우 방지.
+                if (box && box.h != null && (bgDecl || strokeDecl || radiusDecl)) declParts.push("min-height:calc(" + box.h + "/var(--ap-width)*100cqi)")
 
                 // abs 좌표(부모 기준)
                 if (abs) {
@@ -2843,9 +2851,13 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
         return buildSectionBackgroundAsync(sectionNode, cache, secNo).then(function (bg) {
             var sectionDeclParts = []
 
-            // 섹션 높이(--ap-section-h): Figma 섹션에 높이가 있으면 항상 넣음 (min-height라 콘텐츠 늘어나면 섹션도 따라 커짐, 누락 시 collapse 방지)
+            // 섹션 높이: 슬라이드 섹션은 min-height auto, 그 외는 --ap-section-h로 최소 높이 유지
             var box = getAbs(sectionNode)
-            if (box && box.h != null) sectionDeclParts.push("--ap-section-h:" + box.h)
+            if (isSlideNode(sectionNode)) {
+                sectionDeclParts.push("min-height:auto")
+            } else if (box && box.h != null) {
+                sectionDeclParts.push("--ap-section-h:" + box.h)
+            }
 
             if (bg.decl) sectionDeclParts.push(bg.decl)
 
