@@ -1812,7 +1812,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         if (!mSec || !isVisible(mSec) || dSec.type !== mSec.type) continue
         var secClass = sectionClassPrefix(s + 1)
         var mSecBox = getAbs(mSec)
-        if (isSlideNode(mSec)) {
+        if (getSlideItems(mSec)) {
             lines.push("  .ap-section--" + secClass + "{ min-height:auto; }")
         } else if (mSecBox && mSecBox.h != null) {
             lines.push("  .ap-section--" + secClass + "{ --ap-section-h:" + r2(mSecBox.h) + "; }")
@@ -2853,7 +2853,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
             // 섹션 높이: 슬라이드 섹션은 min-height auto, 그 외는 --ap-section-h로 최소 높이 유지
             var box = getAbs(sectionNode)
-            if (isSlideNode(sectionNode)) {
+            if (getSlideItems(sectionNode)) {
                 sectionDeclParts.push("min-height:auto")
             } else if (box && box.h != null) {
                 sectionDeclParts.push("--ap-section-h:" + box.h)
