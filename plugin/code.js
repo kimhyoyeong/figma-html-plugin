@@ -21,6 +21,40 @@ function sectionClassPrefix(oneBasedIndex) {
     var n = Math.max(1, Math.floor(oneBasedIndex))
     return (n < 10 ? "0" : "") + n
 }
+/** ap-ai-audit 주석 블록 — ZIP 등 산출물에 포함하지 않음 */
+function stripApAiAuditBlock(html) {
+    return String(html || "").replace(
+        /<!--\s*ap-ai-audit:start\s*-->[\s\S]*?<!--\s*ap-ai-audit:end\s*-->\s*/gi,
+        ""
+    )
+}
+
+/** 모든 토큰에 ap- 강제 (소문자·하이픈) */
+function makeClassName(name) {
+    name = String(name || "").trim().toLowerCase()
+    name = name.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+    if (!name) name = "node"
+    if (name.indexOf("ap-") !== 0) name = "ap-" + name
+    return name
+}
+/** CSS/HTML 공통: 노드별 유일 클래스 (data-node-id 셀렉터 대체) */
+function nodeUniqueClass(id) {
+    if (id == null || String(id) === "") return makeClassName("anon")
+    var slug = String(id)
+        .replace(/:/g, "-")
+        .replace(/[^a-z0-9-]/gi, "-")
+        .replace(/^-+|-+$/g, "")
+    if (!slug) slug = "x"
+    return makeClassName("n-" + slug)
+}
+/** BEM 요소: ap-section__title, ap-section__content */
+function apSectionBem(part) {
+    var p = String(part || "item")
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, "")
+        .replace(/^-+|-+$/g, "") || "item"
+    return "ap-section__" + p
+}
 /** 레이어 이름이 지정 문자열과 일치하는지 (대소문자 무관, trim) */
 function isNodeName(node, name) {
     return !!(node && String(node.name || "").trim().toLowerCase() === name)
@@ -763,27 +797,24 @@ function hasTextInSubtree(node) {
     return false
 }
 
-/** data-node-id 기반 selector 조각 (selInSection(secClass, xxxSel(id)) 조합용) */
-function textSel(id) { return '.ap-text[data-node-id="' + id + '"]' }
-function frameSel(id) { return '.ap-frame[data-node-id="' + id + '"]' }
-function imageSel(id) { return '.ap-image[data-node-id="' + id + '"]' }
-function imageImgSel(id) { return '.ap-image img[data-node-id="' + id + '"]' }
-function videoSel(id) { return '.ap-video[data-node-id="' + id + '"]' }
-function lineSel(id) { return '.ap-line[data-node-id="' + id + '"]' }
-function ellipseSel(id) { return '.ap-ellipse[data-node-id="' + id + '"]' }
-function layerSel(id) { return '.ap-layer[data-node-id="' + id + '"]' }
+/** 클래스 기반 selector (섹션 스코프는 selInSection으로 접두) */
+function nodeSel(id) {
+    return id ? "." + nodeUniqueClass(String(id)) : ".ap-missing"
+}
+function textSel(id) { return nodeSel(id) }
+function frameSel(id) { return nodeSel(id) }
+function imageSel(id) { return nodeSel(id) }
+function imageImgSel(id) { return nodeSel(id) + " > img" }
+function videoSel(id) { return nodeSel(id) }
+function lineSel(id) { return nodeSel(id) }
+function ellipseSel(id) { return nodeSel(id) }
+function layerSel(id) { return nodeSel(id) }
 
-/** 리프 노드용 스타일 selector (ap-item 제거 후 직접 적용) */
-function getLeafSelectorForNode(ch) {
+/** 리프·자식 노드 지연 스타일용 inner selector */
+function getLeafSelectorForNode(ch, opts) {
     if (!ch || !ch.id) return ""
-    var id = String(ch.id)
-    if (ch.type === "TEXT") return textSel(id)
-    if (isVideoNode(ch)) return videoSel(id)
-    if (isImageCandidate(ch) || isVectorOnlyTree(ch)) return imageSel(id)
-    if (ch.type === "LINE" || isLineLikeNode(ch)) return lineSel(id)
-    if (ch.type === "ELLIPSE") return ellipseSel(id)
-    if (isContainer(ch)) return frameSel(id)
-    return layerSel(id)
+    if (opts && opts.sectionSemantics) return cssInnerSelForNode(String(ch.id), opts, false)
+    return nodeSel(String(ch.id))
 }
 
 /** 섹션 서브트리에서 .ap-image로 출력되는 노드들을 레이어 name 기준으로 수집 (MO 이미지 이름 매칭용) */
@@ -817,6 +848,262 @@ function collectTextNodesByName(root) {
     }
     walk(root)
     return map
+}
+
+/** section 기준 깊이 → 구조 역할. 10단계 넘으면 part로 통일 */
+var SECTION_STRUCTURE_LEVELS = [
+    "container",
+    "content",
+    "group",
+    "block",
+    "item",
+    "part",
+    "slot",
+    "cell",
+    "unit",
+]
+
+function normalizeGeoTextForMatch(s) {
+    return String(s || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase()
+}
+
+function sanitizeGeoRoleForBem(role) {
+    var r = String(role || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, "")
+    var ok = {title: 1, subtitle: 1, description: 1, caption: 1, cta: 1, label: 1, body: 1}
+    return ok[r] ? r : "description"
+}
+
+/**
+ * 섹션 트리 기준 시맨틱 보조 클래스 (id → 클래스 배열).
+ * geoHints: AI 검수 GEO.structure [{ text, role }] — 본문 텍스트 매칭 시 ap-section__* 우선 반영.
+ */
+function buildSectionSemanticClasses(sectionNode, geoHints) {
+    if (geoHints != null && !Array.isArray(geoHints)) geoHints = null
+    if (geoHints && geoHints.length > 64) geoHints = geoHints.slice(0, 64)
+    var map = {}
+    function add(nid, cls) {
+        if (nid == null) return
+        var s = String(nid)
+        if (!map[s]) map[s] = []
+        if (map[s].indexOf(cls) < 0) map[s].push(cls)
+    }
+    if (!sectionNode) return map
+
+    function walkStructure(n, depthFromSection) {
+        if (!n || !isVisible(n)) return
+        if (n.id && n.type === "FRAME" && isContainer(n)) {
+            var role = SECTION_STRUCTURE_LEVELS[depthFromSection - 1] || "part"
+            add(n.id, apSectionBem(role))
+        }
+        if (isContainer(n)) {
+            for (var i = 0; i < (n.children || []).length; i++) {
+                walkStructure(n.children[i], depthFromSection + 1)
+            }
+        }
+    }
+    var visKids = (sectionNode.children || []).filter(function (c) {
+        return c && isVisible(c)
+    })
+    for (var i = 0; i < visKids.length; i++) {
+        walkStructure(visKids[i], 1)
+    }
+
+    var texts = []
+    var secBox = getAbs(sectionNode)
+    var secTop = secBox ? secBox.y : 0
+    function walkText(n) {
+        if (!n || !isVisible(n)) return
+        if (n.type === "TEXT" && n.id) {
+            var ts = getTextSummarySync(n)
+            var fs = ts && ts.fs !== "" ? Number(ts.fs) || 0 : 0
+            var tb = getAbs(n)
+            var relY = tb ? tb.y - secTop : 0
+            var rawT = ts && ts.text != null ? String(ts.text) : ""
+            texts.push({id: n.id, fs: fs, relY: relY, textNorm: normalizeGeoTextForMatch(rawT)})
+        }
+        if (isContainer(n)) for (var j = 0; j < (n.children || []).length; j++) walkText(n.children[j])
+    }
+    walkText(sectionNode)
+    texts.sort(function (a, b) {
+        if (b.fs !== a.fs) return b.fs - a.fs
+        return a.relY - b.relY
+    })
+
+    var TEXT_ROLE_RE = /^ap-section__(title|subtitle|description|caption|cta|label|body)$/
+
+    function stripTextSemanticRoles(nid) {
+        var s = String(nid)
+        var arr = map[s]
+        if (!arr || !arr.length) return
+        map[s] = arr.filter(function (c) {
+            return !TEXT_ROLE_RE.test(c)
+        })
+    }
+
+    var forcedById = {}
+    if (geoHints && geoHints.length) {
+        var matchedTextIds = {}
+        for (var gi = 0; gi < geoHints.length; gi++) {
+            var gh = geoHints[gi]
+            if (!gh || typeof gh !== "object") continue
+            var gtxt = normalizeGeoTextForMatch(gh.text)
+            var groom = sanitizeGeoRoleForBem(gh.role)
+            if (!gtxt) continue
+            for (var ti = 0; ti < texts.length; ti++) {
+                var tx = texts[ti]
+                if (matchedTextIds[tx.id]) continue
+                var tn = tx.textNorm || ""
+                if (!tn) continue
+                if (tn === gtxt || tn.indexOf(gtxt) !== -1 || gtxt.indexOf(tn) !== -1) {
+                    forcedById[String(tx.id)] = groom
+                    matchedTextIds[tx.id] = true
+                    break
+                }
+            }
+        }
+    }
+
+    for (var tsIdx = 0; tsIdx < texts.length; tsIdx++) {
+        stripTextSemanticRoles(texts[tsIdx].id)
+    }
+
+    for (var fid in forcedById) {
+        if (Object.prototype.hasOwnProperty.call(forcedById, fid)) {
+            add(fid, apSectionBem(forcedById[fid]))
+        }
+    }
+
+    var remaining = []
+    for (var ri = 0; ri < texts.length; ri++) {
+        if (!forcedById[String(texts[ri].id)]) remaining.push(texts[ri])
+    }
+    remaining.sort(function (a, b) {
+        if (b.fs !== a.fs) return b.fs - a.fs
+        return a.relY - b.relY
+    })
+    for (var rj = 0; rj < remaining.length; rj++) {
+        var roleRem = rj === 0 ? "title" : rj === 1 ? "subtitle" : "description"
+        add(remaining[rj].id, apSectionBem(roleRem))
+    }
+
+    function tagImageNode(n) {
+        if (!n || !n.id) return
+        var nm = String(n.name || "").toLowerCase()
+        if (/logo|brand|wordmark|sym/.test(nm)) add(n.id, apSectionBem("logo"))
+        else if (/icon|deco|decoration|divider|bullet|line/.test(nm)) add(n.id, apSectionBem("decoration"))
+        else add(n.id, apSectionBem("image"))
+    }
+    function walkImg(n) {
+        if (!n || !isVisible(n)) return
+        if (isContainer(n) && hasTextInSubtree(n)) {
+            for (var k = 0; k < (n.children || []).length; k++) walkImg(n.children[k])
+            return
+        }
+        if (isContainer(n) && isImageCandidate(n)) {
+            if (hasMultipleImageLikeChildren(n) && !isCompositeOneImage(n)) {
+                for (var k2 = 0; k2 < (n.children || []).length; k2++) walkImg(n.children[k2])
+                return
+            }
+            tagImageNode(n)
+            return
+        }
+        if (
+            n.id &&
+            (isImageCandidate(n) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE")) &&
+            n.type !== "TEXT"
+        ) {
+            tagImageNode(n)
+        }
+        if (isContainer(n)) for (var k3 = 0; k3 < (n.children || []).length; k3++) walkImg(n.children[k3])
+    }
+    walkImg(sectionNode)
+
+    function walkFillMissing(n) {
+        if (!n || !isVisible(n)) return
+        if (n.id && !map[String(n.id)]) {
+            if (isVideoNode(n)) add(n.id, apSectionBem("video"))
+            else if (isLineLikeNode(n)) add(n.id, apSectionBem("line"))
+            else if (n.type === "ELLIPSE") add(n.id, apSectionBem("ellipse"))
+            else add(n.id, apSectionBem("layer"))
+        }
+        if (isContainer(n)) for (var wf = 0; wf < (n.children || []).length; wf++) walkFillMissing(n.children[wf])
+    }
+    walkFillMissing(sectionNode)
+
+    disambiguateSectionSemantics(sectionNode, map)
+
+    return map
+}
+
+/** 동일 ap-section__* 가 여러 노드면 --01, --02 로만 구분 (ap-n-* 불사용) */
+function disambiguateSectionSemantics(sectionNode, map) {
+    var classToIds = {}
+    for (var nid in map) {
+        if (!Object.prototype.hasOwnProperty.call(map, nid)) continue
+        var arr = map[nid] || []
+        for (var i = 0; i < arr.length; i++) {
+            var c = arr[i]
+            if (!classToIds[c]) classToIds[c] = []
+            if (classToIds[c].indexOf(nid) < 0) classToIds[c].push(nid)
+        }
+    }
+    var order = []
+    function walkOrd(n) {
+        if (!n || !isVisible(n)) return
+        if (n.id) order.push(String(n.id))
+        if (isContainer(n)) for (var j = 0; j < (n.children || []).length; j++) walkOrd(n.children[j])
+    }
+    walkOrd(sectionNode)
+    function rank(id) {
+        var x = order.indexOf(id)
+        return x < 0 ? 999999 : x
+    }
+    for (var cls in classToIds) {
+        var ids = classToIds[cls]
+        if (ids.length <= 1) continue
+        ids = ids.slice().sort(function (a, b) {
+            return rank(a) - rank(b)
+        })
+        for (var k = 0; k < ids.length; k++) {
+            var newCls = cls + "--" + pad2(k + 1)
+            var arr = map[ids[k]]
+            var idx = arr.indexOf(cls)
+            if (idx >= 0) arr[idx] = newCls
+        }
+    }
+}
+
+/** 지연 CSS용: 섹션 스코프 안 시맨틱 클래스만 (ap-n 없음) */
+function cssInnerSelForNode(id, opts, forImgChild) {
+    var sid = id != null ? String(id) : ""
+    if (!sid) return forImgChild ? ".ap-missing > img" : ".ap-missing"
+    var sem = (opts && opts.sectionSemantics && opts.sectionSemantics[sid]) || []
+    if (!sem.length) return forImgChild ? ".ap-missing > img" : ".ap-missing"
+    var pick = sem[sem.length - 1]
+    if (forImgChild) {
+        for (var i = sem.length - 1; i >= 0; i--) {
+            if (/__(image|logo|decoration)(--|$)/.test(sem[i])) {
+                pick = sem[i]
+                break
+            }
+        }
+    }
+    return forImgChild ? "." + pick + " > img" : "." + pick
+}
+
+/** base + 시맨틱만 (ap-n-* 출력 안 함) */
+function apNodeClassList(base, id, opts) {
+    var parts = [base || ""]
+    var sem = id && opts && opts.sectionSemantics ? opts.sectionSemantics[String(id)] : null
+    if (sem && sem.length) {
+        for (var i = 0; i < sem.length; i++) parts.push(sem[i])
+    }
+    return parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
 }
 
 var IMAGE_EXPORT_MAX_WIDTH = 200   // 미리보기
@@ -905,6 +1192,16 @@ function getImageSizeDecl(node) {
     if (abs.w != null) parts.push("--ap-w:" + abs.w)
     if (abs.h != null) parts.push("--ap-h:" + abs.h)
     return parts.join(";")
+}
+
+/** 래퍼(.ap-image .ap-section__image--XX)에 --ap-w/--ap-h만 넣음. 기존 .ap-image img 규칙이 var()로 활용 (ap-abs 래퍼는 생략) */
+function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapperIsApAbs) {
+    if (!nodeId || wrapperIsApAbs) return
+    var decl = getImageSizeDecl(node)
+    if (!decl) return
+    var innerSel = cssInnerSelForNode(String(nodeId), opts, false)
+    var sel = ".ap-section--" + secClass + " " + innerSel.replace(/,/g, ", .ap-section--" + secClass + " ")
+    pushDeferredStyle(ctx, sel, decl)
 }
 
 // ----- 텍스트 (폰트 로드, 스타일 구간, CSS 변수) -----
@@ -1710,7 +2007,8 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         return lines.join("\n")
     }
 
-    function walkPair(dNode, mNode, mParent, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone) {
+    function walkPair(dNode, mNode, mParent, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone, semMap) {
+        var moOpts = { sectionSemantics: semMap || {} }
         var dKids = (dNode.children || []).filter(function (c) {
             return c && isVisible(c)
         })
@@ -1723,13 +2021,14 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             var m = mKids[i]
             if (d.type !== m.type) continue
             if (!d.id) {
-                if (d.type === "FRAME" && isContainer(d)) walkPair(d, m, m, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone)
+                if (d.type === "FRAME" && isContainer(d))
+                    walkPair(d, m, m, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone, semMap)
                 continue
             }
             var sel = ""
             var declParts = []
             if (d.type === "FRAME" && isContainer(d)) {
-                sel = ".ap-section--" + secClass + " " + frameSel(String(d.id))
+                sel = ".ap-section--" + secClass + " " + cssInnerSelForNode(String(d.id), moOpts, false)
                 if (isFlex(m)) {
                     var flexDiff = buildFlexVarsDeclDiff(isFlex(d) ? getLayoutVars(d) : null, getLayoutVars(m))
                     if (flexDiff) declParts.push(flexDiff)
@@ -1752,7 +2051,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var strokeDiff = buildStrokeDeclDiff(d, m)
                 if (strokeDiff) declParts.push(strokeDiff)
             } else if (d.type === "TEXT" && m.type === "TEXT") {
-                sel = ".ap-section--" + secClass + " " + textSel(String(d.id))
+                sel = ".ap-section--" + secClass + " " + cssInnerSelForNode(String(d.id), moOpts, false)
                 var tsD = getTextSummarySync(d)
                 var tsM = getTextSummarySync(m)
                 if (tsM) {
@@ -1761,7 +2060,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                     if (textOverrideDone && d.id != null) textOverrideDone[String(d.id)] = true
                 }
             } else {
-                var leafSelRaw = getLeafSelectorForNode(d)
+                var leafSelRaw = getLeafSelectorForNode(d, moOpts)
                 sel = leafSelRaw ? ".ap-section--" + secClass + " " + leafSelRaw.replace(/,/g, ", .ap-section--" + secClass + " ") : ""
                 if (isFlex(m)) {
                     var flexDiff2 = buildFlexVarsDeclDiff(isFlex(d) ? getLayoutVars(d) : null, getLayoutVars(m))
@@ -1784,23 +2083,24 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var leafSel = ""
                 if (isLineLikeNode(d)) {
                     sizeDecl = buildLineVarsDeclDiff(d, m)
-                    leafSel = lineSel(String(d.id))
+                    leafSel = cssInnerSelForNode(String(d.id), moOpts, false)
                 } else if (d.type === "ELLIPSE") {
                     sizeDecl = buildEllipseVarsDeclDiff(d, m)
-                    leafSel = ellipseSel(String(d.id))
+                    leafSel = cssInnerSelForNode(String(d.id), moOpts, false)
                 } else if (isVideoNode(d)) {
                     sizeDecl = getVideoSizeDeclDiff(d, m)
-                    leafSel = videoSel(String(d.id))
+                    leafSel = cssInnerSelForNode(String(d.id), moOpts, false)
                 } else {
                     sizeDecl = getImageSizeDeclDiff(d, m)
-                    leafSel = imageImgSel(String(d.id))
+                    leafSel = cssInnerSelForNode(String(d.id), moOpts, true)
                     if (imageOverrideDone && d.id != null) imageOverrideDone[String(d.id)] = true
                 }
                 if (sizeDecl && leafSel) {
                     lines.push("  .ap-section--" + secClass + " " + leafSel + "{ " + sizeDecl + " }")
                 }
             }
-            if (d.type === "FRAME" && isContainer(d)) walkPair(d, m, m, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone)
+            if (d.type === "FRAME" && isContainer(d))
+                walkPair(d, m, m, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone, semMap)
         }
     }
 
@@ -1827,7 +2127,9 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         var secTextByName = collectTextNodesByName(mSec)
         var sectionImageOverrideDone = {}
         var sectionTextOverrideDone = {}
-        walkPair(dSec, mSec, mSec, secClass, secImageByName, sectionImageOverrideDone, secTextByName, sectionTextOverrideDone)
+        var deskSem = buildSectionSemanticClasses(dSec, (options && options.geoStructure) || null)
+        var deskMoOpts = { sectionSemantics: deskSem }
+        walkPair(dSec, mSec, mSec, secClass, secImageByName, sectionImageOverrideDone, secTextByName, sectionTextOverrideDone, deskSem)
         // 이미지: 인덱스로 매칭 안 된 경우에만 레이어 name 기준으로 MO 매칭
         function pushImageOverridesByName(dNode, secCls, imgByName, overrideDone) {
             if (!dNode || !isVisible(dNode)) return
@@ -1837,7 +2139,10 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var mImg = key !== "" && imgByName ? imgByName[key] : null
                 if (mImg) {
                     var decl = getImageSizeDeclDiff(dNode, mImg)
-                    if (decl) lines.push("  .ap-section--" + secCls + " " + imageImgSel(String(dNode.id)) + "{ " + decl + " }")
+                    if (decl)
+                        lines.push(
+                            "  .ap-section--" + secCls + " " + cssInnerSelForNode(String(dNode.id), deskMoOpts, true) + "{ " + decl + " }"
+                        )
                 }
             }
             if (isContainer(dNode)) for (var j = 0; j < dNode.children.length; j++) pushImageOverridesByName(dNode.children[j], secCls, imgByName, overrideDone)
@@ -1855,7 +2160,15 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                     if (tsM) {
                         var textDecl = buildTextVarsDeclDiff(tsD, tsM)
                         if (textDecl) {
-                            lines.push("  .ap-section--" + secCls + " " + textSel(String(dNode.id)) + "{ " + textDecl + " }")
+                            lines.push(
+                                "  .ap-section--" +
+                                    secCls +
+                                    " " +
+                                    cssInnerSelForNode(String(dNode.id), deskMoOpts, false) +
+                                    "{ " +
+                                    textDecl +
+                                    " }"
+                            )
                         }
                     }
                 }
@@ -2224,7 +2537,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         .then(function () {
             var dataTree = {rootSummary: rootSummary, sections: sections, legend: legend}
             var text = flattenTree(dataTree)
-            return buildCodeAsync(root, cache, sectionNodes).then(function (result) {
+            return buildCodeAsync(root, cache, sectionNodes, options.geoStructure || null).then(function (result) {
                 var code = result && result.code != null ? result.code : typeof result === "string" ? result : ""
                 var exportedNodeIds = result && result.exportedNodeIds ? result.exportedNodeIds : {}
                 var ownImageNodeIds = result && result.ownImageNodeIds ? result.ownImageNodeIds : {}
@@ -2243,7 +2556,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
 
 // ----- Code Builder (node-id 기반 HTML/CSS 생성) -----
 /** 루트 노드와 캐시로 전체 HTML/CSS 문자열 생성 (섹션별 스타일·article 본문) */
-function buildCodeAsync(root, cache, sectionNodesParam) {
+function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
     var codeLines = []
     var deferredStyles = []
     var exportedNodeIds = {}
@@ -2374,17 +2687,18 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
         return ".ap-section--" + secClass + " " + innerSel.replace(/,/g, ", .ap-section--" + secClass + " ")
     }
 
-    function pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, includeAbs) {
+    function pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, includeAbs, ropts) {
         if (includeAbs === undefined) includeAbs = true
+        var inner = cssInnerSelForNode(id, ropts || {}, false)
         var decl = buildTextVarsDecl(ts)
-        if (decl) pushDeferredStyle(ctx, selInSection(secClass, textSel(id)), decl)
+        if (decl) pushDeferredStyle(ctx, selInSection(secClass, inner), decl)
         if (includeAbs && textAbs && id) {
             var textAbsDecl = buildAbsDecl(node, parent)
-            if (textAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, textSel(id)), textAbsDecl)
+            if (textAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, inner), textAbsDecl)
         }
         var partResult = buildTextPartInnerHtml(ts)
         var parentStyle = typeof partResult === "string" ? "" : (partResult.parentStyle || "")
-        if (parentStyle && id) pushDeferredStyle(ctx, selInSection(secClass, textSel(id)), parentStyle)
+        if (parentStyle && id) pushDeferredStyle(ctx, selInSection(secClass, inner), parentStyle)
     }
 
     function buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth) {
@@ -2402,16 +2716,12 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
         var id = node.id != null ? String(node.id) : ""
         if (id) ctx.exportedNodeIds[id] = true
-        // data-node-id 중복 방지: 부모와 동일 id면 생략 (순환 참조·동일 노드 이중 출력 시 한 요소만 id 부여)
         var dataIdAttr = ""
-        if (id && !(parent && parent.id != null && String(parent.id) === id)) {
-            dataIdAttr = ' data-node-id="' + escapeHtml(id) + '"'
-        }
 
         // TEXT: 허용 폰트 목록에 없으면 이미지로 내보냄 (project 이미지와 동일하게 path 사용)
         if (node.type === "TEXT") {
             var textAbs = isAbsoluteLike(node, parent)
-            var textCls = "ap-text" + (textAbs ? " ap-abs" : "")
+            var textCls = apNodeClassList("ap-text" + (textAbs ? " ap-abs" : ""), id, opts)
             return getTextSummaryAsync(node)
                 .then(function (ts) {
                     var allowed = cache.allowedFonts || []
@@ -2425,26 +2735,26 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                             }))
 
                     if (fontAllowed) {
-                        pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs)
+                        pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, true, opts)
                         return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                     }
 
                     return exportNodeImageAsync(node)
                         .then(function (dataUrl) {
                             if (!dataUrl) {
-                                pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs)
+                                pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, true, opts)
                                 return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                             }
                             if (node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
                             var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, { skipExport: isVideoNode(node) }) : dataUrl
-                            var imgDecl = getImageSizeDecl(node)
-                            if (imgDecl) pushDeferredStyle(ctx, selInSection(secClass, imageImgSel(id)), imgDecl)
                             var altText = getImageAltText(node)
                             if (id) ctx.ownImageNodeIds[id] = true
-                            return wrapIfBtn(node, indent(depth) + '<div class="ap-image"' + dataIdAttr + '><img src="' + (path || "") + '" alt="' + altText + '"' + dataIdAttr + " /></div>", depth)
+                            var imgWrapCls = apNodeClassList("ap-image", id, opts)
+                            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, false)
+                            return wrapIfBtn(node, indent(depth) + '<div class="' + imgWrapCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>', depth)
                         })
                         .catch(function () {
-                            pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, false)
+                            pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, false, opts)
                             return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                         })
                 })
@@ -2461,13 +2771,13 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
             var videoNeedWrapper = videoAbs && (!videoParentWraps || (node.type === "FRAME" && isContainer(node)))
             if (videoAbs && id) {
                 var videoAbsDecl = buildAbsDecl(node, parent)
-                if (videoAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, videoSel(id)), videoAbsDecl)
+                if (videoAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), videoAbsDecl)
             } else if (id) {
                 var videoSizeDecl = getImageSizeDecl(node)
-                if (videoSizeDecl) pushDeferredStyle(ctx, selInSection(secClass, videoSel(id)), videoSizeDecl)
+                if (videoSizeDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), videoSizeDecl)
             }
-            var videoCls = "ap-video" + (videoNeedWrapper ? " ap-abs" : "")
-            var videoHtml = '<div class="' + videoCls + '"' + dataIdAttr + '><video src="" controls playsinline muted loop autoplay preload="metadata"></video></div>'
+            var videoCls = apNodeClassList("ap-video" + (videoNeedWrapper ? " ap-abs" : ""), id, opts)
+            var videoHtml = '<div class="' + videoCls + '"><video src="" controls playsinline muted loop autoplay preload="metadata"></video></div>'
             return Promise.resolve(wrapIfBtn(node, indent(depth) + videoHtml, depth))
         }
 
@@ -2479,12 +2789,12 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                 var lineNeedWrapper = lineAbs && (!lineParentWraps || (node.type === "FRAME" && isContainer(node)))
                 if (lineAbs && id) {
                     var lineAbsDecl = buildAbsDecl(node, parent)
-                    if (lineAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, lineSel(id)), lineAbsDecl)
+                    if (lineAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), lineAbsDecl)
                 }
                 var lineVars = buildLineVarsDecl(node)
-                if (lineVars) pushDeferredStyle(ctx, selInSection(secClass, lineSel(id)), lineVars)
-                var lineCls = "ap-line" + (lineNeedWrapper ? " ap-abs" : "")
-                var lineHtml = '<div class="' + lineCls + '"' + dataIdAttr + "></div>"
+                if (lineVars) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), lineVars)
+                var lineCls = apNodeClassList("ap-line" + (lineNeedWrapper ? " ap-abs" : ""), id, opts)
+                var lineHtml = '<div class="' + lineCls + '"></div>'
                 return Promise.resolve(wrapIfBtn(node, indent(depth) + lineHtml, depth))
             }
             if (node.type === "ELLIPSE") {
@@ -2493,23 +2803,22 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                 var ellipseNeedWrapper = ellipseAbs && (!ellipseParentWraps || (node.type === "FRAME" && isContainer(node)))
                 if (ellipseAbs && id) {
                     var ellipseAbsDecl = buildAbsDecl(node, parent)
-                    if (ellipseAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, ellipseSel(id)), ellipseAbsDecl)
+                    if (ellipseAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), ellipseAbsDecl)
                 }
                 var ellipseVars = buildEllipseVarsDecl(node)
-                if (ellipseVars) pushDeferredStyle(ctx, selInSection(secClass, ellipseSel(id)), ellipseVars)
-                var ellipseCls = "ap-ellipse" + (ellipseNeedWrapper ? " ap-abs" : "")
-                var ellipseHtml = '<div class="' + ellipseCls + '"' + dataIdAttr + "></div>"
+                if (ellipseVars) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), ellipseVars)
+                var ellipseCls = apNodeClassList("ap-ellipse" + (ellipseNeedWrapper ? " ap-abs" : ""), id, opts)
+                var ellipseHtml = '<div class="' + ellipseCls + '"></div>'
                 return Promise.resolve(wrapIfBtn(node, indent(depth) + ellipseHtml, depth))
             }
             return exportNodeSvgAsync(node).then(function (dataUrl) {
                 if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
                 var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, { skipExport: isVideoNode(node) }) : dataUrl || ""
-                var imgDecl = getImageSizeDecl(node)
-                if (imgDecl) pushDeferredStyle(ctx, selInSection(secClass, imageImgSel(id)), imgDecl)
-
                 var altText = getImageAltText(node)
                 if (id) ctx.ownImageNodeIds[id] = true
-                var html = indent(depth) + '<div class="ap-image"' + dataIdAttr + '><img src="' + (path || "") + '" alt="' + altText + '"' + dataIdAttr + " /></div>"
+                var svgImgCls = apNodeClassList("ap-image", id, opts)
+                pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, false)
+                var html = indent(depth) + '<div class="' + svgImgCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>'
                 return wrapIfBtn(node, html, depth)
             })
         }
@@ -2537,10 +2846,11 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                     var fillWImgGrp = getFillFlexStartWidthDecl(node, parent)
                     if (fillWImgGrp) declPartsImgGrp.push(fillWImgGrp)
                     if (declPartsImgGrp.length && id) {
-                        pushDeferredStyle(ctx, selInSection(secClass, frameSel(id)), declPartsImgGrp.join(";"))
+                        pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declPartsImgGrp.join(";"))
                     }
                     var linesImgGrp = []
-                    linesImgGrp.push(indent(depth) + '<div class="ap-frame' + (absImgGrp ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : "") + '"' + dataIdAttr + ">")
+                    var imgGrpFrameCls = apNodeClassList("ap-frame" + (absImgGrp ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : ""), id, opts)
+                    linesImgGrp.push(indent(depth) + '<div class="' + imgGrpFrameCls + '">')
                     var childrenImgGrp = node.children || []
                     var idxImg = 0
                     function nextImgCh() {
@@ -2562,16 +2872,15 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
             return exportNodeImageAsync(node).then(function (dataUrl) {
                 if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
                 var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, { skipExport: isVideoNode(node) }) : dataUrl || ""
-                var imgDecl = getImageSizeDecl(node)
-                if (imgDecl && !imgAbs) pushDeferredStyle(ctx, selInSection(secClass, imageImgSel(id)), imgDecl)
                 if (imgAbs && id) {
                     var imgAbsDecl = buildAbsDecl(node, parent)
-                    if (imgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, imageSel(id)), imgAbsDecl)
+                    if (imgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), imgAbsDecl)
                 }
                 var altText = getImageAltText(node)
                 if (id) ctx.ownImageNodeIds[id] = true
-                var figureCls = "ap-image" + (imgAbs ? " ap-abs" : "")
-                var figureHtml = '<div class="' + figureCls + '"' + dataIdAttr + '><img src="' + (path || "") + '" alt="' + altText + '"' + dataIdAttr + " /></div>"
+                var figureCls = apNodeClassList("ap-image" + (imgAbs ? " ap-abs" : ""), id, opts)
+                pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs)
+                var figureHtml = '<div class="' + figureCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>'
                 return wrapIfBtn(node, indent(depth) + figureHtml, depth)
             })
         }
@@ -2584,7 +2893,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
             var isFullWidth = node.layoutSizingHorizontal === "FILL" ||
                 (parentBox && box && box.w != null && parentBox.w != null && r2(box.w) === r2(parentBox.w))
 
-            var cls = "ap-frame" + (abs ? " ap-abs" : "") + (flex ? " ap-flex" : "")
+            var cls = apNodeClassList("ap-frame" + (abs ? " ap-abs" : "") + (flex ? " ap-flex" : ""), id, opts)
 
             // style decl for this frame: flex vars + bg (frame는 background-image 가능)
             var declParts = []
@@ -2635,12 +2944,12 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                 }
 
                 if (declParts.length) {
-                    pushDeferredStyle(ctx, selInSection(secClass, frameSel(id)), declParts.join(";"))
+                    pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declParts.join(";"))
                 }
 
                 var isFrameBtn = isBtnNode(node)
                 var frameTag = isFrameBtn ? "a" : "div"
-                var frameTagOpen = "<" + frameTag + (isFrameBtn ? ' href="#"' : "") + ' class="' + cls + '"' + dataIdAttr + ">"
+                var frameTagOpen = "<" + frameTag + (isFrameBtn ? ' href="#"' : "") + ' class="' + cls + '">'
                 var lines = []
                 lines.push(indent(depth) + frameTagOpen)
 
@@ -2676,7 +2985,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                     }
 
                     var itemId = ch.id ? String(ch.id) : ""
-                    var leafSel = getLeafSelectorForNode(ch)
+                    var leafSel = getLeafSelectorForNode(ch, opts)
                     var isChContainer = isContainer(ch)
 
                     return Promise.all([
@@ -2756,12 +3065,12 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                 var skipGroupWrapper = singleChild && !groupHasVisualAttrs
 
                 if (groupHasAttrs && id && !skipGroupWrapper) {
-                    pushDeferredStyle(ctx, selInSection(secClass, frameSel(id)), declParts2.join(";"))
+                    pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declParts2.join(";"))
                 }
 
                 if (skipGroupWrapper) {
                     if (declParts2Flex.length > 0) {
-                        var childSel = getLeafSelectorForNode(singleChild)
+                        var childSel = getLeafSelectorForNode(singleChild, opts)
                         if (childSel) pushDeferredStyle(ctx, selInSection(secClass, childSel), declParts2Flex.join(";"))
                     }
                     return renderNodeAsync(singleChild, node, secNo, secClass, depth, opts)
@@ -2769,8 +3078,8 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
                 var isGroupBtn = isBtnNode(node)
                 var groupTag = isGroupBtn ? "a" : "div"
-                var frameCls = "ap-frame" + (abs2 ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : "")
-                var groupTagOpen = "<" + groupTag + (isGroupBtn ? ' href="#"' : "") + ' class="' + frameCls + '"' + dataIdAttr + ">"
+                var frameCls = apNodeClassList("ap-frame" + (abs2 ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : ""), id, opts)
+                var groupTagOpen = "<" + groupTag + (isGroupBtn ? ' href="#"' : "") + ' class="' + frameCls + '">'
                 var lines2 = []
                 lines2.push(indent(depth) + groupTagOpen)
                 var j = 0
@@ -2793,7 +3102,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
         // leaf 기타 (absolute면 ap-abs + 좌표)
         var absLeaf = isAbsoluteLike(node, parent)
-        var leafCls = "ap-layer" + (absLeaf ? " ap-abs" : "")
+        var leafCls = apNodeClassList("ap-layer" + (absLeaf ? " ap-abs" : ""), id, opts)
         return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl) {
             var declParts = []
             if (bgDecl) declParts.push(bgDecl)
@@ -2803,8 +3112,8 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                 var absDeclLeaf = buildAbsDecl(node, parent)
                 if (absDeclLeaf) declParts.push(absDeclLeaf)
             }
-            if (declParts.length && id) pushDeferredStyle(ctx, selInSection(secClass, layerSel(id)), declParts.join(";"))
-            return wrapIfBtn(node, indent(depth) + '<div class="' + leafCls + '"' + dataIdAttr + "></div>", depth)
+            if (declParts.length && id) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declParts.join(";"))
+            return wrapIfBtn(node, indent(depth) + '<div class="' + leafCls + '"></div>', depth)
         })
     }
 
@@ -2821,7 +3130,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
         var chAbs = isAbsoluteLike(ch, sectionNode)
         var itemId = ch.id ? String(ch.id) : ""
         if (itemId) ctx.exportedNodeIds[itemId] = true
-        var leafSel = getLeafSelectorForNode(ch)
+        var leafSel = getLeafSelectorForNode(ch, opts)
         var isChContainer = isContainer(ch)
         return Promise.all([buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}), chAbs ? Promise.resolve(buildAbsDecl(ch, sectionNode) || "") : Promise.resolve("")]).then(function (res) {
             var itemDeclParts = [res[0]].filter(Boolean)
@@ -2849,6 +3158,11 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
         // section style: height + background (incl child bg detection) + flex(섹션이 Auto Layout일 때)
         return buildSectionBackgroundAsync(sectionNode, cache, secNo).then(function (bg) {
+            var sectionSemantics = buildSectionSemanticClasses(sectionNode, geoStructure)
+            var sectionRenderOpts = {
+                includeHidden: true,
+                sectionSemantics: sectionSemantics,
+            }
             var sectionDeclParts = []
 
             // 섹션 높이: 슬라이드 섹션은 min-height auto, 그 외는 --ap-section-h로 최소 높이 유지
@@ -2877,9 +3191,11 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
             if (sectionNode.id != null) ctx.exportedNodeIds[String(sectionNode.id)] = true
 
-            var secAttr = ' data-node-id="' + escapeHtml(sectionNode.id) + '"'
-            var secClassList = "ap-section ap-section--" + secClass + (isFlex(sectionNode) ? " ap-flex" : "")
-            contentLines.push('    <section class="' + secClassList + '"' + secAttr + ">")
+            var secClassList =
+                apNodeClassList("ap-section ap-section--" + secClass + (isFlex(sectionNode) ? " ap-flex" : ""), String(sectionNode.id), {
+                    sectionSemantics: {},
+                })
+            contentLines.push('    <section class="' + secClassList + '">')
 
             var slideData = getSlideItems(sectionNode)
             var slideParent = sectionNode
@@ -2926,7 +3242,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                 if (isSlideContainerNodeInSection(ch)) return pass1NextChild()
 
                 if (ch.type === "FRAME" && isContainer(ch)) {
-                    return renderNodeAsync(ch, sectionNode, secNo, secClass, 3, {includeHidden: true}).then(function (html) {
+                    return renderNodeAsync(ch, sectionNode, secNo, secClass, 3, sectionRenderOpts).then(function (html) {
                         if (html) contentLines.push(html)
                         return pass1NextChild()
                     })
@@ -2934,7 +3250,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
 
                 var chAbsVirtual = isAbsoluteLike(ch, sectionNode)
                 if (!chAbsVirtual && (ch.type === "LINE" || ch.type === "ELLIPSE" || isLineLikeNode(ch))) {
-                    return renderNodeAsync(ch, sectionNode, secNo, secClass, 3, {includeHidden: true}).then(function (html) {
+                    return renderNodeAsync(ch, sectionNode, secNo, secClass, 3, sectionRenderOpts).then(function (html) {
                         if (html) contentLines.push(html)
                         return pass1NextChild()
                     })
@@ -2945,7 +3261,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                     var chAbs = isAbsoluteLike(ch, sectionNode)
                     var itemId = ch.id ? String(ch.id) : ""
                     if (itemId) ctx.exportedNodeIds[itemId] = true
-                    var leafSel = getLeafSelectorForNode(ch)
+                    var leafSel = getLeafSelectorForNode(ch, sectionRenderOpts)
                     var isChContainer = isContainer(ch)
 
                     return Promise.all([
@@ -2967,12 +3283,12 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                         if (itemDecl && leafSel) pushDeferredStyle(ctx, selInSection(secClass, leafSel), itemDecl)
 
                         if (isChContainer) {
-                            return renderNodeAsync(ch, sectionNode, secNo, secClass, secChildDepth, {includeHidden: true}).then(function (inner) {
+                            return renderNodeAsync(ch, sectionNode, secNo, secClass, secChildDepth, sectionRenderOpts).then(function (inner) {
                                 if (inner) contentLines.push(inner)
                                 return pass1NextChild()
                             })
                         }
-                        return renderNodeAsync(ch, sectionNode, secNo, secClass, secChildDepth, {includeHidden: true}).then(function (inner) {
+                        return renderNodeAsync(ch, sectionNode, secNo, secClass, secChildDepth, sectionRenderOpts).then(function (inner) {
                             if (inner) contentLines.push(inner)
                             return pass1NextChild()
                         })
@@ -3008,7 +3324,7 @@ function buildCodeAsync(root, cache, sectionNodesParam) {
                         return renderSlide(idx + 1)
                     }
 
-                    return renderSectionChildAsync(ch, slideParent, secNo, secClass, bg, 6, {includeHidden: true}).then(function (html) {
+                    return renderSectionChildAsync(ch, slideParent, secNo, secClass, bg, 6, sectionRenderOpts).then(function (html) {
                         if (html) contentLines.push(html)
                         contentLines.push("          </div>")
                         return renderSlide(idx + 1)
@@ -3076,7 +3392,7 @@ figma.ui.onmessage = function (msg) {
         var allowedFonts = msg.allowedFonts || []
         figma.ui.postMessage({type: "LOADING", value: true})
 
-        dumpTreeAsync(root, projectName, allowedFonts, {phase: "desktop"})
+        dumpTreeAsync(root, projectName, allowedFonts, {phase: "desktop", geoStructure: msg.geoStructure || null})
             .then(function (payload) {
                 figma.ui.postMessage({type: "LOADING", value: false})
                 var images = payload.images || []
@@ -3118,13 +3434,17 @@ figma.ui.onmessage = function (msg) {
         var allowedFontsMo = msg.allowedFonts || []
         figma.ui.postMessage({type: "LOADING", value: true})
 
-        dumpTreeAsync(rootDesktop, projectNameMo, allowedFontsMo, {phase: "desktop"})
+        dumpTreeAsync(rootDesktop, projectNameMo, allowedFontsMo, {phase: "desktop", geoStructure: msg.geoStructure || null})
             .then(function (payload) {
                 return loadFontsForMobileTreeAsync(rootMobile).then(function () {
                     return dumpTreeAsync(rootMobile, projectNameMo, allowedFontsMo, {phase: "mobile", imageSuffix: "_mo"}).then(function (moPayload) {
                         var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                         // 구조 불일치여도 PC 기준 단일 뷰 + @media MO 오버라이드만 사용 (텍스트/이미지는 1:1 매칭 가능, frame 구조는 PC 기준·MO는 사람이 수정)
-                        var code = combinePcMoAsBreakpoint(payload.code || "", rootDesktop, rootMobile, breakpoint, { exportedNodeIds: payload.exportedNodeIds, ownImageNodeIds: payload.ownImageNodeIds })
+                        var code = combinePcMoAsBreakpoint(payload.code || "", rootDesktop, rootMobile, breakpoint, {
+                            exportedNodeIds: payload.exportedNodeIds,
+                            ownImageNodeIds: payload.ownImageNodeIds,
+                            geoStructure: msg.geoStructure || null,
+                        })
                         var separateViews = false
                         var images = (payload.images || []).concat(moPayload.images || [])
                         // MO 미리보기: 섹션 배경 --bg-img의 _mo 경로가 MO에서 export 안 됐을 수 있음 → PC 이미지로 채움
@@ -3187,6 +3507,8 @@ figma.ui.onmessage = function (msg) {
         }
         var projectName2 = msg.projectName || "project"
         var allowedFonts2 = msg.allowedFonts || []
+        /** UI 코드 탭에 표시된 문자열(분석 직후·AI 정리 후 등). 있으면 ZIP _cms.html에 이걸 쓰고, 이미지만 피그마에서 다시 export */
+        var codeFromTab = msg.code != null && String(msg.code).trim() ? String(msg.code) : ""
 
         _currentExportWidth = IMAGE_EXPORT_ZIP_WIDTH
         figma.ui.postMessage({type: "LOADING", value: true})
@@ -3230,12 +3552,38 @@ figma.ui.onmessage = function (msg) {
                 return {code: code, images: images}
             })
             .then(function (out) {
-                finishExport(out.code || "", out.images || [])
+                var zipHtml = stripApAiAuditBlock(codeFromTab || out.code || "")
+                finishExport(zipHtml, out.images || [])
             })
             .catch(function (e) {
                 _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
                 figma.ui.postMessage({type: "LOADING", value: false})
                 figma.ui.postMessage({type: "ERROR", message: String(e)})
+            })
+        return
+    }
+
+    if (msg.type === "LOAD_OPENAI_KEY") {
+        figma.clientStorage
+            .getAsync("openai_key")
+            .then(function (v) {
+                figma.ui.postMessage({type: "OPENAI_KEY_LOADED", key: v != null ? String(v) : ""})
+            })
+            .catch(function () {
+                figma.ui.postMessage({type: "OPENAI_KEY_LOADED", key: ""})
+            })
+        return
+    }
+
+    if (msg.type === "SAVE_OPENAI_KEY") {
+        var keyToSave = msg.key != null ? String(msg.key) : ""
+        figma.clientStorage
+            .setAsync("openai_key", keyToSave)
+            .then(function () {
+                figma.ui.postMessage({type: "OPENAI_KEY_SAVED"})
+            })
+            .catch(function (e) {
+                figma.ui.postMessage({type: "OPENAI_KEY_ERROR", message: String(e)})
             })
         return
     }

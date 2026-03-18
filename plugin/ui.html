@@ -193,10 +193,30 @@
     <!-- ===== CODE ===== -->
     <div id="panel-code" class="panel">
       <div style="display:flex;flex-direction:column;flex:1;min-height:0;">
-        <div style="flex-shrink:0;padding:8px 12px 0;display:flex;gap:8px;align-items:center;">
+        <div style="flex-shrink:0;padding:8px 12px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
           <button type="button" id="exportZip" class="gray">Export ZIP</button>
           <span class="hint" style="margin-left:0;">_cms.html + assets/images/page_{project}_secXX_imgYY</span>
         </div>
+    
+        <div id="aiRefineBar" style="flex-shrink:0;padding:8px 12px;border-bottom:1px solid #e7e7e7;background:#f8fafc;display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+            <span style="font-size:11px;font-weight:700;color:#334;">AI</span>
+            <button type="button" id="btnAiAudit" class="gray" title="SEO·GEO·접근성 등 분석만 (패널 표시, 코드 미변경)">분석</button>
+            <button type="button" id="btnApplyAltProposals" class="gray" title="ui.html의 반영 룰로 AI 호출 → alt 등 코드 반영">반영</button>
+            <span style="font-size:10px;color:#888;">|</span>
+            <input type="password" id="openaiKey" class="field" style="width:180px;" placeholder="OpenAI API 키" autocomplete="off" />
+            <select id="aiModel" class="field" style="width:110px;">
+              <option value="gpt-4o">gpt-4o</option>
+              <option value="gpt-4o-mini">gpt-4o-mini</option>
+            </select>
+            <span id="aiRefineStatus" class="hint" style="margin-left:0;font-size:11px;"></span>
+          </div>
+          <div id="aiAuditReport" style="display:none;max-height:200px;overflow:auto;font-size:10px;line-height:1.45;border:1px solid #dde4ea;border-radius:8px;padding:10px;background:#fff;color:#223;"></div>
+          <div style="font-size:10px;color:#667;line-height:1.5;">
+            <b>분석</b> = 검수용 AI · 패널만 · <b>반영</b> = <code>AP_AI_APPLY</code> 룰로 AI → alt만 코드 반영 (요약은 패널만, ZIP/미리보기 제외)
+          </div>
+        </div>
+    
         <textarea id="codeOut" placeholder="선택 분석 후 섹션 코드가 표시됩니다" style="flex:1;"></textarea>
       </div>
     </div>
@@ -458,6 +478,20 @@
         previewImages = zipImages;
         refreshPreview();
         zipImagesBuffer = [];
+      }
+
+      if (msg.type === "OPENAI_KEY_LOADED") {
+        cachedOpenaiKey = msg.key != null ? String(msg.key) : "";
+        var ok = $("#openaiKey");
+        if (ok && cachedOpenaiKey) ok.value = cachedOpenaiKey;
+      }
+      if (msg.type === "OPENAI_KEY_SAVED") {
+        var stAi = $("#aiRefineStatus");
+        if (stAi) stAi.textContent = "API 키 저장됨";
+      }
+      if (msg.type === "OPENAI_KEY_ERROR") {
+        var stE = $("#aiRefineStatus");
+        if (stE) stE.textContent = "키 저장 실패: " + (msg.message || "");
       }
 
       if(msg.type==="ERROR"){
@@ -776,8 +810,16 @@
     var previewBlobUrl = null;
     var previewViewMode = "pc";
 
+    /** ZIP·미리보기용 — ap-ai-audit 블록은 산출물에 포함하지 않음 */
+    function stripEmbeddedAuditReport(html) {
+      return String(html || "").replace(
+        /<!--\s*ap-ai-audit:start\s*-->[\s\S]*?<!--\s*ap-ai-audit:end\s*-->\s*/gi,
+        ""
+      );
+    }
+
     function getPreviewHtml(forExport, forceViewportWidth) {
-      var raw = ($("#codeOut") && $("#codeOut").value) || "";
+      var raw = stripEmbeddedAuditReport(($("#codeOut") && $("#codeOut").value) || "");
       if (!raw.trim()) return "";
 
       // preview에서 assets/images/... 를 dataUrl로 치환
@@ -838,23 +880,350 @@
       }
     }
 
-    // ====== Export ZIP ======
-    $("#exportZip").onclick = function() {
-      var code = ($("#codeOut") && $("#codeOut").value) || "";
+      // ====== AI 정리: OpenAI 키는 figma.clientStorage (code.js 경유) ======
+  var cachedOpenaiKey = "";
+  (function requestStoredOpenaiKey() {
+    parent.postMessage({ pluginMessage: { type: "LOAD_OPENAI_KEY" } }, "*");
+  })();
+
+  window.__apLastAuditAltProposals = null;
+  window.__apLastAuditReport = null;
+
+  var openaiKeyEl = $("#openaiKey");
+  if (openaiKeyEl) {
+    openaiKeyEl.addEventListener("blur", function () {
+      var v = String(this.value || "").trim();
+      cachedOpenaiKey = v;
+      parent.postMessage(
+        { pluginMessage: { type: "SAVE_OPENAI_KEY", key: v } },
+        "*"
+      );
+    });
+  }
+
+  // --------------------------------------------------
+  // 공통 유틸
+  // --------------------------------------------------
+  function getCodeEl() {
+    return $("#codeOut");
+  }
+
+  function getCodeValue() {
+    var codeEl = getCodeEl();
+    return (codeEl && codeEl.value) || "";
+  }
+
+  function setCodeValue(v) {
+    var codeEl = getCodeEl();
+    if (codeEl) codeEl.value = String(v || "");
+  }
+
+  function setAiStatus(msg) {
+    var st = $("#aiRefineStatus");
+    if (st) st.textContent = msg || "";
+  }
+
+  function ensureCodeExists() {
+    var code = getCodeValue();
+    if (!String(code).trim()) {
+      alert("먼저 PC/MO 분석으로 코드를 만든 뒤 시도하세요.");
+      return false;
+    }
+    return true;
+  }
+
+  function ensureOpenAiKeyExists() {
+    var key = (openaiKeyEl && String(openaiKeyEl.value || "").trim()) || cachedOpenaiKey;
+    if (!key) {
+      alert("OpenAI API 키를 입력한 뒤 포커스를 벗어나 저장하거나, 키를 입력하세요.");
+      return "";
+    }
+    cachedOpenaiKey = key;
+    return key;
+  }
+
+  function getAiModel() {
+    var modelEl = $("#aiModel");
+    return (modelEl && modelEl.value) || "gpt-4o";
+  }
+
+  function countImgs(code) {
+    var m = String(code || "").match(/<img\b/gi);
+    return m ? m.length : 0;
+  }
+
+  function detectPageLanguage(code) {
+    var s = String(code || "");
+    if (/[ぁ-んァ-ン一-龯]/.test(s)) return "Japanese";
+    if (/[a-zA-Z]/.test(s) && !/[가-힣]/.test(s)) return "English";
+    return "Korean";
+  }
+
+  /**
+   * 분석 버튼 전용 — SEO·GEO·접근성 리포트 (코드는 건드리지 않음)
+   * {{N_IMG}}, {{LANG}} 자동 치환
+   */
+  var AP_AI_ANALYSIS_SYSTEM_PROMPT_TEMPLATE = [
+    "HTML/CSS quality auditor. Output ONLY one JSON object. Never output HTML, CSS, or markdown.",
+    "Required keys: seo, geo, a11y, altProposals.",
+    "LANGUAGE: Human-readable strings in Korean — seo.issues, seo.suggestions, geo.issues, a11y.issues, a11y.suggestions.",
+    "seo: { issues: string[], suggestions: string[] } 검색·콘텐츠 관점.",
+    "geo: { structure: [ { text, role } ], issues: string[] } role: title|subtitle|description|caption|cta|label|body.",
+    "a11y: { issues: string[], suggestions: string[] } 접근성.",
+    "altProposals: string[] exactly {{N_IMG}} entries (img 문서 순서), 참고용 제안. 장식용은 빈 문자열.",
+    "Page language hint: {{LANG}}.",
+  ].join("\n");
+
+  var AP_AI_ANALYSIS_USER_PROMPT_PREFIX =
+    "아래 HTML/CSS를 분석해 JSON만 반환. 이슈·제안은 한국어로.\n\n---\n";
+
+  /**
+   * 반영 버튼 전용 — 여기 룰만 AI에 넘어감 (원하는 작업을 직접 적어도 됨)
+   * 코드 적용: altProposals가 있으면 img 순서대로 alt 반영. applyNotes는 하단 삽입 블록에 표시.
+   * {{N_IMG}}, {{LANG}} 자동 치환
+   */
+  var AP_AI_APPLY_SYSTEM_PROMPT_TEMPLATE = [
+    "출력은 JSON 객체 하나만. HTML/CSS/마크다운 금지.",
+    "이 문서의 <img>는 문서 순서대로 총 {{N_IMG}}개다.",
+    "할 일: 모든 이미지를 문맥에 맞게 분석하고, 각 img에 쓸 대체 텍스트를 altProposals 배열로 반환한다.",
+    "altProposals: 문자열 배열, img 순서와 정확히 {{N_IMG}}개. 순수 장식 이미지는 빈 문자열.",
+    "선택 applyNotes: string[] — 반영 요약(한국어, 짧게). 코드 하단 삽입 블록에 표시된다.",
+    "페이지 언어 힌트: {{LANG}} — alt는 그 말투에 맞출 것.",
+  ].join("\n");
+
+  var AP_AI_APPLY_USER_PROMPT_PREFIX =
+    "아래 HTML/CSS에 대해 시스템 지시를 수행하고 JSON만 출력.\n\n---\n";
+
+  function expandApPlaceholders(template, htmlCode) {
+    var nImg = countImgs(htmlCode);
+    var lang = detectPageLanguage(htmlCode);
+    return String(template || "")
+      .replace(/\{\{N_IMG\}\}/g, String(nImg))
+      .replace(/\{\{LANG\}\}/g, lang);
+  }
+
+  function runOpenAiJsonApi(htmlCode, systemContent, userPrefix) {
+    var key = (openaiKeyEl && String(openaiKeyEl.value || "").trim()) || cachedOpenaiKey;
+    if (!key) return Promise.reject(new Error("OpenAI API 키가 필요합니다."));
+    var snippet =
+      htmlCode.length > 120000 ? htmlCode.slice(0, 120000) + "\n/* truncated */" : htmlCode;
+    return fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
+      body: JSON.stringify({
+        model: getAiModel(),
+        messages: [
+          { role: "system", content: systemContent },
+          { role: "user", content: userPrefix + snippet },
+        ],
+        temperature: 0,
+        max_tokens: 8192,
+        response_format: { type: "json_object" },
+      }),
+    })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          return { res: res, data: data };
+        });
+      })
+      .then(function (_ref) {
+        var res = _ref.res,
+          data = _ref.data;
+        if (!res.ok) throw new Error((data.error && data.error.message) || res.statusText);
+        var text =
+          data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        if (!text) throw new Error("empty");
+        return JSON.parse(String(text).trim());
+      });
+  }
+
+  function runOpenAiAnalysisApi(htmlCode) {
+    return runOpenAiJsonApi(
+      htmlCode,
+      expandApPlaceholders(AP_AI_ANALYSIS_SYSTEM_PROMPT_TEMPLATE, htmlCode),
+      AP_AI_ANALYSIS_USER_PROMPT_PREFIX
+    );
+  }
+
+  function runOpenAiApplyApi(htmlCode) {
+    return runOpenAiJsonApi(
+      htmlCode,
+      expandApPlaceholders(AP_AI_APPLY_SYSTEM_PROMPT_TEMPLATE, htmlCode),
+      AP_AI_APPLY_USER_PROMPT_PREFIX
+    );
+  }
+
+  function escapeAttr(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;");
+  }
+
+  function applyAltProposalsToCode(html, proposals) {
+    var list = Array.isArray(proposals) ? proposals.slice() : [];
+    var i = 0;
+    return String(html || "").replace(/<img\b[^>]*>/gi, function (tag) {
+      var alt = i < list.length ? list[i++] : null;
+      if (alt == null || alt === undefined) return tag;
+      var val = String(alt);
+      if (/\balt\s*=\s*["']/i.test(tag)) {
+        return tag.replace(/\balt\s*=\s*["'][^"']*["']/i, 'alt="' + escapeAttr(val) + '"');
+      }
+      return tag.replace(/<img\b/i, '<img alt="' + escapeAttr(val) + '"');
+    });
+  }
+
+  function buildAuditReportInnerHtml(obj) {
+    obj = obj || {};
+    function ul(arr, title) {
+      arr = Array.isArray(arr) ? arr : [];
+      if (!arr.length) return "";
+      return (
+        "<div style='margin-bottom:10px;'><strong style='color:#1565c0'>" +
+        title +
+        "</strong><ul style='margin:4px 0 0 16px;padding:0;'>" +
+        arr
+          .map(function (x) {
+            return "<li>" + String(x).replace(/</g, "&lt;") + "</li>";
+          })
+          .join("") +
+        "</ul></div>"
+      );
+    }
+    var geoRoleKo = {
+      title: "제목",
+      subtitle: "부제",
+      description: "설명",
+      caption: "캡션",
+      cta: "행동유도",
+      label: "라벨",
+      body: "본문",
+    };
+    function geoTable(struct) {
+      struct = Array.isArray(struct) ? struct : [];
+      if (!struct.length) return "";
+      var rows = struct
+        .map(function (r) {
+          var t = r && r.text != null ? String(r.text).slice(0, 220) : "";
+          var roleKey = r && r.role != null ? String(r.role).toLowerCase().trim() : "";
+          var role = geoRoleKo[roleKey] || roleKey || "—";
+          return (
+            "<tr><td style='padding:2px 8px 2px 0;vertical-align:top;white-space:nowrap'>" +
+            role.replace(/</g, "&lt;") +
+            "</td><td>" +
+            t.replace(/</g, "&lt;") +
+            "</td></tr>"
+          );
+        })
+        .join("");
+      return (
+        "<div style='margin-bottom:10px;'><strong style='color:#1565c0'>GEO 구조</strong><table style='font-size:10px;margin-top:4px;border-collapse:collapse'>" +
+        rows +
+        "</table></div>"
+      );
+    }
+    var seo = obj.seo || {};
+    var geo = obj.geo || {};
+    var a11y = obj.a11y || {};
+    return (
+      ul(seo.issues, "SEO 이슈") +
+      ul(seo.suggestions, "SEO 제안") +
+      geoTable(geo.structure) +
+      ul(geo.issues, "GEO 이슈") +
+      ul(a11y.issues, "접근성 이슈") +
+      ul(a11y.suggestions, "접근성 제안") +
+      ul(Array.isArray(obj.applyNotes) ? obj.applyNotes : [], "반영 메모")
+    );
+  }
+
+  function renderAuditReport(obj) {
+    var el = $("#aiAuditReport");
+    if (!el) return;
+    var inner = buildAuditReportInnerHtml(obj);
+    el.innerHTML = inner;
+    el.style.display = inner.trim() ? "block" : "none";
+  }
+
+  function runAiAudit() {
+    if (!ensureOpenAiKeyExists()) return;
+    if (!ensureCodeExists()) return;
+    var code = getCodeValue();
+    var btn = $("#btnAiAudit");
+    if (btn) btn.disabled = true;
+    setAiStatus("분석 중…");
+    runOpenAiAnalysisApi(code)
+      .then(function (obj) {
+        window.__apLastAuditReport = obj;
+        window.__apLastAuditAltProposals = Array.isArray(obj.altProposals) ? obj.altProposals : null;
+        renderAuditReport(obj);
+        setAiStatus("분석 완료 · 반영은 AP_AI_APPLY 룰로 별도 실행");
+      })
+      .catch(function (e) {
+        setAiStatus("분석 실패: " + (e && e.message ? e.message : String(e)));
+      })
+      .then(function () {
+        if (btn) btn.disabled = false;
+      });
+  }
+
+  var btnAiAudit = $("#btnAiAudit");
+  if (btnAiAudit) btnAiAudit.onclick = runAiAudit;
+
+  var btnApplyAlt = $("#btnApplyAltProposals");
+  if (btnApplyAlt) {
+    btnApplyAlt.onclick = function () {
+      if (!ensureOpenAiKeyExists()) return;
+      if (!ensureCodeExists()) return;
+      var code = getCodeValue();
+      var n = countImgs(code);
+      var btn = this;
+      btn.disabled = true;
+      setAiStatus("반영: AI 실행 중 (AP_AI_APPLY 룰)…");
+      runOpenAiApplyApi(code)
+        .then(function (obj) {
+          window.__apLastAuditReport = obj;
+          window.__apLastAuditAltProposals = Array.isArray(obj.altProposals) ? obj.altProposals : null;
+          renderAuditReport(obj);
+          var p = Array.isArray(obj.altProposals) ? obj.altProposals : [];
+          var didAlt = false;
+          if (p.length > 0 && n > 0) {
+            if (p.length !== n && !confirm("alt 제안 " + p.length + "개 vs img " + n + "개 — alt는 그대로 반영할까요?")) {
+              p = [];
+            } else if (p.length > 0) {
+              code = applyAltProposalsToCode(code, p);
+              didAlt = true;
+            }
+          }
+          code = stripEmbeddedAuditReport(code);
+          setCodeValue(code);
+          setAiStatus(didAlt ? "반영 완료 (alt) · 요약은 위 패널" : "반영 완료 (alt 없음 · 요약은 패널)");
+        })
+        .catch(function (e) {
+          setAiStatus("반영 실패: " + (e && e.message ? e.message : String(e)));
+        })
+        .then(function () {
+          btn.disabled = false;
+        });
+    };
+  }
+
+  $("#exportZip").onclick = function() {
+      var code = stripEmbeddedAuditReport(($("#codeOut") && $("#codeOut").value) || "");
       if (!code.trim()) return;
       var btn = this;
       btn.disabled = true;
       btn.textContent = "내보내는 중…";
-      parent.postMessage({ pluginMessage: { type: "EXPORT_ZIP", projectName: getProjectName(), allowedFonts: getAllowedFonts() } }, "*");
-    };
+      parent.postMessage({ pluginMessage: { type: "EXPORT_ZIP", projectName: getProjectName(), allowedFonts: getAllowedFonts(), code: code } }, "*");
+  };
 
-    function setExportZipReady() {
-      var btn = $("#exportZip");
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = "Export ZIP";
-      }
+  function setExportZipReady() {
+    var btn = $("#exportZip");
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Export ZIP";
     }
+  }
   </script>
 </body>
 </html>
