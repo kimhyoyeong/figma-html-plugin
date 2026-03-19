@@ -649,7 +649,352 @@ function buildStrokeDeclDiff(dNode, mNode) {
 }
 
 // ----- Asset Export (이미지/리소스 export, 파일명·포맷) -----
-/** imageHash로 원본 이미지 bytes 반환 (자식 제외) */
+/** @param {Uint8Array} bytes */
+function readUint32BE(bytes, offset) {
+    return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0
+}
+/** @param {Uint8Array} bytes */
+function isJpegBytes(bytes) {
+    return !!(bytes && bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
+}
+/** @param {Uint8Array} bytes */
+function isPngBytes(bytes) {
+    return !!(
+        bytes &&
+        bytes.length >= 8 &&
+        bytes[0] === 0x89 &&
+        bytes[1] === 0x50 &&
+        bytes[2] === 0x4e &&
+        bytes[3] === 0x47 &&
+        bytes[4] === 0x0d &&
+        bytes[5] === 0x0a &&
+        bytes[6] === 0x1a &&
+        bytes[7] === 0x0a
+    )
+}
+/** @param {Uint8Array} bytes */
+function isGifBytes(bytes) {
+    return !!(
+        bytes &&
+        bytes.length >= 6 &&
+        bytes[0] === 0x47 &&
+        bytes[1] === 0x49 &&
+        bytes[2] === 0x46 &&
+        bytes[3] === 0x38 &&
+        (bytes[4] === 0x39 || bytes[4] === 0x37) &&
+        bytes[5] === 0x61
+    )
+}
+/** @param {Uint8Array} bytes */
+function isWebpBytes(bytes) {
+    return !!(
+        bytes &&
+        bytes.length >= 12 &&
+        bytes[0] === 0x52 &&
+        bytes[1] === 0x49 &&
+        bytes[2] === 0x46 &&
+        bytes[3] === 0x46 &&
+        bytes[8] === 0x57 &&
+        bytes[9] === 0x45 &&
+        bytes[10] === 0x42 &&
+        bytes[11] === 0x50
+    )
+}
+/**
+ * PNG 알파 채널(타입 4·6) 또는 tRNS 청크 → 투명 사용 가능으로 간주
+ * @param {Uint8Array} bytes
+ */
+function pngBytesHasTransparency(bytes) {
+    if (!isPngBytes(bytes) || bytes.length < 33) return false
+    var pos = 8
+    while (pos + 12 <= bytes.length) {
+        var len = readUint32BE(bytes, pos)
+        var typeStr = String.fromCharCode(bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7])
+        if (len > 0x7fffffff || pos + 12 + len > bytes.length) break
+        if (typeStr === "IHDR" && len >= 13) {
+            var colorType = bytes[pos + 8 + 9]
+            if (colorType === 4 || colorType === 6) return true
+        }
+        if (typeStr === "tRNS") return true
+        if (typeStr === "IEND") break
+        pos += 12 + len
+    }
+    return false
+}
+/**
+ * WebP: VP8X 알파 플래그, 또는 VP8L(로스리스·알파 가능) → PNG export 경로
+ * @param {Uint8Array} bytes
+ */
+function webpBytesHasTransparency(bytes) {
+    if (!isWebpBytes(bytes)) return false
+    var pos = 12
+    while (pos + 8 <= bytes.length) {
+        var chunk = String.fromCharCode(bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3])
+        var sz = bytes[pos + 4] | (bytes[pos + 5] << 8) | (bytes[pos + 6] << 16) | (bytes[pos + 7] << 24)
+        if (sz < 0 || pos + 8 + sz > bytes.length) break
+        if (chunk === "VP8X" && sz >= 10) {
+            return (bytes[pos + 8] & 0x10) !== 0
+        }
+        if (chunk === "VP8L") return true
+        pos += 8 + sz + (sz & 1)
+    }
+    return false
+}
+/** Graphic Control Extension: 투명 색 플래그
+ * @param {Uint8Array} bytes
+ */
+function gifBytesHasTransparency(bytes) {
+    if (!isGifBytes(bytes)) return false
+    for (var i = 0; i < bytes.length - 4; i++) {
+        if (bytes[i] === 0x21 && bytes[i + 1] === 0xf9 && bytes[i + 2] >= 4) {
+            if ((bytes[i + 3] & 1) !== 0) return true
+        }
+    }
+    return false
+}
+/**
+ * 첫 번째 보이는 IMAGE fill 원본 바이트 기준 투명도 여부 (Figma는 알파 메타 미제공)
+ * @param {SceneNode} node
+ * @returns {Promise<boolean>}
+ */
+function imageFillSourceHasTransparencyAsync(node) {
+    if (!node) return Promise.resolve(false)
+    try {
+        var fills = node.fills
+        if (!fills || fills === figma.mixed) return Promise.resolve(false)
+        for (var i = 0; i < fills.length; i++) {
+            var f = fills[i]
+            if (f && f.visible !== false && f.type === "IMAGE" && f.imageHash) {
+                var imageObj = figma.getImageByHash(f.imageHash)
+                if (!imageObj) return Promise.resolve(false)
+                return imageObj
+                    .getBytesAsync()
+                    .then(function (bytes) {
+                        if (!bytes || bytes.length === 0) return false
+                        if (isJpegBytes(bytes)) return false
+                        if (isPngBytes(bytes)) return pngBytesHasTransparency(bytes)
+                        if (isWebpBytes(bytes)) return webpBytesHasTransparency(bytes)
+                        if (isGifBytes(bytes)) return gifBytesHasTransparency(bytes)
+                        return false
+                    })
+                    .catch(function () {
+                        return false
+                    })
+            }
+        }
+    } catch (e) {}
+    return Promise.resolve(false)
+}
+
+/**
+ * 서브트리에 임베디드 IMAGE fill이 알파를 가지는지 순차 확인 (루트만 보면 하위 PNG 알파 누락 방지)
+ * @param {SceneNode} node
+ * @returns {Promise<boolean>}
+ */
+function imageFillTransparencyInSubtreeAsync(node) {
+    if (!node || !isVisible(node)) return Promise.resolve(false)
+    return imageFillSourceHasTransparencyAsync(node).then(function (here) {
+        if (here) return true
+        if (!isContainer(node) || !node.children || !node.children.length) return false
+        var ci = 0
+        function nextChild() {
+            if (ci >= node.children.length) return Promise.resolve(false)
+            var ch = node.children[ci++]
+            return imageFillTransparencyInSubtreeAsync(ch).then(function (sub) {
+                return sub || nextChild()
+            })
+        }
+        return nextChild()
+    })
+}
+
+/** 서브트리 어딘가에서 노드·fill 불완전 불투명 → 실질 투명 (강제 PNG) */
+function hasTransparencyInSubtreeSync(node) {
+    if (!node || !isVisible(node)) return false
+    if (typeof node.opacity === "number" && node.opacity < 1) return true
+    if (hasVisibleFillWithOpacityLessThanOne(node)) return true
+    if (!isContainer(node) || !node.children) return false
+    for (var i = 0; i < node.children.length; i++) {
+        if (hasTransparencyInSubtreeSync(node.children[i])) return true
+    }
+    return false
+}
+
+/**
+ * PNG/JPG 판단용 서브트리 1패스 분석 (동기)
+ * @param {SceneNode} root
+ * @returns {{
+ *   gradientCount: number,
+ *   effectPhotoLike: boolean,
+ *   hasAutoLayout: boolean,
+ *   maxImageFillArea: number,
+ *   vectorCount: number,
+ *   hasText: boolean,
+ *   hasStroke: boolean,
+ *   hasImageFillSubtree: boolean
+ * }}
+ */
+function analyzeExportFormatSubtree(root) {
+    var gradientCount = 0
+    var effectPhotoLike = false
+    var hasAutoLayout = false
+    var maxImageFillArea = 0
+    function walk(n) {
+        if (!n || !isVisible(n)) return
+        if (isFlex(n)) hasAutoLayout = true
+        try {
+            var fills = n.fills
+            if (fills && fills !== figma.mixed) {
+                for (var fi = 0; fi < fills.length; fi++) {
+                    var f = fills[fi]
+                    if (!f || f.visible === false) continue
+                    var ft = f.type
+                    if (
+                        ft === "GRADIENT_LINEAR" ||
+                        ft === "GRADIENT_RADIAL" ||
+                        ft === "GRADIENT_ANGULAR" ||
+                        ft === "GRADIENT_DIAMOND"
+                    ) {
+                        gradientCount++
+                    }
+                    if (ft === "IMAGE") {
+                        var box = getAbs(n)
+                        if (box && box.w != null && box.h != null) {
+                            var area = box.w * box.h
+                            if (area > maxImageFillArea) maxImageFillArea = area
+                        }
+                    }
+                }
+            }
+        } catch (e1) {}
+        try {
+            var eff = n.effects
+            if (eff && eff.length) {
+                for (var ej = 0; ej < eff.length; ej++) {
+                    var e = eff[ej]
+                    if (!e || e.visible === false) continue
+                    var et = e.type
+                    if (et === "LAYER_BLUR" || et === "BACKGROUND_BLUR" || et === "DROP_SHADOW" || et === "INNER_SHADOW") {
+                        effectPhotoLike = true
+                        break
+                    }
+                }
+            }
+        } catch (e2) {}
+        if (isContainer(n) && n.children) {
+            for (var k = 0; k < n.children.length; k++) walk(n.children[k])
+        }
+    }
+    walk(root)
+    return {
+        gradientCount: gradientCount,
+        effectPhotoLike: effectPhotoLike,
+        hasAutoLayout: hasAutoLayout,
+        maxImageFillArea: maxImageFillArea,
+        vectorCount: subtreeUiVectorElementCount(root),
+        hasText: hasTextInSubtree(root),
+        hasStroke: hasVisibleSolidStrokeInSubtree(root),
+        hasImageFillSubtree: hasImageFillInSubtree(root),
+    }
+}
+
+/**
+ * 점수 기반 PNG vs JPG (동기). 최종은 imageExportNeedsPngAsync에서 투명 강제 후 적용.
+ * @param {object} analysis analyzeExportFormatSubtree 결과
+ * @param {SceneNode} rootNode
+ * @returns {{ png: number, jpg: number }}
+ */
+function computeExportFormatScores(analysis, rootNode) {
+    var png = 0
+    var jpg = 0
+    if (analysis.hasText) png += 5
+    var vc = analysis.vectorCount
+    if (vc >= 2) png += 3
+    else if (analysis.hasImageFillSubtree && vc >= 1) png += 3
+    if (analysis.hasStroke) png += 2
+    if (analysis.hasAutoLayout) png += 2
+
+    if (analysis.hasImageFillSubtree) jpg += 5
+    var largeBitmapPx = 400 * 400
+    if (analysis.maxImageFillArea >= largeBitmapPx) jpg += 3
+    if (analysis.gradientCount >= 2) jpg += 2
+    if (analysis.effectPhotoLike) jpg += 2
+
+    var rootBox = rootNode ? getAbs(rootNode) : null
+    if (rootBox && rootBox.w != null && rootBox.h != null) {
+        var exportArea = rootBox.w * rootBox.h
+        if (exportArea >= 800 * 800) jpg += 3
+    }
+    return {png: png, jpg: jpg}
+}
+
+/** 서브트리에 보이는 SOLID stroke가 있으면 true (JPG는 경계가 번질 수 있음) */
+function hasVisibleSolidStrokeInSubtree(node) {
+    if (!node || !isVisible(node)) return false
+    try {
+        if (getFirstSolidStroke(node)) return true
+    } catch (e) {}
+    if (!isContainer(node) || !node.children) return false
+    for (var i = 0; i < node.children.length; i++) {
+        if (hasVisibleSolidStrokeInSubtree(node.children[i])) return true
+    }
+    return false
+}
+
+/**
+ * UI·아이콘성 벡터 개수 (사진판: RECT + IMAGE fill만·stroke 없음 → 제외)
+ * BOOLEAN_OPERATION은 1개로만 센 뒤 자식은 이중 집계 안 함
+ */
+function subtreeUiVectorElementCount(node) {
+    var total = 0
+    function walk(x) {
+        if (!x || !isVisible(x)) return
+        var t = x.type
+        if (t === "BOOLEAN_OPERATION") {
+            total++
+            return
+        }
+        if (t === "VECTOR" || t === "STAR" || t === "POLYGON" || t === "LINE") {
+            total++
+        } else if (t === "ELLIPSE") {
+            if (!isLineLikeNode(x)) total++
+        } else if (t === "RECTANGLE") {
+            var hasImg = hasImageFill(x)
+            var st = getFirstSolidStroke(x)
+            if (st) total++
+            else if (!hasImg) total++
+        }
+        if (isContainer(x) && x.children) {
+            for (var i = 0; i < x.children.length; i++) walk(x.children[i])
+        }
+    }
+    walk(node)
+    return total
+}
+
+/**
+ * PNG vs JPG — 점수제 휴리스틱 + 강제 룰
+ * 강제: 서브트리 실투명(opacity / fill opacity / 임베디드 이미지 알파) → 무조건 PNG
+ * 그 외: computeExportFormatScores → png >= jpg 이면 PNG
+ *
+ * @param {SceneNode} node
+ * @returns {Promise<boolean>}
+ */
+function imageExportNeedsPngAsync(node) {
+    if (!node) return Promise.resolve(false)
+    if (hasTransparencyInSubtreeSync(node)) return Promise.resolve(true)
+    return imageFillTransparencyInSubtreeAsync(node).then(function (bitmapAlpha) {
+        if (bitmapAlpha) return true
+        var analysis = analyzeExportFormatSubtree(node)
+        var scores = computeExportFormatScores(analysis, node)
+        return scores.png >= scores.jpg
+    })
+}
+/**
+ * imageHash 원본 그대로 반환(가능할 때).
+ * JPEG·PNG는 포맷 유지. (예전에는 불투명 PNG만 null → 래스터 JPG로 바뀌어 "PNG 넣었는데 jpg" 이슈 발생)
+ * WebP/GIF 등은 브라우저/HTML 호환·투명 이슈로 null → exportNodeImageAsync 경로
+ */
 function exportImageFillOnlyAsync(node) {
     if (!node) return Promise.resolve(null)
     try {
@@ -664,9 +1009,19 @@ function exportImageFillOnlyAsync(node) {
                     .getBytesAsync()
                     .then(function (bytes) {
                         if (!bytes || bytes.length === 0) return null
-                        var b64 = figma.base64Encode(bytes)
-                        var mime = bytes[0] === 0x89 && bytes[1] === 0x50 ? "image/png" : "image/jpeg"
-                        return "data:" + mime + ";base64," + b64
+                        if (isJpegBytes(bytes)) {
+                            return "data:image/jpeg;base64," + figma.base64Encode(bytes)
+                        }
+                        if (isPngBytes(bytes)) {
+                            return "data:image/png;base64," + figma.base64Encode(bytes)
+                        }
+                        if (webpBytesHasTransparency(bytes) || gifBytesHasTransparency(bytes)) {
+                            return null
+                        }
+                        if (isWebpBytes(bytes) || isGifBytes(bytes)) {
+                            return null
+                        }
+                        return null
                     })
                     .catch(function () {
                         return null
@@ -698,6 +1053,29 @@ function exportNodeImageFillOnlyAsync(node) {
         return Promise.resolve(null)
     }
 }
+
+/**
+ * IMAGE fill이 있으면 Figma imageHash 원본(JPEG/PNG)을 최우선.
+ * 리프 RECT만 있던 경우 예전에는 곧바로 exportNodeImageAsync → JPG 재인코딩되어
+ * "피그마엔 PNG인데 산출물은 jpg"가 발생함.
+ * @param {SceneNode} node
+ * @returns {Promise<string|null>}
+ */
+function exportImagePreferSourceBytesAsync(node) {
+    return exportImageFillOnlyAsync(node).then(function (dataUrl) {
+        if (dataUrl) return dataUrl
+        var useFillClone =
+            hasImageFill(node) &&
+            isContainer(node) &&
+            node.children &&
+            node.children.some(function (c) {
+                return c && isVisible(c)
+            })
+        if (useFillClone) return exportNodeImageFillOnlyAsync(node)
+        return exportNodeImageAsync(node)
+    })
+}
+
 /** VECTOR 계열 타입 목록 (UI 필터와 공유) */
 var VECTOR_TYPES = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "LINE", "ELLIPSE", "POLYGON", "RECTANGLE"]
 /** 타입이 VECTOR 계열인지 */
@@ -751,16 +1129,6 @@ function hasVisibleFillWithOpacityLessThanOne(node) {
             if (f && f.visible !== false && typeof f.opacity === "number" && f.opacity < 1) return true
         }
     } catch (e) {}
-    return false
-}
-
-/** 투명도 필요 시 true → PNG export. (텍스트/벡터/opacity<1 등) */
-function needsTransparencyForExport(node) {
-    if (!node) return false
-    if (typeof node.opacity === "number" && node.opacity < 1) return true
-    if (node.type === "TEXT") return true
-    if (isVectorOnlyTree(node)) return true
-    if (hasVisibleFillWithOpacityLessThanOne(node)) return true
     return false
 }
 
@@ -1110,12 +1478,11 @@ var IMAGE_EXPORT_MAX_WIDTH = 200   // 미리보기
 var IMAGE_EXPORT_ZIP_WIDTH = 1200  // ZIP 내보내기
 var _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
 
-/** 노드 PNG/JPG export. 투명 필요 시 PNG, 아니면 JPG 우선(API는 'JPG' 키워드) */
+/** 노드 PNG/JPG export — imageExportNeedsPngAsync(투명 강제 + 점수제) 후 JPG 우선·실패 시 PNG */
 function exportNodeImageAsync(node) {
     if (!node) return Promise.resolve(null)
     try {
         var isText = node.type === "TEXT"
-        var usePng = needsTransparencyForExport(node)
         var w = _currentExportWidth
         /** @param {"PNG"|"JPG"} format */
         function doExport(format, widthOrNull, extraOpts) {
@@ -1149,7 +1516,7 @@ function exportNodeImageAsync(node) {
                 return doExport(fmt, null, textOpts)
             })
         }
-        function trySequence() {
+        function trySequence(usePng) {
             if (usePng) {
                 return tryFormatSequence("PNG")
             }
@@ -1158,7 +1525,9 @@ function exportNodeImageAsync(node) {
                 return tryFormatSequence("PNG")
             })
         }
-        return trySequence()
+        return imageExportNeedsPngAsync(node).then(function (usePng) {
+            return trySequence(usePng)
+        })
     } catch (e) {
         return Promise.resolve(null)
     }
@@ -1655,6 +2024,98 @@ function dedupeCssDecl(decl) {
     return Object.keys(map).map(function (k) { return k + ":" + map[k] }).join(";")
 }
 
+/**
+ * `.ap-section--01 …` 형태 선택자에서 섹션 번호와, 쉼표로 확장된 공통 inner 선택자만 추출.
+ * @returns {{ sec: string, inner: string|null }|null}  inner가 null이면 섹션 루트만 대상
+ */
+function parseSectionScopedSelector(sel) {
+    sel = String(sel || "").trim()
+    var mRoot = /^\.ap-section--(\d+)\s*$/.exec(sel)
+    if (mRoot) return { sec: mRoot[1], inner: null }
+    var m = /^\.ap-section--(\d+)\s+(.+)$/.exec(sel)
+    if (!m) return null
+    var sec = m[1]
+    var rest = m[2]
+    var re = new RegExp(",\\s*\\.ap-section--" + sec + "\\s+", "g")
+    var inner = rest.replace(re, ", ")
+    return { sec: sec, inner: inner }
+}
+
+/**
+ * 여러 섹션에 걸친 동일 선언(decl) 규칙을 쉼표 선택자 한 줄로 합침 (HTML 변경 없음).
+ * 동일 decl + 동일 inner가 2회 이상일 때만 병합.
+ */
+function consolidateDeferredStylesBySharedDecl(styles) {
+    if (!styles || styles.length < 2) return styles
+    var n = styles.length
+    var meta = []
+    var groups = Object.create(null)
+
+    for (var i = 0; i < n; i++) {
+        var s = styles[i]
+        var sel = s && s.sel ? String(s.sel).trim() : ""
+        var declNorm = dedupeCssDecl(s && s.decl ? String(s.decl) : "")
+        var parsed = parseSectionScopedSelector(sel)
+        meta[i] = { sel: sel, decl: declNorm, parsed: parsed }
+        if (!declNorm || !parsed) continue
+        var innerKey = parsed.inner === null ? "\x00ROOT\x00" : parsed.inner
+        var gkey = declNorm + "\x00" + innerKey
+        if (!groups[gkey]) groups[gkey] = []
+        groups[gkey].push(i)
+    }
+
+    var mergedMember = Object.create(null)
+    var out = []
+
+    for (var gk in groups) {
+        if (!Object.prototype.hasOwnProperty.call(groups, gk)) continue
+        var idxs = groups[gk]
+        if (idxs.length < 2) continue
+        var p0 = meta[idxs[0]].parsed
+        if (!p0) continue
+        var inner0 = p0.inner
+        for (var ii = 0; ii < idxs.length; ii++) mergedMember[idxs[ii]] = true
+        var secs = []
+        for (var si = 0; si < idxs.length; si++) {
+            var sc = meta[idxs[si]].parsed.sec
+            if (secs.indexOf(sc) === -1) secs.push(sc)
+        }
+        secs.sort(function (a, b) {
+            var na = parseInt(a, 10)
+            var nb = parseInt(b, 10)
+            if (na !== nb) return na - nb
+            return String(a).localeCompare(String(b))
+        })
+        var selParts = []
+        for (var sj = 0; sj < secs.length; sj++) {
+            if (inner0 === null) selParts.push(".ap-section--" + secs[sj])
+            else selParts.push(".ap-section--" + secs[sj] + " " + inner0)
+        }
+        var minIdx = idxs[0]
+        for (var mk = 1; mk < idxs.length; mk++) {
+            if (idxs[mk] < minIdx) minIdx = idxs[mk]
+        }
+        out.push({ sel: selParts.join(", "), decl: meta[idxs[0]].decl, _order: minIdx })
+    }
+
+    for (var j = 0; j < n; j++) {
+        if (mergedMember[j]) continue
+        var m = meta[j]
+        out.push({
+            sel: m.sel,
+            decl: m.decl || dedupeCssDecl(styles[j] && styles[j].decl ? String(styles[j].decl) : ""),
+            _order: j,
+        })
+    }
+
+    out.sort(function (a, b) {
+        if (a._order !== b._order) return a._order - b._order
+        return String(a.sel).localeCompare(String(b.sel))
+    })
+    for (var r = 0; r < out.length; r++) delete out[r]._order
+    return out
+}
+
 var ASSETS_IMAGES_PREFIX = "assets/images/"
 /** 프로젝트명 → 파일명에 쓸 수 있는 문자열 (공백·특수문자 제거) */
 function normalizeProjectName(s) {
@@ -1746,19 +2207,10 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
     if (!hasImg) return Promise.resolve(parts.join(";"))
 
     var dataUrlPromise
-    var fillOnly = useCssVarsForSection && hasImageFill(node)
-    if (!fillOnly && hasImageFill(node) && isContainer(node)) {
-        var hasVisibleChildren = node.children && node.children.some(function (c) { return c && isVisible(c) })
-        if (hasVisibleChildren) fillOnly = true
-    }
-    if (fillOnly) {
-        dataUrlPromise = exportImageFillOnlyAsync(node).then(function (dataUrl) {
-            return dataUrl || exportNodeImageFillOnlyAsync(node)
-        })
-    } else if (cache && cache.image && node.id != null && cache.image[node.id]) {
+    if (cache && cache.image && node.id != null && cache.image[node.id]) {
         dataUrlPromise = Promise.resolve(cache.image[node.id])
     } else {
-        dataUrlPromise = exportNodeImageAsync(node)
+        dataUrlPromise = exportImagePreferSourceBytesAsync(node)
     }
 
     return dataUrlPromise
@@ -2444,10 +2896,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                 props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(section, 코드 생성 시 fill만 사용)")
                 return addChildren()
             }
-            var useFillOnly = isContainer(node) && node.children && node.children.some(function (c) { return c && isVisible(c) })
-            var exportPromise = useFillOnly
-                ? exportImageFillOnlyAsync(node).then(function (dataUrl) { return dataUrl || exportNodeImageFillOnlyAsync(node) })
-                : exportNodeImageAsync(node)
+            var exportPromise = exportImagePreferSourceBytesAsync(node)
             return exportPromise.then(function (dataUrl) {
                 if (node.id != null && dataUrl) cache.image[node.id] = dataUrl
                 var secNo = sectionIndex != null ? sectionIndex : 1
@@ -2717,6 +3166,377 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
         return isBtnNode(node) ? html : wrapIfBtn(node, html, depth)
     }
 
+    // TEXT: 허용 폰트 목록에 없으면 이미지로 내보냄 (project 이미지와 동일하게 path 사용)
+    function renderTextNodeAsync(node, parent, secNo, secClass, depth, opts) {
+        var id = node.id != null ? String(node.id) : ""
+        var dataIdAttr = ""
+        var textAbs = isAbsoluteLike(node, parent)
+        var textCls = apNodeClassList("ap-text" + (textAbs ? " ap-abs" : ""), id, opts)
+        return getTextSummaryAsync(node)
+            .then(function (ts) {
+                var allowed = cache.allowedFonts || []
+                var fontFamilyLower = (ts.fontFamily || "").toLowerCase().trim()
+                var families = ts.fontFamilies && ts.fontFamilies.length ? ts.fontFamilies : ts.fontFamily ? [ts.fontFamily] : []
+                var fontAllowed =
+                    allowed.length === 0 ||
+                    (families.length > 0 &&
+                        families.every(function (f) {
+                            return allowed.indexOf(String(f).toLowerCase().trim()) >= 0
+                        }))
+
+                if (fontAllowed) {
+                    pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, true, opts)
+                    return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
+                }
+
+                return exportNodeImageAsync(node)
+                    .then(function (dataUrl) {
+                        if (!dataUrl) {
+                            pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, true, opts)
+                            return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
+                        }
+                        if (node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
+                        var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, { skipExport: isVideoNode(node) }) : dataUrl
+                        var altText = getImageAltText(node)
+                        if (id) ctx.ownImageNodeIds[id] = true
+                        var imgWrapCls = apNodeClassList("ap-image", id, opts)
+                        pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, false)
+                        return wrapIfBtn(node, indent(depth) + '<div class="' + imgWrapCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>', depth)
+                    })
+                    .catch(function () {
+                        pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, false, opts)
+                        return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
+                    })
+            })
+            .catch(function () {
+                var tag = textNodeTag(node, textCls, dataIdAttr, depth)
+                return indent(depth) + tag.open + tag.close
+            })
+    }
+
+    // VECTOR — LINE/line/ELLIPSE는 CSS로 그리기, 나머지는 SVG export
+    function renderVectorNodeAsync(node, parent, secNo, secClass, depth, opts) {
+        var id = node.id != null ? String(node.id) : ""
+        if (isLineLikeNode(node)) {
+            var lineAbs = isAbsoluteLike(node, parent)
+            var lineParentWraps = parent && parent.type === "FRAME" && isContainer(parent)
+            var lineNeedWrapper = lineAbs && (!lineParentWraps || (node.type === "FRAME" && isContainer(node)))
+            if (lineAbs && id) {
+                var lineAbsDecl = buildAbsDecl(node, parent)
+                if (lineAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), lineAbsDecl)
+            }
+            var lineVars = buildLineVarsDecl(node)
+            if (lineVars) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), lineVars)
+            var lineCls = apNodeClassList("ap-line" + (lineNeedWrapper ? " ap-abs" : ""), id, opts)
+            var lineHtml = '<div class="' + lineCls + '"></div>'
+            return Promise.resolve(wrapIfBtn(node, indent(depth) + lineHtml, depth))
+        }
+        if (node.type === "ELLIPSE") {
+            var ellipseAbs = isAbsoluteLike(node, parent)
+            var ellipseParentWraps = parent && parent.type === "FRAME" && isContainer(parent)
+            var ellipseNeedWrapper = ellipseAbs && (!ellipseParentWraps || (node.type === "FRAME" && isContainer(node)))
+            if (ellipseAbs && id) {
+                var ellipseAbsDecl = buildAbsDecl(node, parent)
+                if (ellipseAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), ellipseAbsDecl)
+            }
+            var ellipseVars = buildEllipseVarsDecl(node)
+            if (ellipseVars) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), ellipseVars)
+            var ellipseCls = apNodeClassList("ap-ellipse" + (ellipseNeedWrapper ? " ap-abs" : ""), id, opts)
+            var ellipseHtml = '<div class="' + ellipseCls + '"></div>'
+            return Promise.resolve(wrapIfBtn(node, indent(depth) + ellipseHtml, depth))
+        }
+        return exportNodeSvgAsync(node).then(function (dataUrl) {
+            if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
+            var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, { skipExport: isVideoNode(node) }) : dataUrl || ""
+            var altText = getImageAltText(node)
+            if (id) ctx.ownImageNodeIds[id] = true
+            var svgImgCls = apNodeClassList("ap-image", id, opts)
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, false)
+            var html = indent(depth) + '<div class="' + svgImgCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>'
+            return wrapIfBtn(node, html, depth)
+        })
+    }
+
+    // IMAGE (단일 이미지 또는 컴포지트 → 하나의 이미지로 export)
+    // 컨테이너에 텍스트가 있으면 이미지로보내지 않고 자식 재귀 렌더 (텍스트 유지)
+    // 겹친 composite(clipsContent)일 때만 한 장으로 export. 분리된 이미지 2개 이상이면 ap-frame으로 풀어서 각각 figure로
+    function renderImageNodeAsync(node, parent, secNo, secClass, depth, opts) {
+        var id = node.id != null ? String(node.id) : ""
+        if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeOneImage(node)) {
+            var absImgGrp = isAbsoluteLike(node, parent)
+            var declPartsImgGrp = []
+            return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgImgGrp) {
+                if (bgImgGrp) declPartsImgGrp.push(bgImgGrp)
+                var strokeImgGrp = buildStrokeDecl(node)
+                if (strokeImgGrp) declPartsImgGrp.push(strokeImgGrp)
+                if (absImgGrp) {
+                    var absImgGrpDecl = buildAbsDecl(node, parent)
+                    if (absImgGrpDecl) declPartsImgGrp.push(absImgGrpDecl)
+                }
+                if (isFlex(node)) {
+                    var lvImgGrp = getLayoutVars(node)
+                    var flexImgGrp = buildFlexVarsDecl(lvImgGrp)
+                    if (flexImgGrp) declPartsImgGrp.push(flexImgGrp)
+                }
+                var fillWImgGrp = getFillFlexStartWidthDecl(node, parent)
+                if (fillWImgGrp) declPartsImgGrp.push(fillWImgGrp)
+                if (declPartsImgGrp.length && id) {
+                    pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declPartsImgGrp.join(";"))
+                }
+                var linesImgGrp = []
+                var imgGrpFrameCls = apNodeClassList("ap-frame" + (absImgGrp ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : ""), id, opts)
+                linesImgGrp.push(indent(depth) + '<div class="' + imgGrpFrameCls + '">')
+                var childrenImgGrp = node.children || []
+                var idxImg = 0
+                function nextImgCh() {
+                    if (idxImg >= childrenImgGrp.length) {
+                        linesImgGrp.push(indent(depth) + "</div>")
+                        return Promise.resolve(wrapIfBtn(node, linesImgGrp.join("\n"), depth))
+                    }
+                    var cImg = childrenImgGrp[idxImg++]
+                    if (!cImg || (!(opts && opts.includeHidden) && !isVisible(cImg))) return nextImgCh()
+                    return renderNodeAsync(cImg, node, secNo, secClass, depth + 1, opts).then(function (htmlImg) {
+                        if (htmlImg) linesImgGrp.push(htmlImg)
+                        return nextImgCh()
+                    })
+                }
+                return nextImgCh()
+            })
+        }
+        var imgAbs = isAbsoluteLike(node, parent)
+        return exportImagePreferSourceBytesAsync(node).then(function (dataUrl) {
+            if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
+            var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, { skipExport: isVideoNode(node) }) : dataUrl || ""
+            if (imgAbs && id) {
+                var imgAbsDecl = buildAbsDecl(node, parent)
+                if (imgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), imgAbsDecl)
+            }
+            var altText = getImageAltText(node)
+            if (id) ctx.ownImageNodeIds[id] = true
+            var figureCls = apNodeClassList("ap-image" + (imgAbs ? " ap-abs" : ""), id, opts)
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs)
+            var figureHtml = '<div class="' + figureCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>'
+            return wrapIfBtn(node, indent(depth) + figureHtml, depth)
+        })
+    }
+
+    function renderFrameNodeAsync(node, parent, secNo, secClass, depth, opts) {
+        var id = node.id != null ? String(node.id) : ""
+        var abs = isAbsoluteLike(node, parent)
+        var flex = isFlex(node)
+        var box = getAbs(node)
+        var parentBox = parent ? getAbs(parent) : null
+        var isFullWidth = node.layoutSizingHorizontal === "FILL" ||
+            (parentBox && box && box.w != null && parentBox.w != null && r2(box.w) === r2(parentBox.w))
+
+        var cls = apNodeClassList("ap-frame" + (abs ? " ap-abs" : "") + (flex ? " ap-flex" : ""), id, opts)
+
+        // style decl for this frame: flex vars + bg (frame는 background-image 가능)
+        var declParts = []
+
+        if (flex) {
+            var lv = getLayoutVars(node)
+            var flexDecl = buildFlexVarsDecl(lv)
+            if (flexDecl) declParts.push(flexDecl)
+        }
+
+        if (isFullWidth) {
+
+            declParts.push("width:100%")
+
+        }
+
+        if (!isFullWidth) {
+            var fillWidthDecl = getFillFlexStartWidthDecl(node, parent)
+            if (fillWidthDecl) declParts.push(fillWidthDecl)
+            else if (!abs) {
+                var sizingH = node.layoutSizingHorizontal
+                if (sizingH === "FIXED" && box && box.w != null) declParts.push("width:calc(" + box.w + "/var(--ap-width)*100cqi)")
+            }
+        }
+
+        // frame height: 배경(fill/이미지) 또는 stroke가 있을 때만 고정. 없으면 생략해 콘텐츠 증가 시 유지보수에 유리.
+        return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl) {
+            if (bgDecl) {
+                declParts.push(bgDecl)
+                var hasWidth = declParts.some(function (s) { return String(s).indexOf("width:") !== -1 })
+                if (box && box.w != null && !hasWidth) declParts.push("width:calc(" + box.w + "/var(--ap-width)*100cqi)")
+            }
+            var strokeDecl = buildStrokeDecl(node)
+            if (strokeDecl) declParts.push(strokeDecl)
+            var radiusDecl = buildCornerRadiusDecl(node)
+            if (radiusDecl) declParts.push(radiusDecl)
+            // min-height: 시각적 영역이 있을 때 최소 높이만 지정 → 콘텐츠가 늘어나도 잘리지 않고 유연하게 확장.
+            // ・배경(fill/이미지): bgDecl
+            // ・테두리: strokeDecl
+            // ・모서리 둥글기: radiusDecl (박스 느낌 있음)
+            // ・height 대신 min-height 사용 시 다국어/긴 텍스트 오버플로우 방지.
+            if (box && box.h != null && (bgDecl || strokeDecl || radiusDecl)) declParts.push("min-height:calc(" + box.h + "/var(--ap-width)*100cqi)")
+
+            // abs 좌표(부모 기준)
+            if (abs) {
+                var absDecl = buildAbsDecl(node, parent)
+                if (absDecl) declParts.push(absDecl)
+            }
+
+            if (declParts.length) {
+                pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declParts.join(";"))
+            }
+
+            var isFrameBtn = isBtnNode(node)
+            var frameTag = isFrameBtn ? "a" : "div"
+            var frameTagOpen = "<" + frameTag + (isFrameBtn ? ' href="#"' : "") + ' class="' + cls + '">'
+            var lines = []
+            lines.push(indent(depth) + frameTagOpen)
+
+            // children
+            var children = node.children || []
+            var i = 0
+            function nextChild() {
+                if (i >= children.length) {
+                    lines.push(indent(depth) + "</" + frameTag + ">")
+                    var frameHtml = lines.join("\n")
+                    return Promise.resolve(isFrameBtn ? frameHtml : wrapIfBtn(node, frameHtml, depth))
+                }
+                var ch = children[i++]
+                if (!ch || !isVisible(ch)) return nextChild()
+
+                // AutoLayout parent 안에서 ABS면 child가 FRAME이 아니어도 ap-abs wrapper 필요. 부모가 non-flex면 전부 absolute 처리.
+                var chAbs = isAbsoluteLike(ch, node)
+
+                // child가 FRAME이면 자체가 wrapper라서 추가 wrapper 없이 처리해도 되지만,
+                // TEXT/IMAGE/기타 컨테이너는 wrapper(div)로 abs/배경 처리
+                if (ch.type === "FRAME" && isContainer(ch)) {
+                    return renderNodeAsync(ch, node, secNo, secClass, depth + 1, opts).then(function (html) {
+                        if (html) lines.push(html)
+                        return nextChild()
+                    })
+                }
+
+                if (!chAbs && (ch.type === "LINE" || ch.type === "ELLIPSE" || isLineLikeNode(ch))) {
+                    return renderNodeAsync(ch, node, secNo, secClass, depth + 1, opts).then(function (html) {
+                        if (html) lines.push(html)
+                        return nextChild()
+                    })
+                }
+
+                var itemId = ch.id ? String(ch.id) : ""
+                var leafSel = getLeafSelectorForNode(ch, opts)
+                var isChContainer = isContainer(ch)
+
+                return Promise.all([
+                    buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}),
+                    (function () {
+                        if (!chAbs) return Promise.resolve("")
+                        var absDecl2 = buildAbsDecl(ch, node)
+                        return Promise.resolve(absDecl2 || "")
+                    })(),
+                    (function () {
+                        if (!isFlex(ch)) return Promise.resolve("")
+                        var lv2 = getLayoutVars(ch)
+                        return Promise.resolve(buildFlexVarsDecl(lv2))
+                    })(),
+                ]).then(function (res) {
+                    var itemDeclParts = [res[2], res[0]].filter(Boolean)
+                    if (res[1] && !isImageCandidate(ch)) itemDeclParts.push(res[1])
+                    var strokeDeclCh = buildStrokeDecl(ch)
+                    if (strokeDeclCh) itemDeclParts.push(strokeDeclCh)
+                    var fillWidthCh = getFillFlexStartWidthDecl(ch, node)
+                    if (fillWidthCh) itemDeclParts.push(fillWidthCh)
+                    var itemDecl = itemDeclParts.join(";")
+
+                    if (itemDecl && leafSel) {
+                        pushDeferredStyle(ctx, selInSection(secClass, leafSel), itemDecl)
+                    }
+
+                    // GROUP 등 컨테이너는 renderNodeAsync가 ap-frame 래퍼를 이미 출력
+                    if (isChContainer) {
+                        return renderNodeAsync(ch, node, secNo, secClass, depth + 1, opts).then(function (innerHtml) {
+                            if (innerHtml) lines.push(innerHtml)
+                            return nextChild()
+                        })
+                    }
+                    return renderNodeAsync(ch, node, secNo, secClass, depth + 1, opts).then(function (innerHtml) {
+                        if (innerHtml) lines.push(innerHtml)
+                        return nextChild()
+                    })
+                })
+            }
+
+            return nextChild()
+        })
+    }
+
+    // 기타 컨테이너: wrapper로 children 탐색
+    function renderGenericContainerAsync(node, parent, secNo, secClass, depth, opts) {
+        var id = node.id != null ? String(node.id) : ""
+        var abs2 = isAbsoluteLike(node, parent)
+        var declParts2Visual = []  // 배경/테두리/abs → 있으면 반드시 ap-frame 유지
+        var declParts2Flex = []
+
+        return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl2) {
+            if (bgDecl2) declParts2Visual.push(bgDecl2)
+            var strokeDecl2 = buildStrokeDecl(node)
+            if (strokeDecl2) declParts2Visual.push(strokeDecl2)
+
+            if (abs2) {
+                var absDecl3 = buildAbsDecl(node, parent)
+                if (absDecl3) declParts2Visual.push(absDecl3)
+            }
+
+            if (isFlex(node)) {
+                var lv3 = getLayoutVars(node)
+                var flexDecl3 = buildFlexVarsDecl(lv3)
+                if (flexDecl3) declParts2Flex.push(flexDecl3)
+            }
+
+            var fillWidthDecl2 = getFillFlexStartWidthDecl(node, parent)
+            if (fillWidthDecl2) declParts2Flex.push(fillWidthDecl2)
+
+            var children2 = node.children || []
+            var visibleChildren = children2.filter(function (c) { return c && (opts && opts.includeHidden ? true : isVisible(c)) })
+            var singleChild = visibleChildren.length === 1 ? visibleChildren[0] : null
+            var groupHasVisualAttrs = declParts2Visual.length > 0
+            var declParts2 = declParts2Visual.concat(declParts2Flex)
+            var groupHasAttrs = declParts2.length > 0
+            var skipGroupWrapper = singleChild && !groupHasVisualAttrs
+
+            if (groupHasAttrs && id && !skipGroupWrapper) {
+                pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declParts2.join(";"))
+            }
+
+            if (skipGroupWrapper) {
+                if (declParts2Flex.length > 0) {
+                    var childSel = getLeafSelectorForNode(singleChild, opts)
+                    if (childSel) pushDeferredStyle(ctx, selInSection(secClass, childSel), declParts2Flex.join(";"))
+                }
+                return renderNodeAsync(singleChild, node, secNo, secClass, depth, opts)
+            }
+
+            var isGroupBtn = isBtnNode(node)
+            var groupTag = isGroupBtn ? "a" : "div"
+            var frameCls = apNodeClassList("ap-frame" + (abs2 ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : ""), id, opts)
+            var groupTagOpen = "<" + groupTag + (isGroupBtn ? ' href="#"' : "") + ' class="' + frameCls + '">'
+            var lines2 = []
+            lines2.push(indent(depth) + groupTagOpen)
+            var j = 0
+            function next2() {
+                if (j >= children2.length) {
+                    lines2.push(indent(depth) + "</" + groupTag + ">")
+                    var containerHtml = lines2.join("\n")
+                    return Promise.resolve(isGroupBtn ? containerHtml : wrapIfBtn(node, containerHtml, depth))
+                }
+                var ch2 = children2[j++]
+                if (!ch2 || (!(opts && opts.includeHidden) && !isVisible(ch2))) return next2()
+                return renderNodeAsync(ch2, node, secNo, secClass, depth + 1, opts).then(function (html2) {
+                    if (html2) lines2.push(html2)
+                    return next2()
+                })
+            }
+            return next2()
+        })
+    }
+
     // 개별 노드를 HTML로 렌더링 (abs/flex/text/img 등)
     function renderNodeAsync(node, parent, secNo, secClass, depth, opts) {
         if (!node) return Promise.resolve("")
@@ -2724,52 +3544,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
 
         var id = node.id != null ? String(node.id) : ""
         if (id) ctx.exportedNodeIds[id] = true
-        var dataIdAttr = ""
 
-        // TEXT: 허용 폰트 목록에 없으면 이미지로 내보냄 (project 이미지와 동일하게 path 사용)
         if (node.type === "TEXT") {
-            var textAbs = isAbsoluteLike(node, parent)
-            var textCls = apNodeClassList("ap-text" + (textAbs ? " ap-abs" : ""), id, opts)
-            return getTextSummaryAsync(node)
-                .then(function (ts) {
-                    var allowed = cache.allowedFonts || []
-                    var fontFamilyLower = (ts.fontFamily || "").toLowerCase().trim()
-                    var families = ts.fontFamilies && ts.fontFamilies.length ? ts.fontFamilies : ts.fontFamily ? [ts.fontFamily] : []
-                    var fontAllowed =
-                        allowed.length === 0 ||
-                        (families.length > 0 &&
-                            families.every(function (f) {
-                                return allowed.indexOf(String(f).toLowerCase().trim()) >= 0
-                            }))
-
-                    if (fontAllowed) {
-                        pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, true, opts)
-                        return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
-                    }
-
-                    return exportNodeImageAsync(node)
-                        .then(function (dataUrl) {
-                            if (!dataUrl) {
-                                pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, true, opts)
-                                return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
-                            }
-                            if (node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-                            var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, { skipExport: isVideoNode(node) }) : dataUrl
-                            var altText = getImageAltText(node)
-                            if (id) ctx.ownImageNodeIds[id] = true
-                            var imgWrapCls = apNodeClassList("ap-image", id, opts)
-                            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, false)
-                            return wrapIfBtn(node, indent(depth) + '<div class="' + imgWrapCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>', depth)
-                        })
-                        .catch(function () {
-                            pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, false, opts)
-                            return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
-                        })
-                })
-                .catch(function () {
-                    var tag = textNodeTag(node, textCls, dataIdAttr, depth)
-                    return indent(depth) + tag.open + tag.close
-                })
+            return renderTextNodeAsync(node, parent, secNo, secClass, depth, opts)
         }
 
         // 레이어 이름이 video면 그룹/프레임 여부와 관계없이 비디오 플레이스홀더로 출력
@@ -2791,321 +3568,23 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
 
         // VECTOR — LINE/line/ELLIPSE는 CSS로 그리기, 나머지는 SVG export
         if (isVectorOnlyTree(node)) {
-            if (isLineLikeNode(node)) {
-                var lineAbs = isAbsoluteLike(node, parent)
-                var lineParentWraps = parent && parent.type === "FRAME" && isContainer(parent)
-                var lineNeedWrapper = lineAbs && (!lineParentWraps || (node.type === "FRAME" && isContainer(node)))
-                if (lineAbs && id) {
-                    var lineAbsDecl = buildAbsDecl(node, parent)
-                    if (lineAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), lineAbsDecl)
-                }
-                var lineVars = buildLineVarsDecl(node)
-                if (lineVars) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), lineVars)
-                var lineCls = apNodeClassList("ap-line" + (lineNeedWrapper ? " ap-abs" : ""), id, opts)
-                var lineHtml = '<div class="' + lineCls + '"></div>'
-                return Promise.resolve(wrapIfBtn(node, indent(depth) + lineHtml, depth))
-            }
-            if (node.type === "ELLIPSE") {
-                var ellipseAbs = isAbsoluteLike(node, parent)
-                var ellipseParentWraps = parent && parent.type === "FRAME" && isContainer(parent)
-                var ellipseNeedWrapper = ellipseAbs && (!ellipseParentWraps || (node.type === "FRAME" && isContainer(node)))
-                if (ellipseAbs && id) {
-                    var ellipseAbsDecl = buildAbsDecl(node, parent)
-                    if (ellipseAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), ellipseAbsDecl)
-                }
-                var ellipseVars = buildEllipseVarsDecl(node)
-                if (ellipseVars) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), ellipseVars)
-                var ellipseCls = apNodeClassList("ap-ellipse" + (ellipseNeedWrapper ? " ap-abs" : ""), id, opts)
-                var ellipseHtml = '<div class="' + ellipseCls + '"></div>'
-                return Promise.resolve(wrapIfBtn(node, indent(depth) + ellipseHtml, depth))
-            }
-            return exportNodeSvgAsync(node).then(function (dataUrl) {
-                if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-                var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, { skipExport: isVideoNode(node) }) : dataUrl || ""
-                var altText = getImageAltText(node)
-                if (id) ctx.ownImageNodeIds[id] = true
-                var svgImgCls = apNodeClassList("ap-image", id, opts)
-                pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, false)
-                var html = indent(depth) + '<div class="' + svgImgCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>'
-                return wrapIfBtn(node, html, depth)
-            })
+            return renderVectorNodeAsync(node, parent, secNo, secClass, depth, opts)
         }
 
         // IMAGE (단일 이미지 또는 컴포지트 → 하나의 이미지로 export)
         // 컨테이너에 텍스트가 있으면 이미지로 내보내지 않고 자식 재귀 렌더 (텍스트 유지)
         // 겹친 composite(clipsContent)일 때만 한 장으로 export. 분리된 이미지 2개 이상이면 ap-frame으로 풀어서 각각 figure로
         if (isImageCandidate(node) && !(isContainer(node) && hasTextInSubtree(node))) {
-            if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeOneImage(node)) {
-                var absImgGrp = isAbsoluteLike(node, parent)
-                var declPartsImgGrp = []
-                return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgImgGrp) {
-                    if (bgImgGrp) declPartsImgGrp.push(bgImgGrp)
-                    var strokeImgGrp = buildStrokeDecl(node)
-                    if (strokeImgGrp) declPartsImgGrp.push(strokeImgGrp)
-                    if (absImgGrp) {
-                        var absImgGrpDecl = buildAbsDecl(node, parent)
-                        if (absImgGrpDecl) declPartsImgGrp.push(absImgGrpDecl)
-                    }
-                    if (isFlex(node)) {
-                        var lvImgGrp = getLayoutVars(node)
-                        var flexImgGrp = buildFlexVarsDecl(lvImgGrp)
-                        if (flexImgGrp) declPartsImgGrp.push(flexImgGrp)
-                    }
-                    var fillWImgGrp = getFillFlexStartWidthDecl(node, parent)
-                    if (fillWImgGrp) declPartsImgGrp.push(fillWImgGrp)
-                    if (declPartsImgGrp.length && id) {
-                        pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declPartsImgGrp.join(";"))
-                    }
-                    var linesImgGrp = []
-                    var imgGrpFrameCls = apNodeClassList("ap-frame" + (absImgGrp ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : ""), id, opts)
-                    linesImgGrp.push(indent(depth) + '<div class="' + imgGrpFrameCls + '">')
-                    var childrenImgGrp = node.children || []
-                    var idxImg = 0
-                    function nextImgCh() {
-                        if (idxImg >= childrenImgGrp.length) {
-                            linesImgGrp.push(indent(depth) + "</div>")
-                            return Promise.resolve(wrapIfBtn(node, linesImgGrp.join("\n"), depth))
-                        }
-                        var cImg = childrenImgGrp[idxImg++]
-                        if (!cImg || (!(opts && opts.includeHidden) && !isVisible(cImg))) return nextImgCh()
-                        return renderNodeAsync(cImg, node, secNo, secClass, depth + 1, opts).then(function (htmlImg) {
-                            if (htmlImg) linesImgGrp.push(htmlImg)
-                            return nextImgCh()
-                        })
-                    }
-                    return nextImgCh()
-                })
-            }
-            var imgAbs = isAbsoluteLike(node, parent)
-            return exportNodeImageAsync(node).then(function (dataUrl) {
-                if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-                var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, { skipExport: isVideoNode(node) }) : dataUrl || ""
-                if (imgAbs && id) {
-                    var imgAbsDecl = buildAbsDecl(node, parent)
-                    if (imgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), imgAbsDecl)
-                }
-                var altText = getImageAltText(node)
-                if (id) ctx.ownImageNodeIds[id] = true
-                var figureCls = apNodeClassList("ap-image" + (imgAbs ? " ap-abs" : ""), id, opts)
-                pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs)
-                var figureHtml = '<div class="' + figureCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>'
-                return wrapIfBtn(node, indent(depth) + figureHtml, depth)
-            })
+            return renderImageNodeAsync(node, parent, secNo, secClass, depth, opts)
         }
 
         if (node.type === "FRAME" && isContainer(node)) {
-            var abs = isAbsoluteLike(node, parent)
-            var flex = isFlex(node)
-            var box = getAbs(node)
-            var parentBox = parent ? getAbs(parent) : null
-            var isFullWidth = node.layoutSizingHorizontal === "FILL" ||
-                (parentBox && box && box.w != null && parentBox.w != null && r2(box.w) === r2(parentBox.w))
-
-            var cls = apNodeClassList("ap-frame" + (abs ? " ap-abs" : "") + (flex ? " ap-flex" : ""), id, opts)
-
-            // style decl for this frame: flex vars + bg (frame는 background-image 가능)
-            var declParts = []
-
-            if (flex) {
-                var lv = getLayoutVars(node)
-                var flexDecl = buildFlexVarsDecl(lv)
-                if (flexDecl) declParts.push(flexDecl)
-            }
-
-            if (isFullWidth) {
-
-                declParts.push("width:100%")
-
-            }
-
-            if (!isFullWidth) {
-                var fillWidthDecl = getFillFlexStartWidthDecl(node, parent)
-                if (fillWidthDecl) declParts.push(fillWidthDecl)
-                else if (!abs) {
-                    var sizingH = node.layoutSizingHorizontal
-                    if (sizingH === "FIXED" && box && box.w != null) declParts.push("width:calc(" + box.w + "/var(--ap-width)*100cqi)")
-                }
-            }
-
-            // frame height: 배경(fill/이미지) 또는 stroke가 있을 때만 고정. 없으면 생략해 콘텐츠 증가 시 유지보수에 유리.
-            return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl) {
-                if (bgDecl) {
-                    declParts.push(bgDecl)
-                    var hasWidth = declParts.some(function (s) { return String(s).indexOf("width:") !== -1 })
-                    if (box && box.w != null && !hasWidth) declParts.push("width:calc(" + box.w + "/var(--ap-width)*100cqi)")
-                }
-                var strokeDecl = buildStrokeDecl(node)
-                if (strokeDecl) declParts.push(strokeDecl)
-                var radiusDecl = buildCornerRadiusDecl(node)
-                if (radiusDecl) declParts.push(radiusDecl)
-                // min-height: 시각적 영역이 있을 때 최소 높이만 지정 → 콘텐츠가 늘어나도 잘리지 않고 유연하게 확장.
-                // ・배경(fill/이미지): bgDecl
-                // ・테두리: strokeDecl
-                // ・모서리 둥글기: radiusDecl (박스 느낌 있음)
-                // ・height 대신 min-height 사용 시 다국어/긴 텍스트 오버플로우 방지.
-                if (box && box.h != null && (bgDecl || strokeDecl || radiusDecl)) declParts.push("min-height:calc(" + box.h + "/var(--ap-width)*100cqi)")
-
-                // abs 좌표(부모 기준)
-                if (abs) {
-                    var absDecl = buildAbsDecl(node, parent)
-                    if (absDecl) declParts.push(absDecl)
-                }
-
-                if (declParts.length) {
-                    pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declParts.join(";"))
-                }
-
-                var isFrameBtn = isBtnNode(node)
-                var frameTag = isFrameBtn ? "a" : "div"
-                var frameTagOpen = "<" + frameTag + (isFrameBtn ? ' href="#"' : "") + ' class="' + cls + '">'
-                var lines = []
-                lines.push(indent(depth) + frameTagOpen)
-
-                // children
-                var children = node.children || []
-                var i = 0
-                function nextChild() {
-                    if (i >= children.length) {
-                        lines.push(indent(depth) + "</" + frameTag + ">")
-                        var frameHtml = lines.join("\n")
-                        return Promise.resolve(isFrameBtn ? frameHtml : wrapIfBtn(node, frameHtml, depth))
-                    }
-                    var ch = children[i++]
-                    if (!ch || !isVisible(ch)) return nextChild()
-
-                    // AutoLayout parent 안에서 ABS면 child가 FRAME이 아니어도 ap-abs wrapper 필요. 부모가 non-flex면 전부 absolute 처리.
-                    var chAbs = isAbsoluteLike(ch, node)
-
-                    // child가 FRAME이면 자체가 wrapper라서 추가 wrapper 없이 처리해도 되지만,
-                    // TEXT/IMAGE/기타 컨테이너는 wrapper(div)로 abs/배경 처리
-                    if (ch.type === "FRAME" && isContainer(ch)) {
-                        return renderNodeAsync(ch, node, secNo, secClass, depth + 1, opts).then(function (html) {
-                            if (html) lines.push(html)
-                            return nextChild()
-                        })
-                    }
-
-                    if (!chAbs && (ch.type === "LINE" || ch.type === "ELLIPSE" || isLineLikeNode(ch))) {
-                        return renderNodeAsync(ch, node, secNo, secClass, depth + 1, opts).then(function (html) {
-                            if (html) lines.push(html)
-                            return nextChild()
-                        })
-                    }
-
-                    var itemId = ch.id ? String(ch.id) : ""
-                    var leafSel = getLeafSelectorForNode(ch, opts)
-                    var isChContainer = isContainer(ch)
-
-                    return Promise.all([
-                        buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}),
-                        (function () {
-                            if (!chAbs) return Promise.resolve("")
-                            var absDecl2 = buildAbsDecl(ch, node)
-                            return Promise.resolve(absDecl2 || "")
-                        })(),
-                        (function () {
-                            if (!isFlex(ch)) return Promise.resolve("")
-                            var lv2 = getLayoutVars(ch)
-                            return Promise.resolve(buildFlexVarsDecl(lv2))
-                        })(),
-                    ]).then(function (res) {
-                        var itemDeclParts = [res[2], res[0]].filter(Boolean)
-                        if (res[1] && !isImageCandidate(ch)) itemDeclParts.push(res[1])
-                        var strokeDeclCh = buildStrokeDecl(ch)
-                        if (strokeDeclCh) itemDeclParts.push(strokeDeclCh)
-                        var fillWidthCh = getFillFlexStartWidthDecl(ch, node)
-                        if (fillWidthCh) itemDeclParts.push(fillWidthCh)
-                        var itemDecl = itemDeclParts.join(";")
-
-                        if (itemDecl && leafSel) {
-                            pushDeferredStyle(ctx, selInSection(secClass, leafSel), itemDecl)
-                        }
-
-                        // GROUP 등 컨테이너는 renderNodeAsync가 ap-frame 래퍼를 이미 출력
-                        if (isChContainer) {
-                            return renderNodeAsync(ch, node, secNo, secClass, depth + 1, opts).then(function (innerHtml) {
-                                if (innerHtml) lines.push(innerHtml)
-                                return nextChild()
-                            })
-                        }
-                        return renderNodeAsync(ch, node, secNo, secClass, depth + 1, opts).then(function (innerHtml) {
-                            if (innerHtml) lines.push(innerHtml)
-                            return nextChild()
-                        })
-                    })
-                }
-
-                return nextChild()
-            })
+            return renderFrameNodeAsync(node, parent, secNo, secClass, depth, opts)
         }
 
         // 기타 컨테이너: wrapper로 children 탐색
         if (isContainer(node)) {
-            var abs2 = isAbsoluteLike(node, parent)
-            var declParts2Visual = []  // 배경/테두리/abs → 있으면 반드시 ap-frame 유지
-            var declParts2Flex = []
-
-            return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl2) {
-                if (bgDecl2) declParts2Visual.push(bgDecl2)
-                var strokeDecl2 = buildStrokeDecl(node)
-                if (strokeDecl2) declParts2Visual.push(strokeDecl2)
-
-                if (abs2) {
-                    var absDecl3 = buildAbsDecl(node, parent)
-                    if (absDecl3) declParts2Visual.push(absDecl3)
-                }
-
-                if (isFlex(node)) {
-                    var lv3 = getLayoutVars(node)
-                    var flexDecl3 = buildFlexVarsDecl(lv3)
-                    if (flexDecl3) declParts2Flex.push(flexDecl3)
-                }
-
-                var fillWidthDecl2 = getFillFlexStartWidthDecl(node, parent)
-                if (fillWidthDecl2) declParts2Flex.push(fillWidthDecl2)
-
-                var children2 = node.children || []
-                var visibleChildren = children2.filter(function (c) { return c && (opts && opts.includeHidden ? true : isVisible(c)) })
-                var singleChild = visibleChildren.length === 1 ? visibleChildren[0] : null
-                var groupHasVisualAttrs = declParts2Visual.length > 0
-                var declParts2 = declParts2Visual.concat(declParts2Flex)
-                var groupHasAttrs = declParts2.length > 0
-                var skipGroupWrapper = singleChild && !groupHasVisualAttrs
-
-                if (groupHasAttrs && id && !skipGroupWrapper) {
-                    pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declParts2.join(";"))
-                }
-
-                if (skipGroupWrapper) {
-                    if (declParts2Flex.length > 0) {
-                        var childSel = getLeafSelectorForNode(singleChild, opts)
-                        if (childSel) pushDeferredStyle(ctx, selInSection(secClass, childSel), declParts2Flex.join(";"))
-                    }
-                    return renderNodeAsync(singleChild, node, secNo, secClass, depth, opts)
-                }
-
-                var isGroupBtn = isBtnNode(node)
-                var groupTag = isGroupBtn ? "a" : "div"
-                var frameCls = apNodeClassList("ap-frame" + (abs2 ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : ""), id, opts)
-                var groupTagOpen = "<" + groupTag + (isGroupBtn ? ' href="#"' : "") + ' class="' + frameCls + '">'
-                var lines2 = []
-                lines2.push(indent(depth) + groupTagOpen)
-                var j = 0
-                function next2() {
-                    if (j >= children2.length) {
-                        lines2.push(indent(depth) + "</" + groupTag + ">")
-                        var containerHtml = lines2.join("\n")
-                        return Promise.resolve(isGroupBtn ? containerHtml : wrapIfBtn(node, containerHtml, depth))
-                    }
-                    var ch2 = children2[j++]
-                    if (!ch2 || (!(opts && opts.includeHidden) && !isVisible(ch2))) return next2()
-                    return renderNodeAsync(ch2, node, secNo, secClass, depth + 1, opts).then(function (html2) {
-                        if (html2) lines2.push(html2)
-                        return next2()
-                    })
-                }
-                return next2()
-            })
+            return renderGenericContainerAsync(node, parent, secNo, secClass, depth, opts)
         }
 
         // leaf 기타 (absolute면 ap-abs + 좌표)
@@ -3355,8 +3834,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
     return nextSection().then(function () {
         if (deferredStyles.length) {
             codeLines.push("")
-            for (var i = 0; i < deferredStyles.length; i++) {
-                var r = deferredStyles[i]
+            var consolidatedStyles = consolidateDeferredStylesBySharedDecl(deferredStyles)
+            for (var i = 0; i < consolidatedStyles.length; i++) {
+                var r = consolidatedStyles[i]
                 codeLines.push(r.sel + " { " + r.decl + " }")
             }
             codeLines.push("")

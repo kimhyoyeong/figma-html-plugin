@@ -644,11 +644,16 @@
               <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
               <option value="gpt-4o">gpt-4o</option>
             </select>
+            <label class="hint" style="display:inline-flex;align-items:center;gap:4px;margin:0;cursor:pointer;white-space:nowrap;" title="미리보기 에셋을 작은 JPEG로 줄여 alt 판별에만 사용 (API 토큰 절약)">
+              <input type="checkbox" id="aiVisionAlt" checked />
+              alt·썸네일
+            </label>
+            <input type="number" id="aiVisionMaxEdge" class="field" style="width:62px;" min="128" max="768" step="32" value="384" title="썸네일 긴 변 최대(px). 작을수록 용량·토큰 감소" />
             <span id="aiRefineStatus" class="hint" style="margin-left:0;font-size:11px;"></span>
           </div>
           <div id="aiAuditReport" style="display:none;max-height:360px;overflow:auto;font-size:10px;line-height:1.45;border:1px solid #dde4ea;border-radius:8px;padding:10px;background:#fff;color:#223;"></div>
           <div style="font-size:10px;color:#667;line-height:1.5;">
-            <b>분석</b> = SEO · GEO · 접근성 · 시멘틱 마크업 · alt · 헤딩 검수 리포트 /
+            <b>분석</b> = SEO · GEO · 접근성 · 시멘틱 마크업 · alt · 헤딩 검수 리포트 (alt·썸네일 켜면 에셋을 저해상도 JPEG로 첨부) /
             <b>반영</b> = 마지막 분석의 alt 제안을 그대로 적용 · 헤딩은 동일 분석의 <code>headingAudit</code>에 맞춰 패치 생성
           </div>
         </div>
@@ -1532,7 +1537,7 @@
       "- 애매하면 과도하게 추정하지 말고 ambiguous로 판단한다.",
       "",
       "출력 스타일:",
-      "- 결과는 간결하고 핵심만 작성한다.",
+      "- 결과는 간결하고 핵심만 작성한다. 한국어로 작성한다.",
       "- 동일한 문제를 여러 섹션에서 반복하지 않는다.",
       "- 의미 없는 나열 금지. 중요한 문제만 보고한다.",
       "- '문제 없으면 빈 배열'은 seo/geo/a11y/semantics의 issues·suggestions, headingAudit.issues 등에만 적용한다.",
@@ -1672,12 +1677,13 @@
             "섹션의 주제를 대표하는 텍스트만 heading 후보로 본다.",
             "h1은 반드시 .ap-section--01 내부에서만 찾는다.",
             "다른 섹션에서 h1을 뽑지 않는다.",
-            ".ap-section--01 안에 명확한 대표 제목이 없으면 억지로 h1을 만들지 말고 보류한다.",
             "주요 타이틀이 이미지 안에만 있으면 alt로 대체하지 말고, 숨김텍스트 형태의 h1 제공을 우선 제안한다.",
             "heading은 h1~h3 범위 안에서만 제안한다.",
             "레벨 스킵(h1 다음 바로 h3 등)은 만들지 않는다.",
             "문서 전체에 heading이 과도하게 많아지지 않게 한다.",
             "동일한 성격의 반복 카드/배너마다 heading을 남발하지 않는다.",
+            "마크업(플러그인 출력 규약): <span class=\"ap-text ap-section__title|subtitle...\"> 안에 <h1>-<h3>만 넣는 형태는 금지. span은 플로우/구문 모델상 헤딩의 부모로 쓰지 않는다.",
+            "원래 <span class=\"ap-text ap-section__title\">텍스트</span>를 헤딩으로 바꿀 때는 after를 <h2 class=\"ap-text ap-section__title\">텍스트</h2>처럼 작성한다. ap-text·ap-section__* 클래스는 헤딩 태그의 class에 합친다.",
             "headingPatches: [ { before: string, after: string }, ... ].",
             "before는 입력 HTML에서 정확히 한 번만 매칭될 수 있는 문자열로 작성한다.",
             "after는 필요한 최소 수정만 반영한 HTML이어야 한다.",
@@ -1746,12 +1752,189 @@
         .replace(/\{\{LANG\}\}/g, lang);
     }
 
-    function runOpenAiJsonApi(htmlCode, systemContent, userPrefix, userSuffix) {
+    /** 미리보기·ZIP과 동일 규칙으로 assets 경로 → dataUrl */
+    function buildPathToDataUrlMapFromPreview(previewList) {
+      var pathToDataUrl = {};
+      (previewList || []).forEach(function (item) {
+        if (!item) return;
+        var n = item.name != null ? String(item.name) : "";
+        var du = item.dataUrl != null ? String(item.dataUrl) : "";
+        if (!n || !du) return;
+        pathToDataUrl[n] = du;
+        pathToDataUrl[n.toLowerCase()] = du;
+      });
+      return pathToDataUrl;
+    }
+
+    function extractAssetPathFromImgSrc(src) {
+      var m = String(src || "").match(
+        /(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(_mo)?\.(?:png|jpg|jpeg|svg))/i
+      );
+      return m ? m[1] : "";
+    }
+
+    /** `_mo` → PC 파일명 (비전 첨부는 PC 에셋만 사용) */
+    function toPcAssetPath(relativePath) {
+      if (!relativePath) return "";
+      var p = String(relativePath);
+      if (/_mo\.(png|jpg|jpeg|svg)$/i.test(p)) {
+        return p.replace(/_mo\.(png|jpg|jpeg|svg)$/i, ".$1");
+      }
+      return p;
+    }
+
+    /** 항상 PC 경로로만 lookup (MO·PC 동일 화면이면 중복 전송 방지) */
+    function resolvePcOnlyPreviewDataUrl(src, pathToDataUrl) {
+      if (!src || !pathToDataUrl) return "";
+      var rel = extractAssetPathFromImgSrc(src);
+      if (!rel) return "";
+      var pcPath = toPcAssetPath(rel);
+      return pathToDataUrl[pcPath] || pathToDataUrl[pcPath.toLowerCase()] || "";
+    }
+
+    /** 판별용으로만 사용. PNG/SVG 등은 JPEG로 재인코딩해 용량·토큰 절감 */
+    function dataUrlToDownscaledJpeg(dataUrl, maxEdge, quality) {
+      return new Promise(function (resolve) {
+        if (!dataUrl || String(dataUrl).indexOf("data:") !== 0) {
+          resolve("");
+          return;
+        }
+        var img = new Image();
+        img.onload = function () {
+          var w = img.naturalWidth || 0;
+          var h = img.naturalHeight || 0;
+          if (!w || !h) {
+            resolve("");
+            return;
+          }
+          var me = Math.max(64, Math.min(1024, Number(maxEdge) || 384));
+          var scale = Math.min(me / w, me / h, 1);
+          var cw = Math.max(1, Math.round(w * scale));
+          var ch = Math.max(1, Math.round(h * scale));
+          var canvas = document.createElement("canvas");
+          canvas.width = cw;
+          canvas.height = ch;
+          var ctx = canvas.getContext("2d");
+          if (!ctx) {
+            resolve("");
+            return;
+          }
+          ctx.drawImage(img, 0, 0, cw, ch);
+          try {
+            resolve(canvas.toDataURL("image/jpeg", quality));
+          } catch (e) {
+            resolve("");
+          }
+        };
+        img.onerror = function () {
+          resolve("");
+        };
+        img.src = dataUrl;
+      });
+    }
+
+    /** 한 요청당 첨부 상한 (과도한 페이로드 방지) */
+    var AP_VISION_MAX_IMAGES = 20;
+
+    /**
+     * Chat Completions 멀티모달용: [text 안내] + image_url…
+     * @returns {Promise<Array|null>}
+     */
+    function buildVisionMultimodalAppend(htmlCode, previewList, maxEdgePx) {
+      var pathMap = buildPathToDataUrlMapFromPreview(previewList);
+      if (!Object.keys(pathMap).length) return Promise.resolve(null);
+
+      var s = String(htmlCode || "");
+      var re = /<img\b[^>]*>/gi;
+      /** 동일 PC 자산은 JPEG 1장만 — img 순번은 배열로 묶음 */
+      var groups = [];
+      var byPcKey = Object.create(null);
+      var m;
+      var imgOrder = 0;
+      while ((m = re.exec(s)) !== null) {
+        imgOrder++;
+        var tag = m[0];
+        var srcM = tag.match(/\bsrc\s*=\s*["']([^"']*)["']/i);
+        var rawSrc = srcM ? srcM[1] : "";
+        var du = resolvePcOnlyPreviewDataUrl(rawSrc, pathMap);
+        if (!du) continue;
+        var rel = extractAssetPathFromImgSrc(rawSrc);
+        var pcPath = toPcAssetPath(rel);
+        var pcKey = pcPath.toLowerCase();
+        if (byPcKey[pcKey]) {
+          byPcKey[pcKey].imgIndices.push(imgOrder);
+        } else {
+          var g = { dataUrl: du, imgIndices: [imgOrder] };
+          byPcKey[pcKey] = g;
+          groups.push(g);
+        }
+      }
+      if (!groups.length) return Promise.resolve(null);
+
+      var truncated = 0;
+      if (groups.length > AP_VISION_MAX_IMAGES) {
+        truncated = groups.length - AP_VISION_MAX_IMAGES;
+        groups = groups.slice(0, AP_VISION_MAX_IMAGES);
+      }
+
+      var jpegQ = 0.72;
+      var me = Math.max(128, Math.min(768, Number(maxEdgePx) || 384));
+
+      return Promise.all(
+        groups.map(function (g) {
+          return dataUrlToDownscaledJpeg(g.dataUrl, me, jpegQ).then(function (jpeg) {
+            return { imgIndices: g.imgIndices, jpeg: jpeg };
+          });
+        })
+      ).then(function (rows) {
+        var lines = [
+          "",
+          "---",
+          "첨부 이미지는 alt·alts 판별용 저해상도 JPEG(긴 변 최대 " + me + "px, API detail=low)입니다.",
+          "에셋은 PC 파일 기준 1장만내며, MO·PC가 같은 그림이면 한 블록에 여러 img[순번]을 묶어 표시한다.",
+          "아래 나열 순서대로 image 블록이 이어진다."
+        ];
+        if (truncated) {
+          lines.push(
+            "※ 고유 PC 이미지가 많아 앞에서 " + AP_VISION_MAX_IMAGES + "개만 첨부, " + truncated + "개는 텍스트·파일명으로만 판단."
+          );
+        }
+        var append = [];
+        var blockNum = 0;
+        for (var i = 0; i < rows.length; i++) {
+          var row = rows[i];
+          if (!row || !row.jpeg) continue;
+          blockNum++;
+          var idxLabel = row.imgIndices
+            .map(function (ix) {
+              return "img[" + ix + "]";
+            })
+            .join(", ");
+          lines.push("이미지 블록 " + blockNum + " → " + idxLabel + " (동일 시각·PC 에셋)");
+          append.push({
+            type: "image_url",
+            image_url: { url: row.jpeg, detail: "low" }
+          });
+        }
+        if (!append.length) return null;
+        return [{ type: "text", text: lines.join("\n") }].concat(append);
+      });
+    }
+
+    /**
+     * @param {string|null|undefined} visionAppend - OpenAI user.content에 이어 붙일 파트 배열 (text+image_url)
+     */
+    function runOpenAiJsonApi(htmlCode, systemContent, userPrefix, userSuffix, visionAppend) {
       userSuffix = userSuffix || "";
       var key = (openaiKeyEl && String(openaiKeyEl.value || "").trim()) || cachedOpenaiKey;
       if (!key) return Promise.reject(new Error("OpenAI API 키가 필요합니다."));
       var snippet =
         htmlCode.length > 120000 ? htmlCode.slice(0, 120000) + "\n/* truncated */" : htmlCode;
+      var textBody = userPrefix + snippet + userSuffix;
+      var userContent =
+        visionAppend && visionAppend.length
+          ? [{ type: "text", text: textBody }].concat(visionAppend)
+          : textBody;
       return fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
@@ -1759,7 +1942,7 @@
           model: getAiModel(),
           messages: [
             { role: "system", content: systemContent },
-            { role: "user", content: userPrefix + snippet + userSuffix }
+            { role: "user", content: userContent }
           ],
           temperature: 0,
           max_tokens: 8192,
@@ -1781,11 +1964,19 @@
         });
     }
 
-    function runOpenAiAnalysisApi(htmlCode) {
+    function runOpenAiAnalysisApi(htmlCode, visionAppend) {
+      var sys = expandApPlaceholders(AP_AI_ANALYSIS_SYSTEM_PROMPT_TEMPLATE, htmlCode);
+      if (visionAppend && visionAppend.length) {
+        sys +=
+          "\n\n[시각 입력] user 메시지에 저해상도 이미지가 포함될 수 있다. 안내 문구의 img[순번]과 첨부 image 블록 순서가 대응한다. " +
+          "alt·alts·altProposals 작성 시 반드시 참고한다. 썸네일에서 판독 불가한 글자·세부·브랜드명은 추측하지 말고 ambiguous·보수적 판단 또는 주변 문맥·파일명만 사용한다.";
+      }
       return runOpenAiJsonApi(
         htmlCode,
-        expandApPlaceholders(AP_AI_ANALYSIS_SYSTEM_PROMPT_TEMPLATE, htmlCode),
-        AP_AI_ANALYSIS_USER_PROMPT_PREFIX
+        sys,
+        AP_AI_ANALYSIS_USER_PROMPT_PREFIX,
+        "",
+        visionAppend || null
       );
     }
 
@@ -1860,6 +2051,70 @@
         out = out.slice(0, pos) + after + out.slice(pos + before.length);
       }
       return out;
+    }
+
+    /**
+     * AI 반영 등으로 <span class="ap-text ap-section__title">...</span> 안에 h1–h6만 들어간 잘못된 패턴을
+     * <h2 class="ap-text ap-section__title">...</h2> 형태로 합친다 (클래스·style 병합).
+     */
+    function extractTagAttr(attrs, name) {
+      var re = new RegExp("\\b" + name + "\\s*=\\s*(\"([^\"]*)\"|'([^']*)')", "i");
+      var m = re.exec(String(attrs || ""));
+      if (!m) return "";
+      return m[2] != null ? m[2] : (m[3] || "");
+    }
+
+    function stripClassAndStyleAttrs(attrs) {
+      return String(attrs || "")
+        .replace(/\s+class\s*=\s*("([^"]*)"|'([^']*)')/gi, "")
+        .replace(/\s+style\s*=\s*("([^"]*)"|'([^']*)')/gi, "")
+        .replace(/^\s+|\s+$/g, "");
+    }
+
+    function mergeApClassStrings(a, b) {
+      var seen = {};
+      var out = [];
+      function add(tok) {
+        var t = String(tok || "").trim();
+        if (!t || seen[t]) return;
+        seen[t] = true;
+        out.push(t);
+      }
+      String(a || "").split(/\s+/).forEach(add);
+      String(b || "").split(/\s+/).forEach(add);
+      return out.join(" ");
+    }
+
+    function mergeStyleStrings(a, b) {
+      var parts = [a, b].map(function (x) { return String(x || "").trim(); }).filter(Boolean);
+      if (!parts.length) return "";
+      return parts.join("; ").replace(/;\s*;/g, ";").replace(/;\s*$/g, "").trim();
+    }
+
+    function normalizeApHeadingSpanWrappers(html) {
+      var s = String(html || "");
+      var re = /<span\s([^>]*?)>(\s*)<(h)([1-6])(\b[^>]*?)>([\s\S]*?)<\/h\4>(\s*)<\/span>/gi;
+      return s.replace(re, function (full, spanAttrs, ws1, hLetter, hDigit, hRest, inner) {
+        var spanClass = extractTagAttr(spanAttrs, "class");
+        if (!/\bap-text\b/.test(spanClass)) return full;
+        if (!/\bap-section__(?:title|subtitle)(?:--\d+)?\b/.test(spanClass)) return full;
+        var tag = "h" + String(hDigit);
+        var hClass = extractTagAttr(hRest, "class");
+        var mergedClass = mergeApClassStrings(spanClass, hClass);
+        var spanStyle = extractTagAttr(spanAttrs, "style");
+        var hStyle = extractTagAttr(hRest, "style");
+        var mergedStyle = mergeStyleStrings(spanStyle, hStyle);
+        var rest = [stripClassAndStyleAttrs(spanAttrs), stripClassAndStyleAttrs(hRest)]
+          .filter(Boolean)
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim();
+        var open = "<" + tag + (mergedClass ? ' class="' + escapeAttr(mergedClass) + '"' : "");
+        if (mergedStyle) open += ' style="' + escapeAttr(mergedStyle) + '"';
+        if (rest) open += " " + rest;
+        open += ">";
+        return open + inner + "</" + tag + ">";
+      });
     }
 
     function escReportHtml(s) {
@@ -2176,7 +2431,24 @@
       var btn = $("#btnAiAudit");
       if (btn) btn.disabled = true;
       setAiStatus("검수 리포트 생성 중…");
-      runOpenAiAnalysisApi(codeForAudit)
+      var useVisionEl = $("#aiVisionAlt");
+      var maxEdgeEl = $("#aiVisionMaxEdge");
+      var useVision = useVisionEl && useVisionEl.checked;
+      var maxEdge = maxEdgeEl ? Number(maxEdgeEl.value) || 384 : 384;
+
+      var visionPromise = useVision
+        ? buildVisionMultimodalAppend(codeForAudit, previewImages, maxEdge)
+        : Promise.resolve(null);
+
+      visionPromise
+        .then(function (visionAppend) {
+          if (visionAppend && visionAppend.length > 1) {
+            setAiStatus("검수 리포트 생성 중(썸네일 " + (visionAppend.length - 1) + "장)…");
+          } else if (useVision && (!visionAppend || visionAppend.length <= 1)) {
+            setAiStatus("검수 리포트 생성 중(썸네일 없음 · 에셋 경로 불일치 시 텍스트만)…");
+          }
+          return runOpenAiAnalysisApi(codeForAudit, visionAppend);
+        })
         .then(function (obj) {
           normalizeImgAltAudit(codeForAudit, obj);
           window.__apLastAuditReport = obj;
@@ -2230,6 +2502,7 @@
             }
             var patches = obj.headingPatches;
             code = applyHeadingPatchesToCode(code, patches);
+            code = normalizeApHeadingSpanWrappers(code);
 
             var pApply = obj.altProposals.slice();
             var didHeading = patches.length > 0;
