@@ -1110,13 +1110,14 @@ var IMAGE_EXPORT_MAX_WIDTH = 200   // 미리보기
 var IMAGE_EXPORT_ZIP_WIDTH = 1200  // ZIP 내보내기
 var _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
 
-/** 노드 PNG/JPEG export. PNG 우선 시도 후 실패 시 JPEG 폴백 */
+/** 노드 PNG/JPG export. 투명 필요 시 PNG, 아니면 JPG 우선(API는 'JPG' 키워드) */
 function exportNodeImageAsync(node) {
     if (!node) return Promise.resolve(null)
     try {
         var isText = node.type === "TEXT"
         var usePng = needsTransparencyForExport(node)
         var w = _currentExportWidth
+        /** @param {"PNG"|"JPG"} format */
         function doExport(format, widthOrNull, extraOpts) {
             var opts = widthOrNull != null ? {constraint: {type: "WIDTH", value: widthOrNull}, format: format} : {format: format}
             if (extraOpts && typeof extraOpts === "object") {
@@ -1138,25 +1139,24 @@ function exportNodeImageAsync(node) {
                 })
         }
         var textOpts = isText ? {useAbsoluteBounds: true} : undefined
+        /** 동일 포맷으로 width → 800 → 제약 없음 순 시도 */
+        function tryFormatSequence(fmt) {
+            return doExport(fmt, w, textOpts).then(function (result) {
+                if (result) return result
+                return doExport(fmt, 800, textOpts)
+            }).then(function (result) {
+                if (result) return result
+                return doExport(fmt, null, textOpts)
+            })
+        }
         function trySequence() {
-            return doExport("PNG", w, textOpts)
-                .then(function (result) {
-                    if (result) return result
-                    return doExport("PNG", 800, textOpts)
-                })
-                .then(function (result) {
-                    if (result) return result
-                    return doExport("PNG", null, textOpts)
-                })
-                .then(function (result) {
-                    if (result) return result
-                    if (!usePng) {
-                        return doExport("JPEG", w, textOpts)
-                            .then(function (jpeg) { return jpeg || doExport("JPEG", 800, textOpts) })
-                            .then(function (jpeg) { return jpeg || doExport("JPEG", null, textOpts) })
-                    }
-                    return null
-                })
+            if (usePng) {
+                return tryFormatSequence("PNG")
+            }
+            return tryFormatSequence("JPG").then(function (result) {
+                if (result) return result
+                return tryFormatSequence("PNG")
+            })
         }
         return trySequence()
     } catch (e) {

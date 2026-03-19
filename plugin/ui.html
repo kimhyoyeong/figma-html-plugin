@@ -637,19 +637,19 @@
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
             <span style="font-size:11px;font-weight:700;color:#334;">AI</span>
             <button type="button" id="btnAiAudit" class="gray" title="SEO·GEO·접근성·시멘틱·alt·헤딩 검수 리포트">분석</button>
-            <button type="button" id="btnApplyAltProposals" class="gray" title="AP 반영 룰(alt·헤딩)로 AI 호출 후 코드 반영">반영</button>
+            <button type="button" id="btnApplyAltProposals" class="gray" title="마지막 분석의 alt를 그대로 적용·헤딩은 동일 분석 headingAudit에 맞춰 패치">반영</button>
             <span style="font-size:10px;color:#888;">|</span>
             <input type="password" id="openaiKey" class="field" style="width:180px;" placeholder="OpenAI API 키" autocomplete="off" />
             <select id="aiModel" class="field" style="width:110px;">
+              <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
               <option value="gpt-4o">gpt-4o</option>
-              <option value="gpt-4o-mini">gpt-4o-mini</option>
             </select>
             <span id="aiRefineStatus" class="hint" style="margin-left:0;font-size:11px;"></span>
           </div>
           <div id="aiAuditReport" style="display:none;max-height:360px;overflow:auto;font-size:10px;line-height:1.45;border:1px solid #dde4ea;border-radius:8px;padding:10px;background:#fff;color:#223;"></div>
           <div style="font-size:10px;color:#667;line-height:1.5;">
             <b>분석</b> = SEO · GEO · 접근성 · 시멘틱 마크업 · alt · 헤딩 검수 리포트 /
-            <b>반영</b> = <code>AP_AI_APPLY</code> 규칙(alt·heading) 기반 최소 자동 반영
+            <b>반영</b> = 마지막 분석의 alt 제안을 그대로 적용 · 헤딩은 동일 분석의 <code>headingAudit</code>에 맞춰 패치 생성
           </div>
         </div>
 
@@ -1324,6 +1324,9 @@
 
     window.__apLastAuditAltProposals = null;
     window.__apLastAuditReport = null;
+    /** 분석 직후 스냅샷(반영 시 alt·헤딩 가이드 정합용). 반영 후에도 유지. */
+    window.__apLastAnalysisReport = null;
+    window.__apLastAnalysisImgCount = null;
 
     var openaiKeyEl = $("#openaiKey");
     if (openaiKeyEl) {
@@ -1413,12 +1416,92 @@
 
     function getAiModel() {
       var modelEl = $("#aiModel");
-      return (modelEl && modelEl.value) || "gpt-4o";
+      return (modelEl && modelEl.value) || "gpt-4o-mini";
     }
 
     function countImgs(code) {
       var m = String(code || "").match(/<img\b/gi);
       return m ? m.length : 0;
+    }
+
+    /** 분석용 HTML에서 <img> 순서대로 현재 alt·src 일부 추출 */
+    function collectImgAuditRowsFromCode(htmlCode) {
+      var rows = [];
+      var re = /<img\b[^>]*>/gi;
+      var s = String(htmlCode || "");
+      var m;
+      while ((m = re.exec(s)) !== null) {
+        var tag = m[0];
+        var altM = tag.match(/\balt\s*=\s*["']([^"']*)["']/i);
+        var srcM = tag.match(/\bsrc\s*=\s*["']([^"']*)["']/i);
+        rows.push({
+          currentAlt: altM ? altM[1] : "",
+          srcHint: srcM ? String(srcM[1]).slice(0, 96) : ""
+        });
+      }
+      return rows;
+    }
+
+    /**
+     * API가 alts를 비우거나 개수를 틀리면 리포트에 Alt 검수가 안 보임.
+     * altProposals·마크업으로 길이 맞춤 및 alts 재구성.
+     */
+    function normalizeImgAltAudit(htmlCode, obj) {
+      if (!obj || typeof obj !== "object") return obj;
+      var n = countImgs(htmlCode);
+      if (n === 0) {
+        if (!Array.isArray(obj.alts)) obj.alts = [];
+        if (!Array.isArray(obj.altProposals)) obj.altProposals = [];
+        return obj;
+      }
+      var imgs = collectImgAuditRowsFromCode(htmlCode);
+      var rawProp = Array.isArray(obj.altProposals) ? obj.altProposals.slice() : [];
+      var normProp = [];
+      var i;
+      for (i = 0; i < n; i++) {
+        var cur0 = imgs[i] ? String(imgs[i].currentAlt || "") : "";
+        var p0 = i < rawProp.length && rawProp[i] != null ? String(rawProp[i]) : cur0;
+        normProp.push(p0);
+      }
+      obj.altProposals = normProp;
+
+      var alts = Array.isArray(obj.alts) ? obj.alts : [];
+      var altsOk =
+        alts.length === n &&
+        alts.every(function (it, idx) {
+          var ix = it && it.index != null ? Number(it.index) : idx + 1;
+          return ix === idx + 1;
+        });
+      if (altsOk) {
+        if (!Array.isArray(obj.altProposals) || obj.altProposals.length !== n) {
+          obj.altProposals = alts.map(function (it) {
+            return it && it.proposal != null ? String(it.proposal) : "";
+          });
+        }
+        return obj;
+      }
+
+      var reasonBase =
+        alts.length === 0
+          ? "표시 보정: 모델이 alts를 비웠거나 누락 — altProposals·현재 마크업 기준으로 구성"
+          : "표시 보정: alts 개수·index 순서 불일치 — 재구성";
+      var built = [];
+      for (i = 0; i < n; i++) {
+        var row = imgs[i] || { currentAlt: "", srcHint: "" };
+        var cur = String(row.currentAlt || "");
+        var prop = normProp[i];
+        var decision = prop === cur ? "keep" : prop === "" && cur === "" ? "empty" : "fix";
+        built.push({
+          index: i + 1,
+          srcHint: row.srcHint || "",
+          currentAlt: cur,
+          decision: decision,
+          reason: reasonBase,
+          proposal: prop
+        });
+      }
+      obj.alts = built;
+      return obj;
     }
 
     function detectPageLanguage(code) {
@@ -1452,7 +1535,8 @@
       "- 결과는 간결하고 핵심만 작성한다.",
       "- 동일한 문제를 여러 섹션에서 반복하지 않는다.",
       "- 의미 없는 나열 금지. 중요한 문제만 보고한다.",
-      "- 문제 없으면 빈 배열을 반환한다.",
+      "- '문제 없으면 빈 배열'은 seo/geo/a11y/semantics의 issues·suggestions, headingAudit.issues 등에만 적용한다.",
+      "- alts·altProposals는 예외: 아래 강제 규칙을 반드시 따른다.",
       "",
       "출력 키:",
       "- summary",
@@ -1491,6 +1575,13 @@
       "altProposals 형식:",
       "- string[] 정확히 {{N_IMG}}개 (img 순서 기준)",
       "- 장식 이미지는 빈 문자열",
+      "",
+      "강제 규칙 (문서 내 <img> 개수 = {{N_IMG}}):",
+      "- {{N_IMG}} > 0 이면 alts는 반드시 길이 {{N_IMG}}인 배열이다. 빈 배열·생략 금지.",
+      "- 각 항목 index는 1부터 문서 순서대로 매긴다.",
+      "- 현재 alt가 적절해도 항목을 생략하지 말고 decision:'keep', proposal은 제안 문구(유지 시 현재 alt와 동일하게), 짧은 reason을 넣는다.",
+      "- altProposals[i]는 항상 alts[i].proposal과 같게 맞춘다 (동일 순서·동일 개수).",
+      "- {{N_IMG}} === 0 이면 alts와 altProposals는 빈 배열 []이다.",
       "",
       "검수 규칙:",
       "- 반드시 fragment 내부만 판단한다.",
@@ -1597,7 +1688,8 @@
       }
     ];
 
-    function buildApApplySystemPrompt(htmlCode) {
+    function buildApApplySystemPrompt(htmlCode, opts) {
+      opts = opts || {};
       var ctx = {
         nImg: countImgs(htmlCode),
         lang: detectPageLanguage(htmlCode)
@@ -1607,6 +1699,16 @@
         "필수 키: altProposals (string[] 길이=" + ctx.nImg + "), headingPatches ([{before,after}] 배열).",
         "선택: applyNotes (string[], 한국어 짧은 요약)."
       ];
+      if (opts.auditHeadingContext) {
+        lines.push(
+          "user 메시지 하단에 직전 검수 headingAudit JSON이 첨부되어 있다.",
+          "headingPatches는 그 판정(candidates.decision, recommendedLevel)·issues와 모순 없이 작성한다.",
+          "분석에서 heading이 아니라고 본 문구를 억지로 승격하지 않는다.",
+          "altProposals 배열은 클라이언트가 직전 검수 값으로 덮어쓸 수 있으나, 키는 반드시 포함하고 길이는 " +
+            ctx.nImg +
+            "개로 맞춘다(직전 검수 alt와 동일한 문자열을 그대로 넣어도 된다)."
+        );
+      }
       for (var r = 0; r < AP_AI_APPLY_RULES.length; r++) {
         lines = lines.concat(AP_AI_APPLY_RULES[r].buildLines(ctx));
       }
@@ -1617,6 +1719,25 @@
     var AP_AI_APPLY_USER_PROMPT_PREFIX =
       "아래 HTML/CSS에 대해 시스템 지시를 수행하고 JSON만 출력.\n\n---\n";
 
+    /** 반영 호출 시 직전 분석 headingAudit만 전달(토큰 절약). */
+    function buildApplyAuditHeadingPayload(auditObj) {
+      if (!auditObj || typeof auditObj !== "object") return "";
+      var ha = auditObj.headingAudit;
+      if (!ha || typeof ha !== "object") return "";
+      try {
+        return JSON.stringify({
+          headingAudit: {
+            outline: ha.outline,
+            issues: ha.issues,
+            candidates: ha.candidates
+          },
+          summaryOneLine: auditObj.summary && auditObj.summary.oneLine ? auditObj.summary.oneLine : undefined
+        });
+      } catch (e) {
+        return "";
+      }
+    }
+
     function expandApPlaceholders(template, htmlCode) {
       var nImg = countImgs(htmlCode);
       var lang = detectPageLanguage(htmlCode);
@@ -1625,7 +1746,8 @@
         .replace(/\{\{LANG\}\}/g, lang);
     }
 
-    function runOpenAiJsonApi(htmlCode, systemContent, userPrefix) {
+    function runOpenAiJsonApi(htmlCode, systemContent, userPrefix, userSuffix) {
+      userSuffix = userSuffix || "";
       var key = (openaiKeyEl && String(openaiKeyEl.value || "").trim()) || cachedOpenaiKey;
       if (!key) return Promise.reject(new Error("OpenAI API 키가 필요합니다."));
       var snippet =
@@ -1637,7 +1759,7 @@
           model: getAiModel(),
           messages: [
             { role: "system", content: systemContent },
-            { role: "user", content: userPrefix + snippet }
+            { role: "user", content: userPrefix + snippet + userSuffix }
           ],
           temperature: 0,
           max_tokens: 8192,
@@ -1667,8 +1789,18 @@
       );
     }
 
-    function runOpenAiApplyApi(htmlCode) {
-      return runOpenAiJsonApi(htmlCode, buildApApplySystemPrompt(htmlCode), AP_AI_APPLY_USER_PROMPT_PREFIX);
+    function runOpenAiApplyApi(htmlCode, auditForHeading) {
+      var headingPayload = buildApplyAuditHeadingPayload(auditForHeading);
+      var userSuffix =
+        headingPayload &&
+        "\n\n---\n직전 분석(동일 본문) headingAudit JSON. 위 HTML에 headingPatches를 만들 때 반드시 이 판정과 일관되게.\n" +
+          headingPayload;
+      return runOpenAiJsonApi(
+        htmlCode,
+        buildApApplySystemPrompt(htmlCode, { auditHeadingContext: !!headingPayload }),
+        AP_AI_APPLY_USER_PROMPT_PREFIX,
+        userSuffix || ""
+      );
     }
 
     function escapeAttr(s) {
@@ -2046,8 +2178,11 @@
       setAiStatus("검수 리포트 생성 중…");
       runOpenAiAnalysisApi(codeForAudit)
         .then(function (obj) {
+          normalizeImgAltAudit(codeForAudit, obj);
           window.__apLastAuditReport = obj;
           window.__apLastAuditAltProposals = Array.isArray(obj.altProposals) ? obj.altProposals : null;
+          window.__apLastAnalysisReport = obj;
+          window.__apLastAnalysisImgCount = countImgs(codeForAudit);
           renderAuditReport(obj);
 
           var summary = obj && obj.summary ? obj.summary : {};
@@ -2071,15 +2206,28 @@
         if (!ensureOpenAiKeyExists()) return;
         if (!ensureCodeExists()) return;
         var code = getCodeValue();
+        var codeForApplyApi = extractCmsPartForAudit(code);
+        if (!String(codeForApplyApi).trim()) codeForApplyApi = code;
         var n = countImgs(code);
+        var nApi = countImgs(codeForApplyApi);
         var btn = this;
         btn.disabled = true;
-        setAiStatus("반영: AI 실행 중 (AP_AI_APPLY 룰)…");
-        runOpenAiApplyApi(code)
+        setAiStatus("반영: AI 실행 중 (헤딩 패치 · 분석과 동일 alt)…");
+        runOpenAiApplyApi(codeForApplyApi, window.__apLastAnalysisReport)
           .then(function (obj) {
             var code0 = code;
             if (!Array.isArray(obj.altProposals)) obj.altProposals = [];
             if (!Array.isArray(obj.headingPatches)) obj.headingPatches = [];
+            var auditSnap = window.__apLastAnalysisReport;
+            if (
+              auditSnap &&
+              Array.isArray(auditSnap.altProposals) &&
+              auditSnap.altProposals.length === nApi &&
+              window.__apLastAnalysisImgCount === nApi &&
+              n === nApi
+            ) {
+              obj.altProposals = auditSnap.altProposals.slice();
+            }
             var patches = obj.headingPatches;
             code = applyHeadingPatchesToCode(code, patches);
 
