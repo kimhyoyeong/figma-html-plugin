@@ -1,140 +1,575 @@
-<!-- ui.html -->
 <!doctype html>
 <html>
+
 <head>
   <meta charset="utf-8" />
   <style>
-    body{margin:0;font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
-    header{display:flex;gap:8px;align-items:center;padding:10px;border-bottom:1px solid #e7e7e7;}
-    button{border:1px solid #0d99ff;background:#0d99ff;color:#fff;padding:7px 12px;border-radius:6px;cursor:pointer;font-weight:700;}
-    button.gray{border-color:#cfd8dc;background:#f6f7f8;color:#111;}
-    button:disabled{opacity:.6;cursor:not-allowed;}
-    .wrap{display:flex;flex-direction:column;height:calc(100vh - 60px);min-height:0;}
-    .tabs{display:flex;flex-shrink:0;border-bottom:1px solid #e0e4e8;}
-    .tabs button{padding:8px 14px;border:0;background:transparent;cursor:pointer;font-size:12px;font-weight:600;color:#666;}
-    .tabs button.active{color:#0d99ff;border-bottom:2px solid #0d99ff;margin-bottom:-1px;}
-    .panel{display:none;flex:1;min-height:0;min-width:0;flex-direction:column;}
-    .panel.active{display:flex;}
-    textarea{flex:1;min-height:0;border:0;outline:0;padding:12px;resize:none;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;font-size:11px;line-height:1.5;}
-    .hint{margin-left:auto;color:#666;font-size:11px;}
-    .mobileOpt{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#333;}
-    .mobileOpt input[type="checkbox"]{margin:0;cursor:pointer;}
-    .field{
-      border:1px solid #cfd8dc; background:#fff; color:#111;
-      padding:6px 10px; border-radius:8px; outline:0; font-size:12px;
-      width:180px;
+    body {
+      margin: 0;
+      font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    .fontRow{
-      padding:8px 10px; border-bottom:1px solid #e0e4e8; background:#f7fafc;
-      display:flex; flex-wrap:wrap; align-items:center; gap:10px;
+
+    header {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 10px;
+      border-bottom: 1px solid #e7e7e7;
     }
-    .fontRowLabel{ font-size:11px; font-weight:600; color:#555; flex-shrink:0; }
-    .fontCheckboxes{ display:flex; flex-wrap:wrap; gap:6px 14px; max-height:72px; overflow-y:auto; }
-    .fontCheckboxes label{ display:inline-flex; align-items:center; gap:5px; font-size:11px; color:#333; cursor:pointer; white-space:nowrap; }
-    .fontCheckboxes input{ margin:0; cursor:pointer; }
+
+    button {
+      border: 1px solid #0d99ff;
+      background: #0d99ff;
+      color: #fff;
+      padding: 7px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    button.gray {
+      border-color: #cfd8dc;
+      background: #f6f7f8;
+      color: #111;
+    }
+
+    button:disabled {
+      opacity: .6;
+      cursor: not-allowed;
+    }
+
+    .wrap {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 60px);
+      min-height: 0;
+    }
+
+    .tabs {
+      display: flex;
+      flex-shrink: 0;
+      border-bottom: 1px solid #e0e4e8;
+    }
+
+    .tabs button {
+      padding: 8px 14px;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      color: #666;
+    }
+
+    .tabs button.active {
+      color: #0d99ff;
+      border-bottom: 2px solid #0d99ff;
+      margin-bottom: -1px;
+    }
+
+    .panel {
+      display: none;
+      flex: 1;
+      min-height: 0;
+      min-width: 0;
+      flex-direction: column;
+    }
+
+    .panel.active {
+      display: flex;
+    }
+
+    textarea {
+      flex: 1;
+      min-height: 0;
+      border: 0;
+      outline: 0;
+      padding: 12px;
+      resize: none;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .hint {
+      margin-left: auto;
+      color: #666;
+      font-size: 11px;
+    }
+
+    .mobileOpt {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #333;
+    }
+
+    .mobileOpt input[type="checkbox"] {
+      margin: 0;
+      cursor: pointer;
+    }
+
+    .field {
+      border: 1px solid #cfd8dc;
+      background: #fff;
+      color: #111;
+      padding: 6px 10px;
+      border-radius: 8px;
+      outline: 0;
+      font-size: 12px;
+      width: 180px;
+    }
+
+    .fontRow {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e0e4e8;
+      background: #f7fafc;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .fontRowLabel {
+      font-size: 11px;
+      font-weight: 600;
+      color: #555;
+      flex-shrink: 0;
+    }
+
+    .fontCheckboxes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 14px;
+      max-height: 72px;
+      overflow-y: auto;
+    }
+
+    .fontCheckboxes label {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: #333;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .fontCheckboxes input {
+      margin: 0;
+      cursor: pointer;
+    }
 
     /* ====== DATA TREE VIEW ====== */
-    .dataWrap{flex:1;min-height:0;display:flex;flex-direction:column;}
-    .dataToolbar{
-      flex-shrink:0; padding:10px 14px; border-bottom:1px solid #e0e4e8;
-      display:flex; flex-wrap:wrap; gap:16px; align-items:center; background:#f7fafc;
+    .dataWrap {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
     }
-    .dataToolbarGroup{display:flex; align-items:center; gap:12px; flex-wrap:wrap;}
-    .dataToolbarGroup + .dataToolbarGroup{border-left:1px solid #e0e4e8; padding-left:16px;}
-    .dataToolbarGroup.actions{gap:8px;}
-    .dataToolbar input,.dataToolbar select{
-      border:1px solid #cfd8dc; background:#fff; color:#111;
-      padding:6px 10px; border-radius:8px; outline:0; font-size:12px;
-    }
-    .dataToolbarStatus{
-      margin-left:auto; padding:10px 12px; border-radius:8px;
-       color:#0d6db7; font-size:12px; font-weight:600;
-    }
-    .dataToolbarStatus.waiting{ color:#666; font-weight:500;}
-    .dataToolbarStatus.error{color:#c53030;}
-    .dataMain{
-      flex:1; min-height:0; display:grid; grid-template-columns: 1.15fr 0.85fr; gap:10px;
-      padding:10px 12px; box-sizing:border-box;
-    }
-    .box{
-      min-height:0; border:1px solid #e0e4e8; border-radius:10px; overflow:hidden;
-      display:flex; flex-direction:column; background:#fff;
-    }
-    .boxHd{
-      flex-shrink:0; padding:8px 10px; border-bottom:1px solid #eef2f6;
-      display:flex; gap:8px; align-items:center; background:#fafcff;
-      font-size:11px; color:#333;
-    }
-    .boxBd{flex:1; min-height:0; overflow:auto; padding:10px;}
-    .tree{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;line-height:1.55;}
-    details{border-left:1px solid transparent;}
-    details[open]{border-left-color:#e7edf6;}
-    details.secMismatch{border-left:3px solid #c53030;}
-    details.secMismatch[open]{border-left-color:#c53030;}
-    .secMismatchBadge{font-size:9px;padding:1px 5px;border-radius:4px;background:#fde8e8;color:#c53030;border:1px solid #feb2b2;font-weight:600;}
-    summary{list-style:none; cursor:pointer; padding:6px 8px; border-radius:8px; display:flex; align-items:center; gap:8px;}
-    summary::-webkit-details-marker{display:none;}
-    summary:hover{background:#f2f7ff;}
-    summary.selected{outline:1px solid rgba(13,153,255,.35); background:rgba(13,153,255,.12);}
-    .childPad{padding-left:14px;}
-    .badge{
-      font-size:10px; padding:1px 6px; border:1px solid #d7dee7; border-radius:999px; color:#445; background:#fff;
-      flex-shrink:0;
-    }
-    .badge.flex{border-color:#cfe2ff;color:#1f4b99;}
-    .badge.abs{border-color:#e3d3ff;color:#5b2aa6;}
-    .badge.img{border-color:#cdeed9;color:#1c6b3b;}
-    .badge.vec{border-color:#ffe2c7;color:#7a3f09;}
-    .badge.txt{border-color:#ffd1de;color:#8a2340;}
-    .name{color:#111;}
-    .muted{color:#667; opacity:.95;}
 
-    .detail{
-      font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
-      font-size:11px; line-height:1.6; padding:2px 0;
+    .dataToolbar {
+      flex-shrink: 0;
+      padding: 10px 14px;
+      border-bottom: 1px solid #e0e4e8;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: center;
+      background: #f7fafc;
     }
-    .detailHead{
-      padding-bottom:10px; margin-bottom:10px; border-bottom:1px solid #e0e4e8;
+
+    .dataToolbarGroup {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
     }
-    .detail h3{
-      margin:0 0 8px 0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-      font-size:14px; font-weight:700; color:#111; letter-spacing:-0.02em;
+
+    .dataToolbarGroup+.dataToolbarGroup {
+      border-left: 1px solid #e0e4e8;
+      padding-left: 16px;
     }
-    .detailFlags{ display:flex; flex-wrap:wrap; gap:6px; margin:0; }
-    .detailFlags .badge{ font-size:10px; }
-    .detail .kv{ margin-top:12px; padding-top:12px; border-top:1px solid #eef2f6; }
-    .detail .row{
-      display:grid; grid-template-columns:120px 1fr; gap:10px 14px; align-items:start;
-      padding:8px 10px; margin:0 -10px; border-radius:6px;
-      border-bottom:1px solid rgba(0,0,0,.06);
-      font-size:11px;
+
+    .dataToolbarGroup.actions {
+      gap: 8px;
     }
-    .detail .row:nth-child(even){ background:#f8fafc; }
-    .detail .row .k{
-      color:#555; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.03em;
-      word-break:break-word;
+
+    .dataToolbar input,
+    .dataToolbar select {
+      border: 1px solid #cfd8dc;
+      background: #fff;
+      color: #111;
+      padding: 6px 10px;
+      border-radius: 8px;
+      outline: 0;
+      font-size: 12px;
     }
-    .detail .row .v{
-      color:#111; white-space:pre-wrap; word-break:break-word; line-height:1.5;
+
+    .dataToolbarStatus {
+      margin-left: auto;
+      padding: 10px 12px;
+      border-radius: 8px;
+      color: #0d6db7;
+      font-size: 12px;
+      font-weight: 600;
     }
-    .detail .row.rowLabel .v{ font-size:10px; color:#333; }
-    .detail .row.rowOutputClass .v{ font-family:ui-monospace,monospace; color:#0d6db7; font-weight:600; }
-    .detail .row:last-child{ border-bottom:0; }
-    .rawArea{display:none; flex:1; min-height:0;}
-    .previewToolbar{ display:flex; gap:6px; align-items:center; flex-shrink:0; padding:8px 12px; border-bottom:1px solid #e7e7e7; }
-    .previewToolbar .viewBtn{ padding:6px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; border:1px solid #cfd8dc; background:#f6f7f8; color:#666; }
-    .previewToolbar .viewBtn.active{ border-color:#0d99ff; background:#0d99ff; color:#fff; }
-    .previewToolbar .viewBtn:hover:not(.active){ background:#eef1f3; }
-    #previewViewport{ flex:1; min-height:0; display:flex; flex-direction:column; align-items:center; background:#e0e4e8; overflow:auto; }
-    #previewViewport.viewMo{ padding:12px 0; }
-    #previewViewport.viewMo iframe{ width:374px; max-width:100%; flex:1; min-height:0; box-shadow:0 2px 12px rgba(0,0,0,.15); border-radius:8px; }
+
+    .dataToolbarStatus.waiting {
+      color: #666;
+      font-weight: 500;
+    }
+
+    .dataToolbarStatus.error {
+      color: #c53030;
+    }
+
+    .dataMain {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 10px;
+      padding: 10px 12px;
+      box-sizing: border-box;
+    }
+
+    .box {
+      min-height: 0;
+      border: 1px solid #e0e4e8;
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+    }
+
+    .boxHd {
+      flex-shrink: 0;
+      padding: 8px 10px;
+      border-bottom: 1px solid #eef2f6;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      background: #fafcff;
+      font-size: 11px;
+      color: #333;
+    }
+
+    .boxBd {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 10px;
+    }
+
+    .tree {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    details {
+      border-left: 1px solid transparent;
+    }
+
+    details[open] {
+      border-left-color: #e7edf6;
+    }
+
+    details.secMismatch {
+      border-left: 3px solid #c53030;
+    }
+
+    details.secMismatch[open] {
+      border-left-color: #c53030;
+    }
+
+    .secMismatchBadge {
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #fde8e8;
+      color: #c53030;
+      border: 1px solid #feb2b2;
+      font-weight: 600;
+    }
+
+    summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 6px 8px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    summary::-webkit-details-marker {
+      display: none;
+    }
+
+    summary:hover {
+      background: #f2f7ff;
+    }
+
+    summary.selected {
+      outline: 1px solid rgba(13, 153, 255, .35);
+      background: rgba(13, 153, 255, .12);
+    }
+
+    .childPad {
+      padding-left: 14px;
+    }
+
+    .badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border: 1px solid #d7dee7;
+      border-radius: 999px;
+      color: #445;
+      background: #fff;
+      flex-shrink: 0;
+    }
+
+    .badge.flex {
+      border-color: #cfe2ff;
+      color: #1f4b99;
+    }
+
+    .badge.abs {
+      border-color: #e3d3ff;
+      color: #5b2aa6;
+    }
+
+    .badge.img {
+      border-color: #cdeed9;
+      color: #1c6b3b;
+    }
+
+    .badge.vec {
+      border-color: #ffe2c7;
+      color: #7a3f09;
+    }
+
+    .badge.txt {
+      border-color: #ffd1de;
+      color: #8a2340;
+    }
+
+    .name {
+      color: #111;
+    }
+
+    .muted {
+      color: #667;
+      opacity: .95;
+    }
+
+    /* AI 반영 패널: 변경 diff */
+    .ap-diff-block {
+      margin: 0 0 12px 0;
+      padding: 8px 10px;
+      background: #f6f8fb;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+    }
+
+    .ap-diff-block>strong {
+      display: block;
+      font-size: 11px;
+      color: #0d47a1;
+      margin-bottom: 6px;
+    }
+
+    .ap-diff-row {
+      font-size: 10px;
+      line-height: 1.5;
+      margin-bottom: 6px;
+      word-break: break-all;
+    }
+
+    .ap-diff-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .ap-diff-from {
+      color: #6d4c41;
+      background: #fff8e6;
+      padding: 2px 6px;
+      border-radius: 4px;
+      display: inline;
+      max-width: 100%;
+    }
+
+    .ap-diff-arrow {
+      color: #78909c;
+      margin: 0 6px;
+      font-weight: 700;
+    }
+
+    .ap-diff-to {
+      color: #1b5e20;
+      background: #e8f5e9;
+      padding: 2px 6px;
+      border-radius: 4px;
+      display: inline;
+      max-width: 100%;
+    }
+
+    .detail {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.6;
+      padding: 2px 0;
+    }
+
+    .detailHead {
+      padding-bottom: 10px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid #e0e4e8;
+    }
+
+    .detail h3 {
+      margin: 0 0 8px 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      color: #111;
+      letter-spacing: -0.02em;
+    }
+
+    .detailFlags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0;
+    }
+
+    .detailFlags .badge {
+      font-size: 10px;
+    }
+
+    .detail .kv {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #eef2f6;
+    }
+
+    .detail .row {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 10px 14px;
+      align-items: start;
+      padding: 8px 10px;
+      margin: 0 -10px;
+      border-radius: 6px;
+      border-bottom: 1px solid rgba(0, 0, 0, .06);
+      font-size: 11px;
+    }
+
+    .detail .row:nth-child(even) {
+      background: #f8fafc;
+    }
+
+    .detail .row .k {
+      color: #555;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+      word-break: break-word;
+    }
+
+    .detail .row .v {
+      color: #111;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.5;
+    }
+
+    .detail .row.rowLabel .v {
+      font-size: 10px;
+      color: #333;
+    }
+
+    .detail .row.rowOutputClass .v {
+      font-family: ui-monospace, monospace;
+      color: #0d6db7;
+      font-weight: 600;
+    }
+
+    .detail .row:last-child {
+      border-bottom: 0;
+    }
+
+    .rawArea {
+      display: none;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .previewToolbar {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-shrink: 0;
+      padding: 8px 12px;
+      border-bottom: 1px solid #e7e7e7;
+    }
+
+    .previewToolbar .viewBtn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid #cfd8dc;
+      background: #f6f7f8;
+      color: #666;
+    }
+
+    .previewToolbar .viewBtn.active {
+      border-color: #0d99ff;
+      background: #0d99ff;
+      color: #fff;
+    }
+
+    .previewToolbar .viewBtn:hover:not(.active) {
+      background: #eef1f3;
+    }
+
+    #previewViewport {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: #e0e4e8;
+      overflow: auto;
+    }
+
+    #previewViewport.viewMo {
+      padding: 12px 0;
+    }
+
+    #previewViewport.viewMo iframe {
+      width: 374px;
+      max-width: 100%;
+      flex: 1;
+      min-height: 0;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, .15);
+      border-radius: 8px;
+    }
   </style>
 </head>
+
 <body>
   <header>
     <button id="runDesktop">PC 분석</button>
     <button id="runMobile" class="gray">MO 분석</button>
-    
+
     <input id="projectName" class="field" placeholder="project (ex: iope)" />
     <span class="hint" id="rootHint">PC: ROOT 1개 선택 | MO: ROOT 2개 선택 후 브레이크포인트 매칭</span>
   </header>
@@ -158,7 +593,7 @@
           <div class="dataToolbarGroup actions">
             <button type="button" id="openAll" class="gray">모두 펼치기</button>
             <button type="button" id="closeAll" class="gray">모두 접기</button>
-          </div>  
+          </div>
         </div>
 
         <div class="dataMain">
@@ -197,12 +632,12 @@
           <button type="button" id="exportZip" class="gray">Export ZIP</button>
           <span class="hint" style="margin-left:0;">_cms.html + assets/images/page_{project}_secXX_imgYY</span>
         </div>
-    
+
         <div id="aiRefineBar" style="flex-shrink:0;padding:8px 12px;border-bottom:1px solid #e7e7e7;background:#f8fafc;display:flex;flex-direction:column;gap:8px;">
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
             <span style="font-size:11px;font-weight:700;color:#334;">AI</span>
-            <button type="button" id="btnAiAudit" class="gray" title="SEO·GEO·접근성 등 분석만 (패널 표시, 코드 미변경)">분석</button>
-            <button type="button" id="btnApplyAltProposals" class="gray" title="ui.html의 반영 룰로 AI 호출 → alt 등 코드 반영">반영</button>
+            <button type="button" id="btnAiAudit" class="gray" title="SEO·GEO·접근성·시멘틱·alt·헤딩 검수 리포트">분석</button>
+            <button type="button" id="btnApplyAltProposals" class="gray" title="AP 반영 룰(alt·헤딩)로 AI 호출 후 코드 반영">반영</button>
             <span style="font-size:10px;color:#888;">|</span>
             <input type="password" id="openaiKey" class="field" style="width:180px;" placeholder="OpenAI API 키" autocomplete="off" />
             <select id="aiModel" class="field" style="width:110px;">
@@ -211,12 +646,13 @@
             </select>
             <span id="aiRefineStatus" class="hint" style="margin-left:0;font-size:11px;"></span>
           </div>
-          <div id="aiAuditReport" style="display:none;max-height:200px;overflow:auto;font-size:10px;line-height:1.45;border:1px solid #dde4ea;border-radius:8px;padding:10px;background:#fff;color:#223;"></div>
+          <div id="aiAuditReport" style="display:none;max-height:360px;overflow:auto;font-size:10px;line-height:1.45;border:1px solid #dde4ea;border-radius:8px;padding:10px;background:#fff;color:#223;"></div>
           <div style="font-size:10px;color:#667;line-height:1.5;">
-            <b>분석</b> = 검수용 AI · 패널만 · <b>반영</b> = <code>AP_AI_APPLY</code> 룰로 AI → alt만 코드 반영 (요약은 패널만, ZIP/미리보기 제외)
+            <b>분석</b> = SEO · GEO · 접근성 · 시멘틱 마크업 · alt · 헤딩 검수 리포트 /
+            <b>반영</b> = <code>AP_AI_APPLY</code> 규칙(alt·heading) 기반 최소 자동 반영
           </div>
         </div>
-    
+
         <textarea id="codeOut" placeholder="선택 분석 후 섹션 코드가 표시됩니다" style="flex:1;"></textarea>
       </div>
     </div>
@@ -243,30 +679,30 @@
        ========================================================= */
 
     // ====== dom helpers ======
-    function $(s){ return document.querySelector(s); }
+    function $(s) { return document.querySelector(s); }
 
-    function getProjectName(){
+    function getProjectName() {
       var v = ($("#projectName") && $("#projectName").value) || "";
       return v.trim() || "project";
     }
     var usedFonts = [];
     var fontChecked = {};
-    function getAllowedFonts(){
-      return usedFonts.filter(function(f){ return fontChecked[f]; });
+    function getAllowedFonts() {
+      return usedFonts.filter(function (f) { return fontChecked[f]; });
     }
-    function renderFontCheckboxes(){
+    function renderFontCheckboxes() {
       var wrap = $("#fontCheckboxes");
       var row = $("#fontRow");
       if (!wrap || !row) return;
       if (!usedFonts.length) { row.style.display = "none"; wrap.innerHTML = ""; return; }
       row.style.display = "flex";
-      wrap.innerHTML = usedFonts.map(function(f){
+      wrap.innerHTML = usedFonts.map(function (f) {
         var id = "font_" + f.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
         var checked = fontChecked[f] !== false;
         return "<label><input type='checkbox' id='" + escapeHtml(id) + "' data-font='" + escapeHtml(f) + "' " + (checked ? "checked" : "") + ">" + escapeHtml(f) + "</label>";
       }).join("");
-      wrap.querySelectorAll("input[type=checkbox]").forEach(function(cb){
-        cb.onchange = function(){ fontChecked[this.getAttribute("data-font")] = this.checked; };
+      wrap.querySelectorAll("input[type=checkbox]").forEach(function (cb) {
+        cb.onchange = function () { fontChecked[this.getAttribute("data-font")] = this.checked; };
       });
     }
 
@@ -299,25 +735,25 @@
       }
     }
 
-    $("#runDesktop").onclick = function(){
+    $("#runDesktop").onclick = function () {
       if (this.disabled) return;
       setLoading(true, "PC 분석 중…", "MO 분석");
       parent.postMessage({ pluginMessage: { type: "RUN_DESKTOP", projectName: getProjectName(), allowedFonts: getAllowedFonts() } }, "*");
     };
-    $("#runMobile").onclick = function(){
+    $("#runMobile").onclick = function () {
       if (this.disabled) return;
       setLoading(true, "PC 분석", "MO 분석 중…");
       parent.postMessage({ pluginMessage: { type: "RUN_MOBILE", projectName: getProjectName(), allowedFonts: getAllowedFonts() } }, "*");
     };
 
-    document.querySelectorAll(".tab").forEach(function(btn){
-      btn.onclick = function(){
+    document.querySelectorAll(".tab").forEach(function (btn) {
+      btn.onclick = function () {
         var t = this.getAttribute("data-tab");
-        document.querySelectorAll(".tab").forEach(function(b){ b.classList.remove("active"); });
-        document.querySelectorAll(".panel").forEach(function(p){ p.classList.remove("active"); });
+        document.querySelectorAll(".tab").forEach(function (b) { b.classList.remove("active"); });
+        document.querySelectorAll(".panel").forEach(function (p) { p.classList.remove("active"); });
         this.classList.add("active");
         var panel = document.getElementById("panel-" + t);
-        if(panel) panel.classList.add("active");
+        if (panel) panel.classList.add("active");
         if (t === "preview") refreshPreview();
       };
     });
@@ -341,14 +777,13 @@
       }
       refreshPreview();
     }
-    document.getElementById("previewViewPc").onclick = function() { setPreviewView("pc"); };
-    document.getElementById("previewViewMo").onclick = function() { setPreviewView("mo"); };
+    document.getElementById("previewViewPc").onclick = function () { setPreviewView("pc"); };
+    document.getElementById("previewViewMo").onclick = function () { setPreviewView("mo"); };
 
     function updatePreviewToolbar() {
       var hint = document.getElementById("previewStructureHint");
       var btnMo = document.getElementById("previewViewMo");
       if (hint) hint.style.display = separateViews ? "inline" : "none";
-      // MO 버튼: mobile 데이터가 있고, 이미지 청크 수신이 끝난 경우에만 표시 (미수신 시 MO 탭에서 _mo 배경 이미지가 깨짐)
       if (btnMo) btnMo.style.display = mobileDataTree && previewImagesReady ? "" : "none";
     }
 
@@ -357,27 +792,24 @@
     var previewImages = [];
     var zipImagesBuffer = [];
     var resultImagesBuffer = [];
-    /** MO 분석 시 이미지 청크 수신 완료 여부. true일 때만 MO 미리보기에서 _mo 배경 이미지가 정상 표시됨 */
     var previewImagesReady = true;
     var zipImagesCode = "";
     var payloadText = "";
     var dataTree = null;
     var mobileDataTree = null;
     var separateViews = false;
-    /** PC/MO 구조 불일치 섹션 번호 (예: ["03"]) — 데이터 탭 레드라인 표시용 */
     var hybridMismatchSecs = [];
     var selectedNode = null;
-    /** code.js RESULT에서 전달 (벡터 타입 목록 단일 정의) */
     var vectorTypes = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "LINE", "ELLIPSE", "POLYGON", "RECTANGLE"];
 
-    function escapeHtml(s){
-      if(s==null) return "";
+    function escapeHtml(s) {
+      if (s == null) return "";
       return String(s)
-        .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
-        .replace(/"/g,"&quot;");
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
     }
 
-    function setStatusText(t){
+    function setStatusText(t) {
       var st = $("#dataStatus");
       if (!st) return;
       st.textContent = t || "";
@@ -386,18 +818,18 @@
       st.classList.toggle("error", t === "ERROR");
     }
 
-    $("#openAll").onclick = function(){ toggleAll(true); };
-    $("#closeAll").onclick = function(){ toggleAll(false); };
+    $("#openAll").onclick = function () { toggleAll(true); };
+    $("#closeAll").onclick = function () { toggleAll(false); };
 
     // ====== plugin -> UI message handler ======
-    onmessage = function(e){
+    onmessage = function (e) {
       var msg = e.data.pluginMessage;
-      if(!msg) return;
+      if (!msg) return;
 
       if (msg.type === "LOADING") setLoading(!!msg.value);
       if (msg.type === "PROGRESS") setProgress(msg.phase, msg.current, msg.total);
 
-      if(msg.type==="RESULT"){
+      if (msg.type === "RESULT") {
         setLoading(false);
 
         payloadText = msg.text || "";
@@ -408,7 +840,7 @@
         if (msg.vectorTypes && msg.vectorTypes.length) vectorTypes = msg.vectorTypes;
 
         usedFonts = msg.usedFonts || [];
-        usedFonts.forEach(function(f){ if (fontChecked[f] === undefined) fontChecked[f] = true; });
+        usedFonts.forEach(function (f) { if (fontChecked[f] === undefined) fontChecked[f] = true; });
         renderFontCheckboxes();
 
         $("#out").value = payloadText;
@@ -452,7 +884,12 @@
         setExportZipReady();
         var zipImages = zipImagesBuffer.slice();
         var exportHtml = getPreviewHtml(true);
-        if (!exportHtml || !zipImagesCode.trim()) return;
+        if (!exportHtml && zipImagesCode.trim()) {
+          var raw = zipImagesCode.trim();
+          if (!/^<!DOCTYPE\s+html/i.test(raw)) raw = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head><body>" + raw + "</body></html>";
+          exportHtml = raw;
+        }
+        if (!exportHtml) return;
 
         var zip = new JSZip();
         zip.file("_cms.html", exportHtml);
@@ -474,6 +911,7 @@
           a.download = "export_" + dateTime + ".zip";
           a.click();
           URL.revokeObjectURL(a.href);
+          setStatusText("ZIP 다운로드 완료");
         });
         previewImages = zipImages;
         refreshPreview();
@@ -494,7 +932,7 @@
         if (stE) stE.textContent = "키 저장 실패: " + (msg.message || "");
       }
 
-      if(msg.type==="ERROR"){
+      if (msg.type === "ERROR") {
         setLoading(false);
         setExportZipReady();
 
@@ -508,7 +946,7 @@
         renderFontCheckboxes();
 
         $("#out").value = payloadText;
-        $("#codeOut").value = "";
+        // 코드 탭은 유지 (Export ZIP 실패 시에도 코드 보존)
 
         $("#tree").innerHTML = "";
         $("#detail").innerHTML = "<div class='detailHead'><h3>에러</h3><div class='muted'>" + escapeHtml(msg.message || "") + "</div></div>";
@@ -525,12 +963,12 @@
     };
 
     // ====== Tree rendering ======
-    function renderDataTree(dt){
+    function renderDataTree(dt) {
       $("#tree").innerHTML = "";
       selectedNode = null;
       updateDetail(null);
 
-      if (!dt || !dt.sections || !dt.sections.length){
+      if (!dt || !dt.sections || !dt.sections.length) {
         $("#treeMeta").textContent = "-";
         var emptyMsg = document.createElement("div");
         emptyMsg.className = "muted";
@@ -546,7 +984,7 @@
 
       $("#treeMeta").textContent = "sections=" + dt.sections.length;
 
-      dt.sections.forEach(function(sec){
+      dt.sections.forEach(function (sec) {
         var rootNode = sec.node;
         var secClass = (sec.title || "").replace(/^Section\s+/i, "").trim();
         var isMismatch = hybridMismatchSecs && hybridMismatchSecs.indexOf(secClass) >= 0;
@@ -572,7 +1010,7 @@
       });
     }
 
-    function renderNode(node){
+    function renderNode(node) {
       var d = document.createElement("details");
       d.open = false;
 
@@ -585,11 +1023,11 @@
       sum.dataset.search = buildSearchBlob(node, meta);
 
       sum.innerHTML =
-        meta.flags.map(function(f){ return badgeHtml(f); }).join("") +
+        meta.flags.map(function (f) { return badgeHtml(f); }).join("") +
         '<span class="name">' + escapeHtml(meta.type) + '</span>' +
         '<span class="muted">"' + escapeHtml(meta.name) + '"</span>';
 
-      sum.addEventListener("click", function(){
+      sum.addEventListener("click", function () {
         markSelected(sum);
         selectedNode = node;
         updateDetail(node);
@@ -598,27 +1036,27 @@
       d.appendChild(sum);
 
       var children = node.children || [];
-      if (children.length){
+      if (children.length) {
         var body = document.createElement("div");
         body.className = "childPad";
-        children.forEach(function(ch){ body.appendChild(renderNode(ch)); });
+        children.forEach(function (ch) { body.appendChild(renderNode(ch)); });
         d.appendChild(body);
       }
 
       return d;
     }
 
-    function badgeHtml(flag){
+    function badgeHtml(flag) {
       var cls = "";
-      if(flag==="FLEX") cls="flex";
-      else if(flag==="ABS") cls="abs";
-      else if(flag==="IMG_FILL" || flag==="COMPOSITE?") cls="img";
-      else if(flag==="VEC_ONLY") cls="vec";
-      else if(flag==="TEXT") cls="txt";
+      if (flag === "FLEX") cls = "flex";
+      else if (flag === "ABS") cls = "abs";
+      else if (flag === "IMG_FILL" || flag === "COMPOSITE?") cls = "img";
+      else if (flag === "VEC_ONLY") cls = "vec";
+      else if (flag === "TEXT") cls = "txt";
       return '<span class="badge ' + cls + '">' + escapeHtml(flag) + '</span>';
     }
 
-    function getNodeByPath(dt, path){
+    function getNodeByPath(dt, path) {
       if (!dt || !dt.sections || !path || !path.length) return null;
       var secIdx = path[0] - 1;
       if (secIdx < 0 || secIdx >= dt.sections.length) return null;
@@ -654,30 +1092,30 @@
       return null;
     }
 
-    function parseMetaFromLabel(label){
+    function parseMetaFromLabel(label) {
       var s = String(label || "").trim();
       var m = s.match(/([A-Z_]+)\s+"([^"]*)"(?:\s+\[([^\]]+)\])?.*$/);
       var type = m ? m[1] : "NODE";
       var name = m ? m[2] : s;
-      var flags = (m && m[3]) ? m[3].split(",").map(function(x){return x.trim();}).filter(Boolean) : [];
-      return { type:type, name:name, flags:flags };
+      var flags = (m && m[3]) ? m[3].split(",").map(function (x) { return x.trim(); }).filter(Boolean) : [];
+      return { type: type, name: name, flags: flags };
     }
 
-    function buildSearchBlob(node, meta){
+    function buildSearchBlob(node, meta) {
       var parts = [];
       parts.push(meta.type, meta.name, meta.flags.join(" "));
-      (node.props || []).forEach(function(p){ parts.push(p); });
+      (node.props || []).forEach(function (p) { parts.push(p); });
       return parts.join(" ").toLowerCase();
     }
 
-    function markSelected(sumEl){
-      document.querySelectorAll("summary.selected").forEach(function(x){ x.classList.remove("selected"); });
+    function markSelected(sumEl) {
+      document.querySelectorAll("summary.selected").forEach(function (x) { x.classList.remove("selected"); });
       sumEl.classList.add("selected");
-      $("#selPill").textContent = '선택: ' + (sumEl.dataset.type||"NODE") + ' "' + (sumEl.dataset.name||"") + '"';
+      $("#selPill").textContent = '선택: ' + (sumEl.dataset.type || "NODE") + ' "' + (sumEl.dataset.name || "") + '"';
     }
 
-    function updateDetail(node){
-      if(!node){
+    function updateDetail(node) {
+      if (!node) {
         $("#detail").innerHTML = "<div class='detailHead'><h3>노드 상세 정보</h3><div class='muted'>트리에서 항목을 클릭하면 상세 정보가 표시됩니다</div></div>";
         $("#selPill").textContent = "선택 없음";
         return;
@@ -691,7 +1129,7 @@
       html += "<h3>" + escapeHtml(meta.type) + " \"" + escapeHtml(meta.name) + "\"</h3>";
       if (meta.flags && meta.flags.length) {
         html += "<div class='detailFlags'>";
-        meta.flags.forEach(function(f){ html += badgeHtml(f); });
+        meta.flags.forEach(function (f) { html += badgeHtml(f); });
         html += "</div>";
       }
       html += "</div>";
@@ -720,7 +1158,7 @@
         sectionRelative: "섹션 기준", position: "위치", flex: "플렉스", layoutChild: "레이아웃",
         bg: "배경", bgImage: "배경 이미지", text: "내용", vector: "벡터"
       };
-      var parsed = props.map(function(p){ var kv = parsePropLine(p); return { key: kv.key, value: kv.value }; });
+      var parsed = props.map(function (p) { var kv = parsePropLine(p); return { key: kv.key, value: kv.value }; });
 
       function getParsed(key) { for (var i = 0; i < parsed.length; i++) if (parsed[i].key === key) return parsed[i].value; return null; }
       var bgVal = getParsed("bg");
@@ -729,7 +1167,7 @@
         html += row("배경", [bgVal, bgImageVal].filter(Boolean).join("; "));
       }
 
-      keyOrder.forEach(function(orderedKey){
+      keyOrder.forEach(function (orderedKey) {
         if (orderedKey === "bg" || orderedKey === "bgImage") return;
         for (var i = 0; i < parsed.length; i++) {
           if (parsed[i].key === orderedKey) {
@@ -738,7 +1176,7 @@
           }
         }
       });
-      parsed.forEach(function(kv){
+      parsed.forEach(function (kv) {
         if (kv.key !== "bg" && kv.key !== "bgImage" && keyOrder.indexOf(kv.key) === -1) html += row(keyLabel[kv.key] || kv.key, kv.value);
       });
 
@@ -748,39 +1186,39 @@
           html += row("상태", "레이어 구조가 달라 매칭 불가");
           html += "</div>";
         } else {
-        var moNode = getNodeByPath(mobileDataTree, node.path);
-        if (moNode) {
-          html += "<div class='kv' style='margin-top:12px;padding-top:12px;border-top:1px solid #e0e4e8;'><h4 style='margin:0 0 8px 0;font-size:12px;color:#0d6db7;'>MO (매칭)</h4>";
-          var hasMoContent = false;
-          if (moNode.textMeta) {
-            var tm = moNode.textMeta;
-            var moParts = [];
-            if (tm.fs !== undefined && tm.fs !== "") moParts.push("font-size:" + tm.fs + "px");
-            if (tm.lh !== undefined && tm.lh !== "") moParts.push("line-height:" + tm.lh + (Number(tm.lh) <= 3 ? "" : "px"));
-            if (tm.fontFamily !== undefined && tm.fontFamily !== "") moParts.push("font:" + (tm.fontFamily || "") + (tm.fontStyle ? " " + tm.fontStyle : ""));
-            if (tm.fw !== undefined && tm.fw !== "") moParts.push("font-weight:" + tm.fw);
-            if (tm.ta !== undefined && tm.ta !== "") moParts.push("text-align:" + tm.ta);
-            if (tm.clr !== undefined && tm.clr !== "") moParts.push("color:" + tm.clr);
-            if (moParts.length) { html += row("텍스트 스타일", moParts.join("; ")); hasMoContent = true; }
-          }
-          if (moNode.props && moNode.props.length) {
-            var moParsed = moNode.props.map(function(p){ var kv = parsePropLine(p); return { key: kv.key, value: kv.value }; });
-            keyOrder.forEach(function(orderedKey){
-              for (var i = 0; i < moParsed.length; i++) {
-                if (moParsed[i].key === orderedKey) {
-                  html += row((keyLabel[orderedKey] || orderedKey), moParsed[i].value);
-                  hasMoContent = true;
-                  return;
+          var moNode = getNodeByPath(mobileDataTree, node.path);
+          if (moNode) {
+            html += "<div class='kv' style='margin-top:12px;padding-top:12px;border-top:1px solid #e0e4e8;'><h4 style='margin:0 0 8px 0;font-size:12px;color:#0d6db7;'>MO (매칭)</h4>";
+            var hasMoContent = false;
+            if (moNode.textMeta) {
+              var tm2 = moNode.textMeta;
+              var moParts = [];
+              if (tm2.fs !== undefined && tm2.fs !== "") moParts.push("font-size:" + tm2.fs + "px");
+              if (tm2.lh !== undefined && tm2.lh !== "") moParts.push("line-height:" + tm2.lh + (Number(tm2.lh) <= 3 ? "" : "px"));
+              if (tm2.fontFamily !== undefined && tm2.fontFamily !== "") moParts.push("font:" + (tm2.fontFamily || "") + (tm2.fontStyle ? " " + tm2.fontStyle : ""));
+              if (tm2.fw !== undefined && tm2.fw !== "") moParts.push("font-weight:" + tm2.fw);
+              if (tm2.ta !== undefined && tm2.ta !== "") moParts.push("text-align:" + tm2.ta);
+              if (tm2.clr !== undefined && tm2.clr !== "") moParts.push("color:" + tm2.clr);
+              if (moParts.length) { html += row("텍스트 스타일", moParts.join("; ")); hasMoContent = true; }
+            }
+            if (moNode.props && moNode.props.length) {
+              var moParsed = moNode.props.map(function (p) { var kv = parsePropLine(p); return { key: kv.key, value: kv.value }; });
+              keyOrder.forEach(function (orderedKey) {
+                for (var i = 0; i < moParsed.length; i++) {
+                  if (moParsed[i].key === orderedKey) {
+                    html += row((keyLabel[orderedKey] || orderedKey), moParsed[i].value);
+                    hasMoContent = true;
+                    return;
+                  }
                 }
-              }
-            });
-            moParsed.forEach(function(kv){
-              if (keyOrder.indexOf(kv.key) === -1) { html += row(keyLabel[kv.key] || kv.key, kv.value); hasMoContent = true; }
-            });
+              });
+              moParsed.forEach(function (kv) {
+                if (keyOrder.indexOf(kv.key) === -1) { html += row(keyLabel[kv.key] || kv.key, kv.value); hasMoContent = true; }
+              });
+            }
+            if (!hasMoContent) html += row("상태", "인덱스 매칭 (레이어 순서 동일)");
+            html += "</div>";
           }
-          if (!hasMoContent) html += row("상태", "인덱스 매칭 (레이어 순서 동일)");
-          html += "</div>";
-        }
         }
       }
       html += "</div>";
@@ -788,7 +1226,7 @@
       $("#detail").innerHTML = html;
     }
 
-    function parsePropLine(p){
+    function parsePropLine(p) {
       if (typeof p !== "string") return { key: "prop", value: String(p) };
       var idx = p.indexOf(":");
       if (idx === -1) return { key: "prop", value: p.trim() };
@@ -797,20 +1235,19 @@
       return { key: k || "prop", value: v };
     }
 
-    function row(k, v, rowClass){
+    function row(k, v, rowClass) {
       var cls = "row" + (rowClass ? " " + rowClass : "");
       return "<div class='" + cls + "'><div class='k'>" + escapeHtml(k) + "</div><div class='v'>" + escapeHtml(v) + "</div></div>";
     }
 
-    function toggleAll(open){
-      $("#tree").querySelectorAll("details").forEach(function(d){ d.open = open; });
+    function toggleAll(open) {
+      $("#tree").querySelectorAll("details").forEach(function (d) { d.open = open; });
     }
 
     // ====== Preview ======
     var previewBlobUrl = null;
     var previewViewMode = "pc";
 
-    /** ZIP·미리보기용 — ap-ai-audit 블록은 산출물에 포함하지 않음 */
     function stripEmbeddedAuditReport(html) {
       return String(html || "").replace(
         /<!--\s*ap-ai-audit:start\s*-->[\s\S]*?<!--\s*ap-ai-audit:end\s*-->\s*/gi,
@@ -822,7 +1259,6 @@
       var raw = stripEmbeddedAuditReport(($("#codeOut") && $("#codeOut").value) || "");
       if (!raw.trim()) return "";
 
-      // preview에서 assets/images/... 를 dataUrl로 치환
       var styleMatches = raw.match(/<style>[\s\S]*?<\/style>/ig) || [];
       var style = styleMatches.join("\n");
       var body = raw.replace(/<style>[\s\S]*?<\/style>/ig, "").replace(/^\s+/, "");
@@ -843,7 +1279,7 @@
           }
           return m;
         }
-        body  = body.replace(imgRe,  replacePath);
+        body = body.replace(imgRe, replacePath);
         style = style.replace(imgRe, replacePath);
       }
 
@@ -880,350 +1316,845 @@
       }
     }
 
-      // ====== AI 정리: OpenAI 키는 figma.clientStorage (code.js 경유) ======
-  var cachedOpenaiKey = "";
-  (function requestStoredOpenaiKey() {
-    parent.postMessage({ pluginMessage: { type: "LOAD_OPENAI_KEY" } }, "*");
-  })();
+    // ====== AI 정리: OpenAI 키는 figma.clientStorage (code.js 경유) ======
+    var cachedOpenaiKey = "";
+    (function requestStoredOpenaiKey() {
+      parent.postMessage({ pluginMessage: { type: "LOAD_OPENAI_KEY" } }, "*");
+    })();
 
-  window.__apLastAuditAltProposals = null;
-  window.__apLastAuditReport = null;
+    window.__apLastAuditAltProposals = null;
+    window.__apLastAuditReport = null;
 
-  var openaiKeyEl = $("#openaiKey");
-  if (openaiKeyEl) {
-    openaiKeyEl.addEventListener("blur", function () {
-      var v = String(this.value || "").trim();
-      cachedOpenaiKey = v;
-      parent.postMessage(
-        { pluginMessage: { type: "SAVE_OPENAI_KEY", key: v } },
-        "*"
-      );
-    });
-  }
-
-  // --------------------------------------------------
-  // 공통 유틸
-  // --------------------------------------------------
-  function getCodeEl() {
-    return $("#codeOut");
-  }
-
-  function getCodeValue() {
-    var codeEl = getCodeEl();
-    return (codeEl && codeEl.value) || "";
-  }
-
-  function setCodeValue(v) {
-    var codeEl = getCodeEl();
-    if (codeEl) codeEl.value = String(v || "");
-  }
-
-  function setAiStatus(msg) {
-    var st = $("#aiRefineStatus");
-    if (st) st.textContent = msg || "";
-  }
-
-  function ensureCodeExists() {
-    var code = getCodeValue();
-    if (!String(code).trim()) {
-      alert("먼저 PC/MO 분석으로 코드를 만든 뒤 시도하세요.");
-      return false;
-    }
-    return true;
-  }
-
-  function ensureOpenAiKeyExists() {
-    var key = (openaiKeyEl && String(openaiKeyEl.value || "").trim()) || cachedOpenaiKey;
-    if (!key) {
-      alert("OpenAI API 키를 입력한 뒤 포커스를 벗어나 저장하거나, 키를 입력하세요.");
-      return "";
-    }
-    cachedOpenaiKey = key;
-    return key;
-  }
-
-  function getAiModel() {
-    var modelEl = $("#aiModel");
-    return (modelEl && modelEl.value) || "gpt-4o";
-  }
-
-  function countImgs(code) {
-    var m = String(code || "").match(/<img\b/gi);
-    return m ? m.length : 0;
-  }
-
-  function detectPageLanguage(code) {
-    var s = String(code || "");
-    if (/[ぁ-んァ-ン一-龯]/.test(s)) return "Japanese";
-    if (/[a-zA-Z]/.test(s) && !/[가-힣]/.test(s)) return "English";
-    return "Korean";
-  }
-
-  /**
-   * 분석 버튼 전용 — SEO·GEO·접근성 리포트 (코드는 건드리지 않음)
-   * {{N_IMG}}, {{LANG}} 자동 치환
-   */
-  var AP_AI_ANALYSIS_SYSTEM_PROMPT_TEMPLATE = [
-    "HTML/CSS quality auditor. Output ONLY one JSON object. Never output HTML, CSS, or markdown.",
-    "Required keys: seo, geo, a11y, altProposals.",
-    "LANGUAGE: Human-readable strings in Korean — seo.issues, seo.suggestions, geo.issues, a11y.issues, a11y.suggestions.",
-    "seo: { issues: string[], suggestions: string[] } 검색·콘텐츠 관점.",
-    "geo: { structure: [ { text, role } ], issues: string[] } role: title|subtitle|description|caption|cta|label|body.",
-    "a11y: { issues: string[], suggestions: string[] } 접근성.",
-    "altProposals: string[] exactly {{N_IMG}} entries (img 문서 순서), 참고용 제안. 장식용은 빈 문자열.",
-    "Page language hint: {{LANG}}.",
-  ].join("\n");
-
-  var AP_AI_ANALYSIS_USER_PROMPT_PREFIX =
-    "아래 HTML/CSS를 분석해 JSON만 반환. 이슈·제안은 한국어로.\n\n---\n";
-
-  /**
-   * 반영 버튼 전용 — 여기 룰만 AI에 넘어감 (원하는 작업을 직접 적어도 됨)
-   * 코드 적용: altProposals가 있으면 img 순서대로 alt 반영. applyNotes는 하단 삽입 블록에 표시.
-   * {{N_IMG}}, {{LANG}} 자동 치환
-   */
-  var AP_AI_APPLY_SYSTEM_PROMPT_TEMPLATE = [
-    "출력은 JSON 객체 하나만. HTML/CSS/마크다운 금지.",
-    "이 문서의 <img>는 문서 순서대로 총 {{N_IMG}}개다.",
-    "할 일: 모든 이미지를 문맥에 맞게 분석하고, 각 img에 쓸 대체 텍스트를 altProposals 배열로 반환한다.",
-    "altProposals: 문자열 배열, img 순서와 정확히 {{N_IMG}}개. 순수 장식 이미지는 빈 문자열.",
-    "선택 applyNotes: string[] — 반영 요약(한국어, 짧게). 코드 하단 삽입 블록에 표시된다.",
-    "페이지 언어 힌트: {{LANG}} — alt는 그 말투에 맞출 것.",
-  ].join("\n");
-
-  var AP_AI_APPLY_USER_PROMPT_PREFIX =
-    "아래 HTML/CSS에 대해 시스템 지시를 수행하고 JSON만 출력.\n\n---\n";
-
-  function expandApPlaceholders(template, htmlCode) {
-    var nImg = countImgs(htmlCode);
-    var lang = detectPageLanguage(htmlCode);
-    return String(template || "")
-      .replace(/\{\{N_IMG\}\}/g, String(nImg))
-      .replace(/\{\{LANG\}\}/g, lang);
-  }
-
-  function runOpenAiJsonApi(htmlCode, systemContent, userPrefix) {
-    var key = (openaiKeyEl && String(openaiKeyEl.value || "").trim()) || cachedOpenaiKey;
-    if (!key) return Promise.reject(new Error("OpenAI API 키가 필요합니다."));
-    var snippet =
-      htmlCode.length > 120000 ? htmlCode.slice(0, 120000) + "\n/* truncated */" : htmlCode;
-    return fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
-      body: JSON.stringify({
-        model: getAiModel(),
-        messages: [
-          { role: "system", content: systemContent },
-          { role: "user", content: userPrefix + snippet },
-        ],
-        temperature: 0,
-        max_tokens: 8192,
-        response_format: { type: "json_object" },
-      }),
-    })
-      .then(function (res) {
-        return res.json().then(function (data) {
-          return { res: res, data: data };
-        });
-      })
-      .then(function (_ref) {
-        var res = _ref.res,
-          data = _ref.data;
-        if (!res.ok) throw new Error((data.error && data.error.message) || res.statusText);
-        var text =
-          data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-        if (!text) throw new Error("empty");
-        return JSON.parse(String(text).trim());
+    var openaiKeyEl = $("#openaiKey");
+    if (openaiKeyEl) {
+      openaiKeyEl.addEventListener("blur", function () {
+        var v = String(this.value || "").trim();
+        cachedOpenaiKey = v;
+        parent.postMessage(
+          { pluginMessage: { type: "SAVE_OPENAI_KEY", key: v } },
+          "*"
+        );
       });
-  }
+    }
 
-  function runOpenAiAnalysisApi(htmlCode) {
-    return runOpenAiJsonApi(
-      htmlCode,
-      expandApPlaceholders(AP_AI_ANALYSIS_SYSTEM_PROMPT_TEMPLATE, htmlCode),
-      AP_AI_ANALYSIS_USER_PROMPT_PREFIX
-    );
-  }
+    // --------------------------------------------------
+    // 공통 유틸
+    // --------------------------------------------------
+    function getCodeEl() {
+      return $("#codeOut");
+    }
 
-  function runOpenAiApplyApi(htmlCode) {
-    return runOpenAiJsonApi(
-      htmlCode,
-      expandApPlaceholders(AP_AI_APPLY_SYSTEM_PROMPT_TEMPLATE, htmlCode),
-      AP_AI_APPLY_USER_PROMPT_PREFIX
-    );
-  }
+    function getCodeValue() {
+      var codeEl = getCodeEl();
+      return (codeEl && codeEl.value) || "";
+    }
 
-  function escapeAttr(s) {
-    return String(s || "")
-      .replace(/&/g, "&amp;")
-      .replace(/"/g, "&quot;")
-      .replace(/</g, "&lt;");
-  }
-
-  function applyAltProposalsToCode(html, proposals) {
-    var list = Array.isArray(proposals) ? proposals.slice() : [];
-    var i = 0;
-    return String(html || "").replace(/<img\b[^>]*>/gi, function (tag) {
-      var alt = i < list.length ? list[i++] : null;
-      if (alt == null || alt === undefined) return tag;
-      var val = String(alt);
-      if (/\balt\s*=\s*["']/i.test(tag)) {
-        return tag.replace(/\balt\s*=\s*["'][^"']*["']/i, 'alt="' + escapeAttr(val) + '"');
+    /** AI 분석 시 CMS 등록 영역만 사용 — <style>...</style> + <article class="ap-post">...</article> */
+    function extractCmsPartForAudit(code) {
+      if (!code || !String(code).trim()) return code;
+      var parts = [];
+      var s = String(code);
+      var styleRe = /<style[^>]*>[\s\S]*?<\/style>/gi;
+      var styleM;
+      while ((styleM = styleRe.exec(s)) !== null) parts.push(styleM[0]);
+      var articleRe = /<article\b[^>]*\bclass\s*=\s*["'][^"']*\bap-post\b[^"']*["'][^>]*>/i;
+      var articleOpen = s.search(articleRe);
+      if (articleOpen === -1) return parts.length ? parts.join("\n") : code;
+      var afterOpen = s.indexOf(">", articleOpen) + 1;
+      var depth = 1;
+      var pos = afterOpen;
+      while (depth > 0 && pos < s.length) {
+        var nextOpen = s.indexOf("<article", pos);
+        var nextClose = s.indexOf("</article>", pos);
+        if (nextClose === -1) break;
+        if (nextOpen !== -1 && nextOpen < nextClose) {
+          depth++;
+          pos = s.indexOf(">", nextOpen) + 1;
+        } else {
+          depth--;
+          if (depth === 0) {
+            parts.push(s.substring(articleOpen, nextClose + "</article>".length));
+            break;
+          }
+          pos = nextClose + 10;
+        }
       }
-      return tag.replace(/<img\b/i, '<img alt="' + escapeAttr(val) + '"');
-    });
-  }
-
-  function buildAuditReportInnerHtml(obj) {
-    obj = obj || {};
-    function ul(arr, title) {
-      arr = Array.isArray(arr) ? arr : [];
-      if (!arr.length) return "";
-      return (
-        "<div style='margin-bottom:10px;'><strong style='color:#1565c0'>" +
-        title +
-        "</strong><ul style='margin:4px 0 0 16px;padding:0;'>" +
-        arr
-          .map(function (x) {
-            return "<li>" + String(x).replace(/</g, "&lt;") + "</li>";
-          })
-          .join("") +
-        "</ul></div>"
-      );
+      return parts.length ? parts.join("\n") : code;
     }
-    var geoRoleKo = {
-      title: "제목",
-      subtitle: "부제",
-      description: "설명",
-      caption: "캡션",
-      cta: "행동유도",
-      label: "라벨",
-      body: "본문",
-    };
-    function geoTable(struct) {
-      struct = Array.isArray(struct) ? struct : [];
-      if (!struct.length) return "";
-      var rows = struct
-        .map(function (r) {
-          var t = r && r.text != null ? String(r.text).slice(0, 220) : "";
-          var roleKey = r && r.role != null ? String(r.role).toLowerCase().trim() : "";
-          var role = geoRoleKo[roleKey] || roleKey || "—";
-          return (
-            "<tr><td style='padding:2px 8px 2px 0;vertical-align:top;white-space:nowrap'>" +
-            role.replace(/</g, "&lt;") +
-            "</td><td>" +
-            t.replace(/</g, "&lt;") +
-            "</td></tr>"
-          );
+
+    function setCodeValue(v) {
+      var codeEl = getCodeEl();
+      if (codeEl) codeEl.value = String(v || "");
+    }
+
+    function setAiStatus(msg) {
+      var st = $("#aiRefineStatus");
+      if (st) st.textContent = msg || "";
+    }
+
+    function ensureCodeExists() {
+      var code = getCodeValue();
+      if (!String(code).trim()) {
+        alert("먼저 PC/MO 분석으로 코드를 만든 뒤 시도하세요.");
+        return false;
+      }
+      return true;
+    }
+
+    function ensureOpenAiKeyExists() {
+      var key = (openaiKeyEl && String(openaiKeyEl.value || "").trim()) || cachedOpenaiKey;
+      if (!key) {
+        alert("OpenAI API 키를 입력한 뒤 포커스를 벗어나 저장하거나, 키를 입력하세요.");
+        return "";
+      }
+      cachedOpenaiKey = key;
+      return key;
+    }
+
+    function getAiModel() {
+      var modelEl = $("#aiModel");
+      return (modelEl && modelEl.value) || "gpt-4o";
+    }
+
+    function countImgs(code) {
+      var m = String(code || "").match(/<img\b/gi);
+      return m ? m.length : 0;
+    }
+
+    function detectPageLanguage(code) {
+      var s = String(code || "");
+      if (/[ぁ-んァ-ン一-龯]/.test(s)) return "Japanese";
+      if (/[a-zA-Z]/.test(s) && !/[가-힣]/.test(s)) return "English";
+      return "Korean";
+    }
+
+    /**
+     * 분석 버튼 전용 — 검수 리포트
+     * {{N_IMG}}, {{LANG}} 자동 치환
+     */
+    var AP_AI_ANALYSIS_SYSTEM_PROMPT_TEMPLATE = [
+      "당신은 HTML/CSS 검수 리포트 생성 엔진이다.",
+      "반드시 하나의 JSON 객체만 출력한다. HTML, CSS, 설명, 코드블록은 절대 출력하지 않는다.",
+      "",
+      "범위 제한:",
+      "- 입력은 전체 HTML 문서가 아니다.",
+      "- <style>...</style>와 <article class=\"ap-post\">...</article> 내부만 검수한다.",
+      "- head, title, meta, canonical, og, schema, lang 등 문서 바깥 영역은 절대 판단하지 않는다.",
+      "- CMS 본문 조각(fragment) 기준으로만 판단한다.",
+      "",
+      "목표:",
+      "- SEO(본문 기준), GEO, 접근성, 시맨틱 구조, alt 품질, heading 구조를 검수한다.",
+      "- 코드 수정이 아니라 검수 리포트를 작성한다.",
+      "- 명확하게 확인 가능한 문제만 보고한다.",
+      "- 애매하면 과도하게 추정하지 말고 ambiguous로 판단한다.",
+      "",
+      "출력 스타일:",
+      "- 결과는 간결하고 핵심만 작성한다.",
+      "- 동일한 문제를 여러 섹션에서 반복하지 않는다.",
+      "- 의미 없는 나열 금지. 중요한 문제만 보고한다.",
+      "- 문제 없으면 빈 배열을 반환한다.",
+      "",
+      "출력 키:",
+      "- summary",
+      "- seo",
+      "- geo",
+      "- a11y",
+      "- semantics",
+      "- alts",
+      "- headingAudit",
+      "- altProposals",
+      "",
+      "summary 형식:",
+      "{ overall: 'pass'|'warn'|'fail', score: number, oneLine: string }",
+      "",
+      "Issue 형식:",
+      "{ severity: 'high'|'medium'|'low', type: string, target: string, selectorHint: string, problem: string, why: string, fix: string }",
+      "",
+      "seo 형식:",
+      "{ issues: Issue[], suggestions: string[] }",
+      "",
+      "geo 형식:",
+      "{ structure: [{ text: string, role: 'title'|'subtitle'|'description'|'caption'|'cta'|'label'|'body', evidence: string }], issues: Issue[], suggestions: string[], extractability: { titleClear: boolean, entityCoverage: string[], missingEntities: string[] } }",
+      "",
+      "a11y 형식:",
+      "{ issues: Issue[], suggestions: string[] }",
+      "",
+      "semantics 형식:",
+      "{ issues: Issue[], suggestions: string[] }",
+      "",
+      "alts 형식:",
+      "[{ index: number, srcHint: string, currentAlt: string, decision: 'keep'|'fix'|'empty'|'ambiguous', reason: string, proposal: string }]",
+      "",
+      "headingAudit 형식:",
+      "{ outline: [{ level: string, text: string }], issues: Issue[], candidates: [{ text: string, decision: 'title'|'subtitle'|'not-heading'|'ambiguous', recommendedLevel: 'h1'|'h2'|'h3'|'', reason: string, selectorHint: string }] }",
+      "",
+      "altProposals 형식:",
+      "- string[] 정확히 {{N_IMG}}개 (img 순서 기준)",
+      "- 장식 이미지는 빈 문자열",
+      "",
+      "검수 규칙:",
+      "- 반드시 fragment 내부만 판단한다.",
+      "- meta, title, og, schema 누락은 이슈로 보고하지 않는다.",
+      "",
+      "- SEO:",
+      "  * heading 오용, 텍스트 부족, 이미지 의존 정보, 의미 없는 반복 텍스트 위주로 판단한다.",
+      "",
+      "- GEO:",
+      "  * 페이지 주제, 섹션 목적, 주요 엔티티가 텍스트 기반으로 추출 가능한지 판단한다.",
+      "",
+      "- 접근성:",
+      "  * alt 품질, 장식 이미지 처리, 텍스트 대체 가능성 중심으로 판단한다.",
+      "",
+      "- 시맨틱:",
+      "  * 제공된 마크업 내부에서 역할이 명확한지 판단한다.",
+      "",
+      "- Heading:",
+      "  * Heading 판단은 반드시 '정보 구조' 기준으로 한다.",
+      "  * 텍스트 크기, 굵기, 위치, 스타일(CSS)은 절대 판단 기준이 아니다.",
+      "  * NEVER infer heading from visual style.",
+      "  * 시각적으로 커 보여도 주제를 대표하지 않으면 heading이 아니다.",
+      "  * 섹션의 주제를 대표하는 텍스트만 heading 후보로 본다.",
+      "  * 카드, 리스트, 버튼, 라벨, 가격, 캡션, 설명 문구는 heading이 아니다.",
+      "",
+      "  * h1은 반드시 .ap-section--01 내부에서만 찾는다.",
+      "  * 다른 섹션에서 h1을 선택하지 않는다.",
+      "  * .ap-section--01에 명확한 제목이 없으면 ambiguous로 판단한다.",
+      "",
+      "  * h1은 1개를 권장하며, 1개인 경우 SEO 이슈로 판단하지 않는다.",
+      "  * h2, h3는 정보 구조상 필요하면 여러 개 가능하다.",
+      "  * h2가 여러 개라는 이유만으로 이슈로 판단하지 않는다.",
+      "",
+      "  * heading 이슈는 개수보다 '정보 구조 적합성'을 기준으로 판단한다.",
+      "  * h1,h2,h3만 사용하며 레벨 스킵은 허용하지 않는다.",
+      "",
+      "  * 주요 타이틀이 이미지에만 존재하면 alt로 대체하지 말고 숨김텍스트(h1) 제공을 제안한다.",
+      "",
+      "- Alt:",
+      "  * 파일명형, 중복, 의미 없는 alt를 감지한다.",
+      "  * 장식 이미지는 빈 문자열로 처리한다.",
+      "  * 제품명/텍스트는 문맥에서만 가져오며 임의 생성하지 않는다.",
+      "",
+      "셀렉터 규칙:",
+      "- selectorHint는 'img[2]' 또는 '.ap-section--02 .ap-image__text--01'처럼 간결하게 작성한다.",
+      "- target은 사람이 이해하기 쉽게 작성한다.",
+      "",
+      "페이지 언어: {{LANG}}"
+    ].join("\n");
+
+    var AP_AI_ANALYSIS_USER_PROMPT_PREFIX =
+      "아래는 CMS 등록용 본문 조각입니다. 전체 HTML 문서가 아닙니다.\n" +
+      "<style>와 <article class=\"ap-post\"> 내부만 검수하세요.\n" +
+      "head, meta, title, og, canonical, schema, html/body 등 문서 바깥 영역은 절대 판단하지 마세요.\n" +
+      "본문 안에서 확인 가능한 문제만 간결하게 보고해 주세요.\n\n---\n";
+
+    /**
+     * 반영(AP_AI_APPLY) 규칙 레지스트리
+     */
+    var AP_AI_APPLY_RULES = [
+      {
+        id: "alt",
+        buildLines: function (ctx) {
+          return [
+            "[규칙: alt]",
+            "이 작업은 CMS 본문 조각(<style> + <article class=\"ap-post\">) 기준으로만 판단한다.",
+            "<img>는 문서 순서대로 총 " + ctx.nImg + "개.",
+            "altProposals: string[], img 순서와 정확히 " + ctx.nImg + "개를 반환한다. 순수 장식 이미지는 빈 문자열.",
+            "현재 alt가 적절하면 그대로 유지 가능하다.",
+            "파일명형 alt, 레이어명형 alt, src 복사형 alt, 의미 없는 generic alt(image, img, visual 등), 주변 리얼텍스트 반복 alt는 수정 대상으로 본다.",
+            "alt는 이미지 설명용이다. 제목 구조(h1/h2/h3)를 대신하지 않는다.",
+            "제품만 보이는 이미지면 제품명 위주로 짧게 작성한다.",
+            "페이지 언어와 alt 언어가 다르면 수정 대상으로 본다.",
+            "문맥상 확실하지 않으면 공격적으로 추정하지 말고 현재 alt 유지 또는 보수적으로 제안한다."
+          ];
+        }
+      },
+      {
+        id: "heading",
+        buildLines: function () {
+          return [
+            "[규칙: 헤딩(정보 구조)]",
+            "이 작업은 CMS 본문 조각(<style> + <article class=\"ap-post\">) 기준으로만 판단한다.",
+            "헤딩은 반드시 텍스트 크기나 굵기, 위치, 스타일이 아니라 정보 구조 기준으로 판단한다.",
+            "시각적으로 커 보여도 섹션/페이지의 주제를 대표하지 않으면 heading으로 판단하지 않는다.",
+            "대표 제목 후보와 하위 제목 후보를 보수적으로 판단한다.",
+            "카드 제목, 리스트 항목명, 장식 문구, 짧은 라벨, 가격, 버튼 문구, 캡션, 설명 문장은 heading으로 승격하지 않는다.",
+            "섹션의 주제를 대표하는 텍스트만 heading 후보로 본다.",
+            "h1은 반드시 .ap-section--01 내부에서만 찾는다.",
+            "다른 섹션에서 h1을 뽑지 않는다.",
+            ".ap-section--01 안에 명확한 대표 제목이 없으면 억지로 h1을 만들지 말고 보류한다.",
+            "주요 타이틀이 이미지 안에만 있으면 alt로 대체하지 말고, 숨김텍스트 형태의 h1 제공을 우선 제안한다.",
+            "heading은 h1~h3 범위 안에서만 제안한다.",
+            "레벨 스킵(h1 다음 바로 h3 등)은 만들지 않는다.",
+            "문서 전체에 heading이 과도하게 많아지지 않게 한다.",
+            "동일한 성격의 반복 카드/배너마다 heading을 남발하지 않는다.",
+            "headingPatches: [ { before: string, after: string }, ... ].",
+            "before는 입력 HTML에서 정확히 한 번만 매칭될 수 있는 문자열로 작성한다.",
+            "after는 필요한 최소 수정만 반영한 HTML이어야 한다.",
+            "구조 전체를 재작성하지 말고, 필요한 최소 범위만 수정한다.",
+            "변경이 불확실하면 headingPatches에 넣지 않는다."
+          ];
+        }
+      }
+    ];
+
+    function buildApApplySystemPrompt(htmlCode) {
+      var ctx = {
+        nImg: countImgs(htmlCode),
+        lang: detectPageLanguage(htmlCode)
+      };
+      var lines = [
+        "출력은 JSON 객체 하나만. HTML/CSS/마크다운 금지.",
+        "필수 키: altProposals (string[] 길이=" + ctx.nImg + "), headingPatches ([{before,after}] 배열).",
+        "선택: applyNotes (string[], 한국어 짧은 요약)."
+      ];
+      for (var r = 0; r < AP_AI_APPLY_RULES.length; r++) {
+        lines = lines.concat(AP_AI_APPLY_RULES[r].buildLines(ctx));
+      }
+      lines.push("페이지 언어: " + ctx.lang + " — alt 등 노출 문구는 해당 언어 톤에 맞출 것.");
+      return lines.join("\n");
+    }
+
+    var AP_AI_APPLY_USER_PROMPT_PREFIX =
+      "아래 HTML/CSS에 대해 시스템 지시를 수행하고 JSON만 출력.\n\n---\n";
+
+    function expandApPlaceholders(template, htmlCode) {
+      var nImg = countImgs(htmlCode);
+      var lang = detectPageLanguage(htmlCode);
+      return String(template || "")
+        .replace(/\{\{N_IMG\}\}/g, String(nImg))
+        .replace(/\{\{LANG\}\}/g, lang);
+    }
+
+    function runOpenAiJsonApi(htmlCode, systemContent, userPrefix) {
+      var key = (openaiKeyEl && String(openaiKeyEl.value || "").trim()) || cachedOpenaiKey;
+      if (!key) return Promise.reject(new Error("OpenAI API 키가 필요합니다."));
+      var snippet =
+        htmlCode.length > 120000 ? htmlCode.slice(0, 120000) + "\n/* truncated */" : htmlCode;
+      return fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
+        body: JSON.stringify({
+          model: getAiModel(),
+          messages: [
+            { role: "system", content: systemContent },
+            { role: "user", content: userPrefix + snippet }
+          ],
+          temperature: 0,
+          max_tokens: 8192,
+          response_format: { type: "json_object" }
         })
-        .join("");
-      return (
-        "<div style='margin-bottom:10px;'><strong style='color:#1565c0'>GEO 구조</strong><table style='font-size:10px;margin-top:4px;border-collapse:collapse'>" +
-        rows +
-        "</table></div>"
+      })
+        .then(function (res) {
+          return res.json().then(function (data) {
+            return { res: res, data: data };
+          });
+        })
+        .then(function (_ref) {
+          var res = _ref.res, data = _ref.data;
+          if (!res.ok) throw new Error((data.error && data.error.message) || res.statusText);
+          var text =
+            data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+          if (!text) throw new Error("empty");
+          return JSON.parse(String(text).trim());
+        });
+    }
+
+    function runOpenAiAnalysisApi(htmlCode) {
+      return runOpenAiJsonApi(
+        htmlCode,
+        expandApPlaceholders(AP_AI_ANALYSIS_SYSTEM_PROMPT_TEMPLATE, htmlCode),
+        AP_AI_ANALYSIS_USER_PROMPT_PREFIX
       );
     }
-    var seo = obj.seo || {};
-    var geo = obj.geo || {};
-    var a11y = obj.a11y || {};
-    return (
-      ul(seo.issues, "SEO 이슈") +
-      ul(seo.suggestions, "SEO 제안") +
-      geoTable(geo.structure) +
-      ul(geo.issues, "GEO 이슈") +
-      ul(a11y.issues, "접근성 이슈") +
-      ul(a11y.suggestions, "접근성 제안") +
-      ul(Array.isArray(obj.applyNotes) ? obj.applyNotes : [], "반영 메모")
-    );
-  }
 
-  function renderAuditReport(obj) {
-    var el = $("#aiAuditReport");
-    if (!el) return;
-    var inner = buildAuditReportInnerHtml(obj);
-    el.innerHTML = inner;
-    el.style.display = inner.trim() ? "block" : "none";
-  }
+    function runOpenAiApplyApi(htmlCode) {
+      return runOpenAiJsonApi(htmlCode, buildApApplySystemPrompt(htmlCode), AP_AI_APPLY_USER_PROMPT_PREFIX);
+    }
 
-  function runAiAudit() {
-    if (!ensureOpenAiKeyExists()) return;
-    if (!ensureCodeExists()) return;
-    var code = getCodeValue();
-    var btn = $("#btnAiAudit");
-    if (btn) btn.disabled = true;
-    setAiStatus("분석 중…");
-    runOpenAiAnalysisApi(code)
-      .then(function (obj) {
-        window.__apLastAuditReport = obj;
-        window.__apLastAuditAltProposals = Array.isArray(obj.altProposals) ? obj.altProposals : null;
-        renderAuditReport(obj);
-        setAiStatus("분석 완료 · 반영은 AP_AI_APPLY 룰로 별도 실행");
-      })
-      .catch(function (e) {
-        setAiStatus("분석 실패: " + (e && e.message ? e.message : String(e)));
-      })
-      .then(function () {
-        if (btn) btn.disabled = false;
+    function escapeAttr(s) {
+      return String(s || "")
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;");
+    }
+
+    function applyAltProposalsToCode(html, proposals) {
+      var list = Array.isArray(proposals) ? proposals.slice() : [];
+      var i = 0;
+      return String(html || "").replace(/<img\b[^>]*>/gi, function (tag) {
+        var alt = i < list.length ? list[i++] : null;
+        if (alt == null || alt === undefined) return tag;
+        var val = String(alt);
+        if (/\balt\s*=\s*["']/i.test(tag)) {
+          return tag.replace(/\balt\s*=\s*["'][^"']*["']/i, 'alt="' + escapeAttr(val) + '"');
+        }
+        return tag.replace(/<img\b/i, '<img alt="' + escapeAttr(val) + '"');
       });
-  }
+    }
 
-  var btnAiAudit = $("#btnAiAudit");
-  if (btnAiAudit) btnAiAudit.onclick = runAiAudit;
+    function countOccurrences(src, needle) {
+      if (!needle) return 0;
+      var count = 0;
+      var pos = 0;
+      while (true) {
+        var idx = src.indexOf(needle, pos);
+        if (idx === -1) break;
+        count++;
+        pos = idx + needle.length;
+      }
+      return count;
+    }
 
-  var btnApplyAlt = $("#btnApplyAltProposals");
-  if (btnApplyAlt) {
-    btnApplyAlt.onclick = function () {
+    function applyHeadingPatchesToCode(html, patches) {
+      var list = (Array.isArray(patches) ? patches : []).filter(function (p) {
+        return (
+          p &&
+          typeof p.before === "string" &&
+          p.before.length &&
+          p.after != null &&
+          String(p.before) !== String(p.after)
+        );
+      });
+      if (!list.length) return String(html || "");
+      var out = String(html || "");
+
+      for (var k = 0; k < list.length; k++) {
+        var before = list[k].before;
+        var after = String(list[k].after);
+        var occ = countOccurrences(out, before);
+        if (occ !== 1) continue;
+        var pos = out.indexOf(before);
+        if (pos === -1) continue;
+        out = out.slice(0, pos) + after + out.slice(pos + before.length);
+      }
+      return out;
+    }
+
+    function escReportHtml(s) {
+      return String(s || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function buildAltChangeRowsForPanel(html, proposals) {
+      var rows = [];
+      var list = Array.isArray(proposals) ? proposals : [];
+      var idx = 0;
+      String(html || "").replace(/<img\b[^>]*>/gi, function (tag) {
+        if (idx >= list.length) {
+          idx++;
+          return tag;
+        }
+        var prop = list[idx++];
+        var m = tag.match(/\balt\s*=\s*["']([^"']*)["']/i);
+        var fromVal = m ? m[1] : "";
+        var toVal = String(prop);
+        var fromDisp = m ? 'alt="' + escReportHtml(fromVal) + '"' : "(alt 없음)";
+        var toDisp = 'alt="' + escReportHtml(toVal) + '"';
+        if (fromVal !== toVal || !m) {
+          rows.push({ from: fromDisp, to: toDisp });
+        }
+        return tag;
+      });
+      return rows;
+    }
+
+    function buildHeadingChangeRowsForPanel(patches) {
+      var rows = [];
+      var list = Array.isArray(patches) ? patches : [];
+      for (var i = 0; i < list.length; i++) {
+        var p = list[i];
+        if (!p || typeof p.before !== "string" || p.after == null) continue;
+        if (String(p.before) === String(p.after)) continue;
+        var fromS = String(p.before).replace(/\s+/g, " ").trim();
+        var toS = String(p.after).replace(/\s+/g, " ").trim();
+        if (fromS.length > 120) fromS = fromS.slice(0, 117) + "…";
+        if (toS.length > 120) toS = toS.slice(0, 117) + "…";
+        rows.push({ from: escReportHtml(fromS), to: escReportHtml(toS) });
+      }
+      return rows;
+    }
+
+    function buildAuditReportInnerHtml(obj) {
+      obj = obj || {};
+
+      function esc(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function sevBadge(sev) {
+        var cls = "background:#eef2f7;color:#445;border:1px solid #d7dee7;";
+        if (sev === "high") cls = "background:#fde8e8;color:#c53030;border:1px solid #feb2b2;";
+        else if (sev === "medium") cls = "background:#fff7e6;color:#b7791f;border:1px solid #f6d28b;";
+        else if (sev === "low") cls = "background:#edfdf3;color:#1c6b3b;border:1px solid #b7e4c7;";
+        return '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;' + cls + '">' + esc(sev || "info") + "</span>";
+      }
+
+      function ynBadge(v) {
+        return v
+          ? '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;background:#edfdf3;color:#1c6b3b;border:1px solid #b7e4c7;">true</span>'
+          : '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;background:#fde8e8;color:#c53030;border:1px solid #feb2b2;">false</span>';
+      }
+
+      function simpleList(title, arr) {
+        arr = Array.isArray(arr) ? arr : [];
+        if (!arr.length) return "";
+        return (
+          '<div style="margin:0 0 12px 0;">' +
+          '<strong style="display:block;margin-bottom:6px;color:#1565c0;">' + esc(title) + '</strong>' +
+          '<ul style="margin:0 0 0 16px;padding:0;">' +
+          arr.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") +
+          "</ul>" +
+          "</div>"
+        );
+      }
+
+      function issueList(title, issues) {
+        issues = Array.isArray(issues) ? issues : [];
+        if (!issues.length) return "";
+        return (
+          '<div style="margin:0 0 14px 0;">' +
+          '<strong style="display:block;margin-bottom:8px;color:#1565c0;">' + esc(title) + '</strong>' +
+          issues.map(function (it) {
+            return (
+              '<div style="margin-bottom:10px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">' +
+              '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">' +
+              sevBadge(it.severity) +
+              '<code style="font-size:10px;background:#f6f8fb;padding:1px 6px;border-radius:4px;border:1px solid #e2e8f0;">' + esc(it.type || "") + '</code>' +
+              '<span style="font-size:10px;color:#667;">' + esc(it.target || "") + '</span>' +
+              "</div>" +
+              (it.selectorHint ? '<div style="font-size:10px;color:#667;margin-bottom:6px;">대상: <code>' + esc(it.selectorHint) + "</code></div>" : "") +
+              (it.problem ? '<div style="margin-bottom:4px;"><b>문제</b> · ' + esc(it.problem) + "</div>" : "") +
+              (it.why ? '<div style="margin-bottom:4px;"><b>이유</b> · ' + esc(it.why) + "</div>" : "") +
+              (it.fix ? '<div><b>권장 수정</b> · ' + esc(it.fix) + "</div>" : "") +
+              "</div>"
+            );
+          }).join("") +
+          "</div>"
+        );
+      }
+
+      function summaryBlock(summary) {
+        summary = summary || {};
+        if (!summary.oneLine && summary.score == null && !summary.overall) return "";
+        var overall = String(summary.overall || "warn");
+        var badgeStyle = "background:#fff7e6;color:#b7791f;border:1px solid #f6d28b;";
+        if (overall === "pass") badgeStyle = "background:#edfdf3;color:#1c6b3b;border:1px solid #b7e4c7;";
+        else if (overall === "fail") badgeStyle = "background:#fde8e8;color:#c53030;border:1px solid #feb2b2;";
+        return (
+          '<div class="ap-diff-block" style="background:#fff;">' +
+          "<strong>종합 결과</strong>" +
+          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">' +
+          '<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;' + badgeStyle + '">' + esc(overall) + "</span>" +
+          (summary.score != null ? '<span style="font-size:11px;color:#334;">score: <b>' + esc(summary.score) + "</b></span>" : "") +
+          "</div>" +
+          (summary.oneLine ? '<div style="font-size:11px;line-height:1.5;color:#223;">' + esc(summary.oneLine) + "</div>" : "") +
+          "</div>"
+        );
+      }
+
+      function geoStructureTable(struct) {
+        struct = Array.isArray(struct) ? struct : [];
+        if (!struct.length) return "";
+        return (
+          '<div style="margin:0 0 12px 0;">' +
+          '<strong style="display:block;margin-bottom:6px;color:#1565c0;">GEO 구조</strong>' +
+          '<table style="width:100%;border-collapse:collapse;font-size:10px;">' +
+          "<thead>" +
+          "<tr>" +
+          '<th style="text-align:left;padding:6px;border-bottom:1px solid #e2e8f0;">role</th>' +
+          '<th style="text-align:left;padding:6px;border-bottom:1px solid #e2e8f0;">text</th>' +
+          '<th style="text-align:left;padding:6px;border-bottom:1px solid #e2e8f0;">evidence</th>' +
+          "</tr>" +
+          "</thead>" +
+          "<tbody>" +
+          struct.map(function (r) {
+            return (
+              "<tr>" +
+              '<td style="vertical-align:top;padding:6px;border-bottom:1px solid #f1f5f9;">' + esc(r.role || "") + "</td>" +
+              '<td style="vertical-align:top;padding:6px;border-bottom:1px solid #f1f5f9;">' + esc(r.text || "") + "</td>" +
+              '<td style="vertical-align:top;padding:6px;border-bottom:1px solid #f1f5f9;"><code>' + esc(r.evidence || "") + "</code></td>" +
+              "</tr>"
+            );
+          }).join("") +
+          "</tbody>" +
+          "</table>" +
+          "</div>"
+        );
+      }
+
+      function geoExtractabilityBlock(extractability) {
+        extractability = extractability || {};
+        var entityCoverage = Array.isArray(extractability.entityCoverage) ? extractability.entityCoverage : [];
+        var missingEntities = Array.isArray(extractability.missingEntities) ? extractability.missingEntities : [];
+        if (extractability.titleClear == null && !entityCoverage.length && !missingEntities.length) return "";
+        return (
+          '<div style="margin:0 0 12px 0;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">' +
+          '<strong style="display:block;margin-bottom:8px;color:#1565c0;">GEO 추출성</strong>' +
+          '<div style="margin-bottom:6px;">대표 주제 명확성: ' + ynBadge(!!extractability.titleClear) + "</div>" +
+          '<div style="margin-bottom:6px;">회수된 엔티티: ' + (entityCoverage.length ? entityCoverage.map(esc).join(", ") : "없음") + "</div>" +
+          '<div>누락 엔티티: ' + (missingEntities.length ? missingEntities.map(esc).join(", ") : "없음") + "</div>" +
+          "</div>"
+        );
+      }
+
+      function altAuditBlock(alts) {
+        alts = Array.isArray(alts) ? alts : [];
+        if (!alts.length) return "";
+        return (
+          '<div style="margin:0 0 14px 0;">' +
+          '<strong style="display:block;margin-bottom:8px;color:#1565c0;">Alt 검수</strong>' +
+          alts.map(function (it) {
+            var decisionStyle = "background:#eef2f7;color:#445;border:1px solid #d7dee7;";
+            if (it.decision === "fix") decisionStyle = "background:#fff7e6;color:#b7791f;border:1px solid #f6d28b;";
+            else if (it.decision === "empty") decisionStyle = "background:#edfdf3;color:#1c6b3b;border:1px solid #b7e4c7;";
+            else if (it.decision === "ambiguous") decisionStyle = "background:#fde8e8;color:#c53030;border:1px solid #feb2b2;";
+            return (
+              '<div style="margin-bottom:10px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">' +
+              '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">' +
+              '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;background:#f6f8fb;color:#334;border:1px solid #e2e8f0;">img[' + esc(it.index) + "]</span>" +
+              '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;' + decisionStyle + '">' + esc(it.decision || "") + "</span>" +
+              (it.srcHint ? '<code style="font-size:10px;background:#f6f8fb;padding:1px 6px;border-radius:4px;border:1px solid #e2e8f0;">' + esc(it.srcHint) + "</code>" : "") +
+              "</div>" +
+              '<div style="margin-bottom:4px;"><b>현재 alt</b> · ' + esc(it.currentAlt || "(없음)") + "</div>" +
+              (it.reason ? '<div style="margin-bottom:4px;"><b>판정 이유</b> · ' + esc(it.reason) + "</div>" : "") +
+              '<div><b>제안 alt</b> · ' + esc(it.proposal || "(빈 alt)") + "</div>" +
+              "</div>"
+            );
+          }).join("") +
+          "</div>"
+        );
+      }
+
+      function headingAuditBlock(headingAudit) {
+        headingAudit = headingAudit || {};
+        var outline = Array.isArray(headingAudit.outline) ? headingAudit.outline : [];
+        var candidates = Array.isArray(headingAudit.candidates) ? headingAudit.candidates : [];
+        var out = "";
+
+        if (outline.length) {
+          out += (
+            '<div style="margin:0 0 12px 0;">' +
+            '<strong style="display:block;margin-bottom:6px;color:#1565c0;">Heading outline</strong>' +
+            '<div style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">' +
+            outline.map(function (it) {
+              return '<div style="margin-bottom:4px;"><code>' + esc(it.level || "") + "</code> · " + esc(it.text || "") + "</div>";
+            }).join("") +
+            "</div>" +
+            "</div>"
+          );
+        }
+
+        if (candidates.length) {
+          out += (
+            '<div style="margin:0 0 14px 0;">' +
+            '<strong style="display:block;margin-bottom:8px;color:#1565c0;">Heading 후보 판정</strong>' +
+            candidates.map(function (it) {
+              var decisionStyle = "background:#eef2f7;color:#445;border:1px solid #d7dee7;";
+              if (it.decision === "title") decisionStyle = "background:#edfdf3;color:#1c6b3b;border:1px solid #b7e4c7;";
+              else if (it.decision === "subtitle") decisionStyle = "background:#fff7e6;color:#b7791f;border:1px solid #f6d28b;";
+              else if (it.decision === "ambiguous") decisionStyle = "background:#fde8e8;color:#c53030;border:1px solid #feb2b2;";
+              return (
+                '<div style="margin-bottom:10px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">' +
+                '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">' +
+                '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;' + decisionStyle + '">' + esc(it.decision || "") + "</span>" +
+                (it.recommendedLevel ? '<code style="font-size:10px;background:#f6f8fb;padding:1px 6px;border-radius:4px;border:1px solid #e2e8f0;">' + esc(it.recommendedLevel) + "</code>" : "") +
+                (it.selectorHint ? '<code style="font-size:10px;background:#f6f8fb;padding:1px 6px;border-radius:4px;border:1px solid #e2e8f0;">' + esc(it.selectorHint) + "</code>" : "") +
+                "</div>" +
+                '<div style="margin-bottom:4px;"><b>텍스트</b> · ' + esc(it.text || "") + "</div>" +
+                (it.reason ? '<div><b>판정 이유</b> · ' + esc(it.reason) + "</div>" : "") +
+                "</div>"
+              );
+            }).join("") +
+            "</div>"
+          );
+        }
+
+        return out;
+      }
+
+      function diffBlock(title, rows) {
+        rows = Array.isArray(rows) ? rows : [];
+        if (!rows.length) return "";
+        return (
+          '<div class="ap-diff-block">' +
+          "<strong>" + esc(title) + "</strong>" +
+          rows.map(function (r) {
+            return (
+              '<div class="ap-diff-row">' +
+              '<code class="ap-diff-from">' + r.from + "</code>" +
+              '<span class="ap-diff-arrow">→</span>' +
+              '<code class="ap-diff-to">' + r.to + "</code>" +
+              "</div>"
+            );
+          }).join("") +
+          "</div>"
+        );
+      }
+
+      var summary = obj.summary || {};
+      var seo = obj.seo || {};
+      var geo = obj.geo || {};
+      var a11y = obj.a11y || {};
+      var semantics = obj.semantics || {};
+      var headingAudit = obj.headingAudit || {};
+      var applyDiff =
+        diffBlock("Alt 반영", obj._apAltChangeRows) +
+        diffBlock("헤딩 반영", obj._apHeadingChangeRows);
+
+      return (
+        summaryBlock(summary) +
+        applyDiff +
+        issueList("SEO 이슈", seo.issues) +
+        simpleList("SEO 제안", seo.suggestions) +
+        geoStructureTable(geo.structure) +
+        geoExtractabilityBlock(geo.extractability) +
+        issueList("GEO 이슈", geo.issues) +
+        simpleList("GEO 제안", geo.suggestions) +
+        issueList("접근성 이슈", a11y.issues) +
+        simpleList("접근성 제안", a11y.suggestions) +
+        issueList("시멘틱 마크업 이슈", semantics.issues) +
+        simpleList("시멘틱 마크업 제안", semantics.suggestions) +
+        altAuditBlock(obj.alts) +
+        headingAuditBlock(headingAudit) +
+        issueList("Heading 구조 이슈", headingAudit.issues) +
+        simpleList("반영 메모", Array.isArray(obj.applyNotes) ? obj.applyNotes : [])
+      );
+    }
+
+    function renderAuditReport(obj) {
+      var el = $("#aiAuditReport");
+      if (!el) return;
+      var inner = buildAuditReportInnerHtml(obj);
+      el.innerHTML = inner;
+      el.style.display = inner.trim() ? "block" : "none";
+    }
+
+    function runAiAudit() {
       if (!ensureOpenAiKeyExists()) return;
       if (!ensureCodeExists()) return;
       var code = getCodeValue();
-      var n = countImgs(code);
-      var btn = this;
-      btn.disabled = true;
-      setAiStatus("반영: AI 실행 중 (AP_AI_APPLY 룰)…");
-      runOpenAiApplyApi(code)
+      var codeForAudit = extractCmsPartForAudit(code);
+      var btn = $("#btnAiAudit");
+      if (btn) btn.disabled = true;
+      setAiStatus("검수 리포트 생성 중…");
+      runOpenAiAnalysisApi(codeForAudit)
         .then(function (obj) {
           window.__apLastAuditReport = obj;
           window.__apLastAuditAltProposals = Array.isArray(obj.altProposals) ? obj.altProposals : null;
           renderAuditReport(obj);
-          var p = Array.isArray(obj.altProposals) ? obj.altProposals : [];
-          var didAlt = false;
-          if (p.length > 0 && n > 0) {
-            if (p.length !== n && !confirm("alt 제안 " + p.length + "개 vs img " + n + "개 — alt는 그대로 반영할까요?")) {
-              p = [];
-            } else if (p.length > 0) {
-              code = applyAltProposalsToCode(code, p);
-              didAlt = true;
-            }
-          }
-          code = stripEmbeddedAuditReport(code);
-          setCodeValue(code);
-          setAiStatus(didAlt ? "반영 완료 (alt) · 요약은 위 패널" : "반영 완료 (alt 없음 · 요약은 패널)");
+
+          var summary = obj && obj.summary ? obj.summary : {};
+          var label = summary.oneLine ? summary.oneLine : "검수 완료";
+          setAiStatus("검수 완료 · " + label);
         })
         .catch(function (e) {
-          setAiStatus("반영 실패: " + (e && e.message ? e.message : String(e)));
+          setAiStatus("검수 실패: " + (e && e.message ? e.message : String(e)));
         })
         .then(function () {
-          btn.disabled = false;
+          if (btn) btn.disabled = false;
         });
-    };
-  }
+    }
 
-  $("#exportZip").onclick = function() {
+    var btnAiAudit = $("#btnAiAudit");
+    if (btnAiAudit) btnAiAudit.onclick = runAiAudit;
+
+    var btnApplyAlt = $("#btnApplyAltProposals");
+    if (btnApplyAlt) {
+      btnApplyAlt.onclick = function () {
+        if (!ensureOpenAiKeyExists()) return;
+        if (!ensureCodeExists()) return;
+        var code = getCodeValue();
+        var n = countImgs(code);
+        var btn = this;
+        btn.disabled = true;
+        setAiStatus("반영: AI 실행 중 (AP_AI_APPLY 룰)…");
+        runOpenAiApplyApi(code)
+          .then(function (obj) {
+            var code0 = code;
+            if (!Array.isArray(obj.altProposals)) obj.altProposals = [];
+            if (!Array.isArray(obj.headingPatches)) obj.headingPatches = [];
+            var patches = obj.headingPatches;
+            code = applyHeadingPatchesToCode(code, patches);
+
+            var pApply = obj.altProposals.slice();
+            var didHeading = patches.length > 0;
+            var didAlt = false;
+
+            if (pApply.length > 0 && n > 0) {
+              if (pApply.length !== n) {
+                if (
+                  !confirm(
+                    "img " +
+                    n +
+                    "개 vs alt " +
+                    pApply.length +
+                    "개 (불일치). 그래도 alt 반영할까요? (취소 시 alt만 생략 · 헤딩은 이미 적용됨)"
+                  )
+                ) {
+                  pApply = [];
+                }
+              }
+              if (pApply.length > 0) {
+                code = applyAltProposalsToCode(code, pApply);
+                didAlt = true;
+              }
+            }
+
+            var reportObj = Object.assign({}, obj, {
+              _apAltChangeRows: didAlt ? buildAltChangeRowsForPanel(code0, pApply) : [],
+              _apHeadingChangeRows: buildHeadingChangeRowsForPanel(patches)
+            });
+
+            window.__apLastAuditReport = reportObj;
+            window.__apLastAuditAltProposals = Array.isArray(obj.altProposals) ? obj.altProposals : null;
+            renderAuditReport(reportObj);
+
+            code = stripEmbeddedAuditReport(code);
+            setCodeValue(code);
+
+            var parts = [];
+            if (didAlt) parts.push("alt " + reportObj._apAltChangeRows.length + "건");
+            if (didHeading && reportObj._apHeadingChangeRows.length) parts.push("헤딩 " + reportObj._apHeadingChangeRows.length + "건");
+
+            setAiStatus(
+              parts.length
+                ? "반영 완료 (" + parts.join(", ") + ") · 상세는 패널"
+                : "반영 완료 (변경 없음 또는 스킵) · 패널 확인"
+            );
+          })
+          .catch(function (e) {
+            setAiStatus("반영 실패: " + (e && e.message ? e.message : String(e)));
+          })
+          .then(function () {
+            btn.disabled = false;
+          });
+      };
+    }
+
+    $("#exportZip").onclick = function () {
       var code = stripEmbeddedAuditReport(($("#codeOut") && $("#codeOut").value) || "");
       if (!code.trim()) return;
       var btn = this;
       btn.disabled = true;
       btn.textContent = "내보내는 중…";
       parent.postMessage({ pluginMessage: { type: "EXPORT_ZIP", projectName: getProjectName(), allowedFonts: getAllowedFonts(), code: code } }, "*");
-  };
+    };
 
-  function setExportZipReady() {
-    var btn = $("#exportZip");
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Export ZIP";
+    function setExportZipReady() {
+      var btn = $("#exportZip");
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Export ZIP";
+      }
     }
-  }
   </script>
 </body>
+
 </html>

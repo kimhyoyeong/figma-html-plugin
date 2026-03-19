@@ -1,5 +1,5 @@
 // code.js — Figma → HTML/CMS Export Plugin
-figma.showUI(__html__, {width: 1000, height: 700})
+figma.showUI(__html__, {width: 900, height: 1000})
 
 /**
  * 흐름: UI onmessage → 선택 노드 검사/매칭(PC/MO) → buildCodeAsync → 이미지 export → 결과 전달
@@ -1948,8 +1948,8 @@ function resolveDesktopMobile(sel) {
     var b = sel[1]
     var wa = (getAbs(a) && getAbs(a).w) != null ? getAbs(a).w : 0
     var wb = (getAbs(b) && getAbs(b).w) != null ? getAbs(b).w : 0
-    if (wa >= wb) return {desktopRoot: a, mobileRoot: b, breakpoint: r2(wb) || 390}
-    return {desktopRoot: b, mobileRoot: a, breakpoint: r2(wa) || 390}
+    if (wa >= wb) return {desktopRoot: a, mobileRoot: b, breakpoint: r2(wb) || 750}
+    return {desktopRoot: b, mobileRoot: a, breakpoint: r2(wa) || 750}
 }
 
 /** ROOT의 섹션으로 쓸 노드 목록. 래퍼 1개(직계 자식 1개 컨테이너)면 그 자식들을 섹션으로 사용 → 모바일 프레임 구조 대응 */
@@ -1996,7 +1996,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         return ownImageSet[String(id)] === true
     }
     var lines = []
-    var bp = Number(breakpoint) || 390
+    var bp = Number(breakpoint) || 750
     lines.push("")
     lines.push("@media (max-width:" + bp + "px){")
     lines.push("  .ap-post__inner{ --ap-width:" + bp + "; }")
@@ -2050,6 +2050,9 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 }
                 var strokeDiff = buildStrokeDeclDiff(d, m)
                 if (strokeDiff) declParts.push(strokeDiff)
+                // 모바일에서도 min-height 오버라이드(데스크톱만 적용되던 min-height가 미디어쿼리에서 덮이도록)
+                var mBoxH = getAbs(m)
+                if (mBoxH && mBoxH.h != null) declParts.push("min-height:calc(" + r2(mBoxH.h) + "/var(--ap-width)*100cqi)")
             } else if (d.type === "TEXT" && m.type === "TEXT") {
                 sel = ".ap-section--" + secClass + " " + cssInnerSelForNode(String(d.id), moOpts, false)
                 var tsD = getTextSummarySync(d)
@@ -2104,17 +2107,19 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         }
     }
 
-    for (var s = 0; s < desktopRoot.children.length; s++) {
-        var dSec = desktopRoot.children[s]
-        if (!dSec || !isVisible(dSec)) continue
-        if (s >= mobileRoot.children.length) continue
-        var mSec = mobileRoot.children[s]
-        if (!mSec || !isVisible(mSec) || dSec.type !== mSec.type) continue
+    var dSecs = getSectionNodes(desktopRoot)
+    var mSecs = getSectionNodes(mobileRoot)
+    for (var s = 0; s < dSecs.length; s++) {
+        var dSec = dSecs[s]
+        if (s >= mSecs.length) continue
+        var mSec = mSecs[s]
+        if (!mSec || dSec.type !== mSec.type) continue
         var secClass = sectionClassPrefix(s + 1)
         var mSecBox = getAbs(mSec)
         if (getSlideItems(mSec)) {
             lines.push("  .ap-section--" + secClass + "{ min-height:auto; }")
-        } else if (mSecBox && mSecBox.h != null) {
+        }
+        if (mSecBox && mSecBox.h != null) {
             lines.push("  .ap-section--" + secClass + "{ --ap-section-h:" + r2(mSecBox.h) + "; }")
         }
         if (isFlex(mSec)) {
@@ -2181,7 +2186,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
     return lines.join("\n")
 }
 
-/** PC/MO 섹션 구조 매칭. allMatch, mismatchSecs[], matches[] (visible 직계 자식 시그니처 비교) */
+/** PC/MO 섹션 구조 매칭. allMatch, mismatchSecs[], matches[] (숨김 제외한 섹션 목록 기준) */
 function getSectionStructureMatch(desktopRoot, mobileRoot) {
     var out = {allMatch: false, matches: [], mismatchSecs: []}
 
@@ -2210,8 +2215,8 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
         return t + ":" + isCont + "[" + parts.join("|") + "]"
     }
 
-    var dSecs = visibleChildren(desktopRoot)
-    var mSecs = visibleChildren(mobileRoot)
+    var dSecs = getSectionNodes(desktopRoot)
+    var mSecs = getSectionNodes(mobileRoot)
 
     // 섹션 개수부터 체크
     var count = Math.max(dSecs.length, mSecs.length)
@@ -2363,6 +2368,9 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
     rootSummary.push("")
 
     var sectionNodes = getSectionNodes(root)
+    if (!sectionNodes || sectionNodes.length === 0) {
+        return Promise.reject(new Error("보이는 섹션이 없습니다. ROOT 프레임의 직계 자식(또는 래퍼 안)에 표시된 레이어가 있는지 확인하세요."))
+    }
     var sections = []
 
     function walkAsync(node, depth, isRootChild, sectionIndex, sectionNode, path) {
@@ -2578,7 +2586,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
     codeLines.push(".ap-post__inner {")
     codeLines.push("  container:article/inline-size;")
     codeLines.push("  --ap-width:" + baseWidth + ";")
-    codeLines.push("  max-width:" + baseWidth + "px;width:100%;")
+    //codeLines.push("  max-width:" + baseWidth + "px;width:100%;")
     codeLines.push("  margin:0 auto;")
     codeLines.push("}")
     codeLines.push("")
@@ -2642,7 +2650,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
     codeLines.push("")
     codeLines.push(".ap-video {")
     codeLines.push("  display:flex; align-items:center; justify-content:center;")
-    codeLines.push("  background:#eee; color:#666; font-size:12px;")
+    codeLines.push("  background:#eee;")
     codeLines.push("  width:calc(var(--ap-w, 0) / var(--ap-width) * 100cqi);")
     codeLines.push("  height:calc(var(--ap-h, 0) / var(--ap-width) * 100cqi);")
     codeLines.push("  aspect-ratio: calc(var(--ap-w, 1) / var(--ap-h, 1));")
@@ -3481,14 +3489,19 @@ figma.ui.onmessage = function (msg) {
                     separateViews: out.separateViews,
                     hybridMismatchSecs: out.hybridMismatchSecs,
                 })
-                images.forEach(function (item, i) {
-                    figma.ui.postMessage({type: "RESULT_IMAGES_CHUNK", index: i, name: item.name, dataUrl: item.dataUrl})
-                })
+                try {
+                    for (var i = 0; i < images.length; i++) {
+                        var item = images[i]
+                        figma.ui.postMessage({type: "RESULT_IMAGES_CHUNK", index: i, name: item.name, dataUrl: item.dataUrl})
+                    }
+                } catch (chunkErr) {
+                    figma.ui.postMessage({type: "ERROR", message: "이미지 전송 중 오류: " + String(chunkErr && chunkErr.message ? chunkErr.message : chunkErr)})
+                }
                 figma.ui.postMessage({type: "RESULT_IMAGES_END"})
             })
             .catch(function (e) {
                 figma.ui.postMessage({type: "LOADING", value: false})
-                figma.ui.postMessage({type: "ERROR", message: String(e)})
+                figma.ui.postMessage({type: "ERROR", message: String(e && e.message ? e.message : e)})
             })
         return
     }

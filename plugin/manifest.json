@@ -1,11 +1,11 @@
 {
-  "name": "Figma HTML Export",
-  "id": "figma-to-ap-html",
-  "api": "1.0.0",
-  "main": "code.js",
-  "ui": "ui.html",
-  "editorType": ["figma"],
-  "networkAccess": {
-    "allowedDomains": ["https://api.openai.com"]
-  }
+    "name": "Figma HTML Export",
+    "id": "figma-to-ap-html",
+    "api": "1.0.0",
+    "main": "code.js",
+    "ui": "ui.html",
+    "editorType": ["figma"],
+    "networkAccess": {
+        "allowedDomains": ["https://api.openai.com", "https://cdnjs.cloudflare.com"]
+    }
 }
