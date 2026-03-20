@@ -1,7 +1,7 @@
 // code.js — Figma → HTML/CMS Export Plugin
 figma.showUI(__html__, {width: 900, height: 1000})
 
-/** AI 분석 기본: alt·썸네일(비전) ON — ui.html `#aiVisionAlt` 초기값과 반드시 동일 유지 */
+/** 참고: ui.html AI 검수는 비전(썸네일) 기본 사용. 이미지 바이너리는 PC/MO 분석 완료 후 RESULT_IMAGES_* 로 UI에 전달됨(ZIP만으로는 코드 탭에 붙여 넣은 경우 미전달). */
 var AP_AI_DEFAULT_ALT_VISION = true
 setTimeout(function () {
     try {
@@ -298,6 +298,18 @@ function indent(depth) {
     for (var i = 0; i < depth; i++) s += "  "
     return s
 }
+
+/** 자식 chunk HTML을 프레임 태그로 감쌈 */
+function wrapChunksAsUlOrDiv(depth, cls, frameTag, frameTagOpen, isFrameBtn, chunks) {
+    var out = []
+    out.push(indent(depth) + frameTagOpen)
+    for (var cj = 0; cj < (chunks || []).length; cj++) {
+        if (chunks[cj]) out.push(chunks[cj])
+    }
+    out.push(indent(depth) + "</" + frameTag + ">")
+    return out.join("\n")
+}
+
 /** 노드 absoluteBoundingBox → {x,y,w,h} (r2 적용) */
 function getAbs(node) {
     try {
@@ -2027,7 +2039,7 @@ function pushDeferredStyle(ctx, sel, decl) {
             return
         }
     }
-    ctx.deferredStyles.push({sel: sel, decl: decl})
+    ctx.deferredStyles.push({ sel: sel, decl: decl })
 }
 
 /** CSS 선언 문자열에서 동일 속성 중복 제거 (마지막 값 유지) */
@@ -2047,29 +2059,48 @@ function dedupeCssDecl(decl) {
     return Object.keys(map).map(function (k) { return k + ":" + map[k] }).join(";")
 }
 
-/**
- * `.ap-section--01 …` 형태 선택자에서 섹션 번호와, 쉼표로 확장된 공통 inner 선택자만 추출.
- * @returns {{ sec: string, inner: string|null }|null}  inner가 null이면 섹션 루트만 대상
- */
-function parseSectionScopedSelector(sel) {
-    sel = String(sel || "").trim()
-    var mRoot = /^\.ap-section--(\d+)\s*$/.exec(sel)
-    if (mRoot) return { sec: mRoot[1], inner: null }
-    var m = /^\.ap-section--(\d+)\s+(.+)$/.exec(sel)
-    if (!m) return null
-    var sec = m[1]
-    var rest = m[2]
-    var re = new RegExp(",\\s*\\.ap-section--" + sec + "\\s+", "g")
-    var inner = rest.replace(re, ", ")
-    return { sec: sec, inner: inner }
+/** 그룹 키용: 속성 이름 순 정렬로 선언이 같으면 동일 키 (선언 순서 무관) */
+function normalizeDeclForMergeKey(decl) {
+    var d = dedupeCssDecl(decl)
+    if (!d || !String(d).trim()) return ""
+    var parts = String(d).split(";")
+    var pairs = []
+    for (var i = 0; i < parts.length; i++) {
+        var p = parts[i].trim()
+        if (!p) continue
+        var colon = p.indexOf(":")
+        if (colon === -1) continue
+        pairs.push({
+            k: p.substring(0, colon).trim(),
+            v: p.substring(colon + 1).trim(),
+        })
+    }
+    pairs.sort(function (a, b) {
+        return String(a.k).localeCompare(String(b.k))
+    })
+    return pairs.map(function (x) { return x.k + ":" + x.v }).join(";")
+}
+
+/** deferred 규칙 선택자 선두의 `ap-section--` 번호 (없으면 빈 문자열) */
+function leadingApSectionIdFromSelector(sel) {
+    var m = /^\.ap-section--(\d+)/.exec(String(sel || "").trim())
+    return m ? m[1] : ""
 }
 
 /**
- * 여러 섹션에 걸친 동일 선언(decl) 규칙을 쉼표 선택자 한 줄로 합침 (HTML 변경 없음).
- * 동일 decl + 동일 inner가 2회 이상일 때만 병합.
+ * 동일 선언(decl)을 쓰는 규칙을 쉼표 선택자 한 줄로 합침 (HTML·클래스명 유지).
+ * 병합은 같은 섹션(`.ap-section--NN` 동일) 안에서만 수행 — 섹션 간 우연한 동일 선언은 묶지 않음.
  */
-function consolidateDeferredStylesBySharedDecl(styles) {
-    if (!styles || styles.length < 2) return styles
+function consolidateDeferredStylesByIdenticalDecl(styles) {
+    if (!styles || styles.length < 2) {
+        if (!styles || !styles.length) return styles
+        return styles.map(function (s) {
+            return {
+                sel: s.sel,
+                decl: dedupeCssDecl(s.decl ? String(s.decl) : ""),
+            }
+        })
+    }
     var n = styles.length
     var meta = []
     var groups = Object.create(null)
@@ -2078,11 +2109,11 @@ function consolidateDeferredStylesBySharedDecl(styles) {
         var s = styles[i]
         var sel = s && s.sel ? String(s.sel).trim() : ""
         var declNorm = dedupeCssDecl(s && s.decl ? String(s.decl) : "")
-        var parsed = parseSectionScopedSelector(sel)
-        meta[i] = { sel: sel, decl: declNorm, parsed: parsed }
-        if (!declNorm || !parsed) continue
-        var innerKey = parsed.inner === null ? "\x00ROOT\x00" : parsed.inner
-        var gkey = declNorm + "\x00" + innerKey
+        var mergeKey = normalizeDeclForMergeKey(declNorm)
+        var secId = leadingApSectionIdFromSelector(sel)
+        meta[i] = { sel: sel, decl: declNorm, secId: secId }
+        if (!declNorm || !mergeKey || !secId) continue
+        var gkey = secId + "\x00" + mergeKey
         if (!groups[gkey]) groups[gkey] = []
         groups[gkey].push(i)
     }
@@ -2094,31 +2125,23 @@ function consolidateDeferredStylesBySharedDecl(styles) {
         if (!Object.prototype.hasOwnProperty.call(groups, gk)) continue
         var idxs = groups[gk]
         if (idxs.length < 2) continue
-        var p0 = meta[idxs[0]].parsed
-        if (!p0) continue
-        var inner0 = p0.inner
-        for (var ii = 0; ii < idxs.length; ii++) mergedMember[idxs[ii]] = true
-        var secs = []
-        for (var si = 0; si < idxs.length; si++) {
-            var sc = meta[idxs[si]].parsed.sec
-            if (secs.indexOf(sc) === -1) secs.push(sc)
-        }
-        secs.sort(function (a, b) {
-            var na = parseInt(a, 10)
-            var nb = parseInt(b, 10)
-            if (na !== nb) return na - nb
-            return String(a).localeCompare(String(b))
-        })
+        idxs.sort(function (a, b) { return a - b })
+        var seenSel = Object.create(null)
         var selParts = []
-        for (var sj = 0; sj < secs.length; sj++) {
-            if (inner0 === null) selParts.push(".ap-section--" + secs[sj])
-            else selParts.push(".ap-section--" + secs[sj] + " " + inner0)
+        for (var ii = 0; ii < idxs.length; ii++) {
+            var ij = idxs[ii]
+            var oneSel = meta[ij].sel
+            if (!oneSel || seenSel[oneSel]) continue
+            seenSel[oneSel] = true
+            selParts.push(oneSel)
         }
-        var minIdx = idxs[0]
-        for (var mk = 1; mk < idxs.length; mk++) {
-            if (idxs[mk] < minIdx) minIdx = idxs[mk]
-        }
-        out.push({ sel: selParts.join(", "), decl: meta[idxs[0]].decl, _order: minIdx })
+        if (selParts.length < 2) continue
+        for (var mk = 0; mk < idxs.length; mk++) mergedMember[idxs[mk]] = true
+        out.push({
+            sel: selParts.join(", "),
+            decl: meta[idxs[0]].decl,
+            _order: idxs[0],
+        })
     }
 
     for (var j = 0; j < n; j++) {
@@ -2137,6 +2160,231 @@ function consolidateDeferredStylesBySharedDecl(styles) {
     })
     for (var r = 0; r < out.length; r++) delete out[r]._order
     return out
+}
+
+function splitTopLevelCommaSelectors(sel) {
+    return String(sel || "")
+        .split(",")
+        .map(function (s) {
+            return s.trim()
+        })
+        .filter(Boolean)
+}
+
+/** `.ap-section--NN .ap-section__foo--01` 단일 리프만 허용 (복합/자식 선택자면 null) */
+function parseSimpleSectionScopedPart(part) {
+    var m = /^\s*\.ap-section--(\d+)\s+(\.[a-zA-Z0-9_-]+)\s*$/.exec(String(part || "").trim())
+    if (!m) return null
+    return { sec: m[1], cls: m[2].slice(1) }
+}
+
+/** 묶인 BEM 리프 중 `--숫자` 접미사 최소인 클래스를 대표로 */
+function representativeBemClassForMerge(leaves) {
+    var scored = leaves.map(function (leaf) {
+        var n = 999999
+        var mm = /--(\d+)$/.exec(leaf)
+        if (mm) n = parseInt(mm[1], 10)
+        return { leaf: leaf, n: n }
+    })
+    scored.sort(function (a, b) {
+        if (a.n !== b.n) return a.n - b.n
+        return String(a.leaf).localeCompare(String(b.leaf))
+    })
+    return scored[0].leaf
+}
+
+/**
+ * 쉼표 병합된 규칙 → 대표 클래스 하나만 쓰는 선택자 + HTML 클래스 치환 목록.
+ * 형식이 `.ap-section--N .단일클래스` 가 아니면 원문 셀렉터 유지.
+ * @returns {{ rules: { sel: string, decl: string }[], renames: { secId: string, from: string, to: string }[] }}
+ */
+function canonicalizeMergedRulesToSingleRepresentativeClass(rules) {
+    var renames = []
+    var out = []
+    if (!rules || !rules.length) return { rules: rules || [], renames: [] }
+    for (var i = 0; i < rules.length; i++) {
+        var rule = rules[i]
+        var sel = rule.sel ? String(rule.sel) : ""
+        var decl = rule.decl
+        if (sel.indexOf(",") < 0) {
+            out.push({ sel: sel, decl: decl })
+            continue
+        }
+        var parts = splitTopLevelCommaSelectors(sel)
+        var parsed = []
+        var ok = true
+        for (var p = 0; p < parts.length; p++) {
+            var one = parseSimpleSectionScopedPart(parts[p])
+            if (!one) {
+                ok = false
+                break
+            }
+            parsed.push(one)
+        }
+        if (!ok || !parsed.length) {
+            out.push({ sel: sel, decl: decl })
+            continue
+        }
+        var sec0 = parsed[0].sec
+        for (var q = 1; q < parsed.length; q++) {
+            if (parsed[q].sec !== sec0) {
+                ok = false
+                break
+            }
+        }
+        if (!ok) {
+            out.push({ sel: sel, decl: decl })
+            continue
+        }
+        var sheetLeaves = []
+        for (var r = 0; r < parsed.length; r++) sheetLeaves.push(parsed[r].cls)
+        var canon = representativeBemClassForMerge(sheetLeaves)
+        var newSel = ".ap-section--" + sec0 + " ." + canon
+        for (var t = 0; t < sheetLeaves.length; t++) {
+            if (sheetLeaves[t] !== canon) renames.push({ secId: sec0, from: sheetLeaves[t], to: canon })
+        }
+        out.push({ sel: newSel, decl: decl })
+    }
+    return { rules: out, renames: renames }
+}
+
+/**
+ * 섹션 스택 기준으로 `class="` 안 토큰만 치환 (리프 BEM → 대표 클래스).
+ */
+function applySectionScopedClassRenames(lines, renames) {
+    if (!lines || !lines.length || !renames || !renames.length) return
+    var map = Object.create(null)
+    for (var ri = 0; ri < renames.length; ri++) {
+        var rr = renames[ri]
+        if (!rr || rr.from == null || rr.to == null) continue
+        if (String(rr.from) === String(rr.to)) continue
+        map[String(rr.secId) + "\x00" + String(rr.from)] = String(rr.to)
+    }
+    var stack = []
+    for (var i = 0; i < lines.length; i++) {
+        var line = lines[i]
+        if (/<section\b/i.test(line)) {
+            var sid = null
+            var cm = /class="([^"]*)"/.exec(line)
+            if (cm) {
+                var sm = cm[1].match(/(?:^|\s)ap-section--(\d+)(?:\s|$)/)
+                if (sm) sid = sm[1]
+            }
+            stack.push(sid)
+        }
+        var closeSecs = line.match(/<\/section>/gi)
+        if (closeSecs) {
+            for (var ci = 0; ci < closeSecs.length; ci++) {
+                if (stack.length) stack.pop()
+            }
+        }
+        var curSec = stack.length ? stack[stack.length - 1] : null
+        if (curSec == null || line.indexOf('class="') < 0) continue
+        lines[i] = line.replace(/class="([^"]*)"/g, function (full, inner) {
+            if (!inner) return full
+            var toks = inner.split(/\s+/).filter(Boolean)
+            var seen = Object.create(null)
+            var outParts = []
+            var changed = false
+            for (var j = 0; j < toks.length; j++) {
+                var tok = toks[j]
+                var rep = map[String(curSec) + "\x00" + tok]
+                if (rep && rep !== tok) {
+                    tok = rep
+                    changed = true
+                }
+                if (!seen[tok]) {
+                    seen[tok] = true
+                    outParts.push(tok)
+                } else {
+                    changed = true
+                }
+            }
+            if (!changed && outParts.length === toks.length) return full
+            return 'class="' + outParts.join(" ") + '"'
+        })
+    }
+}
+
+/**
+ * 최종 deferred 규칙 셀렉터에서 섹션별로 참조된 ap-section__ 클래스 집합 (루트만 .ap-section--NN 인 규칙은 제외).
+ */
+function buildUsedApSectionClassBySectionFromRules(rules) {
+    var map = Object.create(null)
+    if (!rules || !rules.length) return map
+    for (var i = 0; i < rules.length; i++) {
+        var sel = rules[i] && rules[i].sel ? String(rules[i].sel) : ""
+        if (!sel) continue
+        var parts = splitTopLevelCommaSelectors(sel)
+        for (var p = 0; p < parts.length; p++) {
+            var m = /^\.ap-section--(\d+)\s+(.+)$/.exec(parts[p].trim())
+            if (!m) continue
+            var sec = m[1]
+            var rest = m[2]
+            var re = /\.(ap-section__[a-zA-Z0-9_-]+)/g
+            var mm
+            while ((mm = re.exec(rest)) !== null) {
+                if (!map[sec]) map[sec] = Object.create(null)
+                map[sec][mm[1]] = true
+            }
+        }
+    }
+    return map
+}
+
+/**
+ * 해당 섹션에 스코프 CSS가 있는 경우, 사용되지 않는 ap-section__* 만 class 목록에서 제거.
+ */
+function stripUnusedApSectionBemFromContentLines(contentLines, usedBySection) {
+    if (!contentLines || !contentLines.length || !usedBySection) return
+    var stack = []
+    for (var i = 0; i < contentLines.length; i++) {
+        var line = contentLines[i]
+        if (/<section\b/i.test(line)) {
+            var sid = null
+            var cm = /class="([^"]*)"/.exec(line)
+            if (cm) {
+                var sm = cm[1].match(/(?:^|\s)ap-section--(\d+)(?:\s|$)/)
+                if (sm) sid = sm[1]
+            }
+            stack.push(sid)
+        }
+        var closeSecs = line.match(/<\/section>/gi)
+        if (closeSecs) {
+            for (var ci = 0; ci < closeSecs.length; ci++) {
+                if (stack.length) stack.pop()
+            }
+        }
+        var curSec = stack.length ? stack[stack.length - 1] : null
+        if (curSec == null || line.indexOf('class="') < 0) continue
+        var used = usedBySection[curSec]
+        if (!used) continue
+        var hasAny = false
+        for (var uk in used) {
+            if (Object.prototype.hasOwnProperty.call(used, uk)) {
+                hasAny = true
+                break
+            }
+        }
+        if (!hasAny) continue
+
+        contentLines[i] = line.replace(/class="([^"]*)"/g, function (full, inner) {
+            if (!inner) return full
+            var toks = inner.split(/\s+/).filter(Boolean)
+            var outParts = []
+            var changed = false
+            for (var j = 0; j < toks.length; j++) {
+                var tok = toks[j]
+                if (tok.indexOf("ap-section__") === 0 && !used[tok]) {
+                    changed = true
+                    continue
+                }
+                outParts.push(tok)
+            }
+            if (!changed) return full
+            return 'class="' + outParts.join(" ") + '"'
+        })
+    }
 }
 
 var ASSETS_IMAGES_PREFIX = "assets/images/"
@@ -3086,8 +3334,6 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
     codeLines.push("  padding-bottom:calc(var(--ap-pb)/var(--ap-width)*100cqi);")
     codeLines.push("  padding-left:calc(var(--ap-pl)/var(--ap-width)*100cqi);")
     codeLines.push("}")
-    codeLines.push("")
-
     codeLines.push(".ap-frame { position:relative; }")
     codeLines.push("")
 
@@ -3306,20 +3552,20 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
                 if (declPartsImgGrp.length && id) {
                     pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declPartsImgGrp.join(";"))
                 }
-                var linesImgGrp = []
+                var chunksImg = []
                 var imgGrpFrameCls = apNodeClassList("ap-frame" + (absImgGrp ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : ""), id, opts)
-                linesImgGrp.push(indent(depth) + '<div class="' + imgGrpFrameCls + '">')
+                var imgGrpTagOpen = indent(depth) + '<div class="' + imgGrpFrameCls + '">'
                 var childrenImgGrp = node.children || []
                 var idxImg = 0
                 function nextImgCh() {
                     if (idxImg >= childrenImgGrp.length) {
-                        linesImgGrp.push(indent(depth) + "</div>")
-                        return Promise.resolve(wrapIfBtn(node, linesImgGrp.join("\n"), depth))
+                        var imgGrpHtml = wrapChunksAsUlOrDiv(depth, imgGrpFrameCls, "div", imgGrpTagOpen, false, chunksImg)
+                        return Promise.resolve(wrapIfBtn(node, imgGrpHtml, depth))
                     }
                     var cImg = childrenImgGrp[idxImg++]
                     if (!cImg || (!(opts && opts.includeHidden) && !isVisible(cImg))) return nextImgCh()
                     return renderNodeAsync(cImg, node, secNo, secClass, depth + 1, opts).then(function (htmlImg) {
-                        if (htmlImg) linesImgGrp.push(htmlImg)
+                        if (htmlImg) chunksImg.push(htmlImg)
                         return nextImgCh()
                     })
                 }
@@ -3409,16 +3655,14 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
             var isFrameBtn = isBtnNode(node)
             var frameTag = isFrameBtn ? "a" : "div"
             var frameTagOpen = "<" + frameTag + (isFrameBtn ? ' href="#"' : "") + ' class="' + cls + '">'
-            var lines = []
-            lines.push(indent(depth) + frameTagOpen)
+            var childChunks = []
 
             // children
             var children = node.children || []
             var i = 0
             function nextChild() {
                 if (i >= children.length) {
-                    lines.push(indent(depth) + "</" + frameTag + ">")
-                    var frameHtml = lines.join("\n")
+                    var frameHtml = wrapChunksAsUlOrDiv(depth, cls, frameTag, frameTagOpen, isFrameBtn, childChunks)
                     return Promise.resolve(isFrameBtn ? frameHtml : wrapIfBtn(node, frameHtml, depth))
                 }
                 var ch = children[i++]
@@ -3431,14 +3675,14 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
                 // TEXT/IMAGE/기타 컨테이너는 wrapper(div)로 abs/배경 처리
                 if (ch.type === "FRAME" && isContainer(ch)) {
                     return renderNodeAsync(ch, node, secNo, secClass, depth + 1, opts).then(function (html) {
-                        if (html) lines.push(html)
+                        if (html) childChunks.push(html)
                         return nextChild()
                     })
                 }
 
                 if (!chAbs && (ch.type === "LINE" || ch.type === "ELLIPSE" || isLineLikeNode(ch))) {
                     return renderNodeAsync(ch, node, secNo, secClass, depth + 1, opts).then(function (html) {
-                        if (html) lines.push(html)
+                        if (html) childChunks.push(html)
                         return nextChild()
                     })
                 }
@@ -3475,12 +3719,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
                     // GROUP 등 컨테이너는 renderNodeAsync가 ap-frame 래퍼를 이미 출력
                     if (isChContainer) {
                         return renderNodeAsync(ch, node, secNo, secClass, depth + 1, opts).then(function (innerHtml) {
-                            if (innerHtml) lines.push(innerHtml)
+                            if (innerHtml) childChunks.push(innerHtml)
                             return nextChild()
                         })
                     }
                     return renderNodeAsync(ch, node, secNo, secClass, depth + 1, opts).then(function (innerHtml) {
-                        if (innerHtml) lines.push(innerHtml)
+                        if (innerHtml) childChunks.push(innerHtml)
                         return nextChild()
                     })
                 })
@@ -3540,19 +3784,17 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
             var groupTag = isGroupBtn ? "a" : "div"
             var frameCls = apNodeClassList("ap-frame" + (abs2 ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : ""), id, opts)
             var groupTagOpen = "<" + groupTag + (isGroupBtn ? ' href="#"' : "") + ' class="' + frameCls + '">'
-            var lines2 = []
-            lines2.push(indent(depth) + groupTagOpen)
+            var chunks2 = []
             var j = 0
             function next2() {
                 if (j >= children2.length) {
-                    lines2.push(indent(depth) + "</" + groupTag + ">")
-                    var containerHtml = lines2.join("\n")
+                    var containerHtml = wrapChunksAsUlOrDiv(depth, frameCls, groupTag, groupTagOpen, isGroupBtn, chunks2)
                     return Promise.resolve(isGroupBtn ? containerHtml : wrapIfBtn(node, containerHtml, depth))
                 }
                 var ch2 = children2[j++]
                 if (!ch2 || (!(opts && opts.includeHidden) && !isVisible(ch2))) return next2()
                 return renderNodeAsync(ch2, node, secNo, secClass, depth + 1, opts).then(function (html2) {
-                    if (html2) lines2.push(html2)
+                    if (html2) chunks2.push(html2)
                     return next2()
                 })
             }
@@ -3855,10 +4097,19 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
     return nextSection().then(function () {
         if (deferredStyles.length) {
             codeLines.push("")
-            var consolidatedStyles = consolidateDeferredStylesBySharedDecl(deferredStyles)
+            var consolidatedStyles = consolidateDeferredStylesByIdenticalDecl(deferredStyles)
+            var canon = canonicalizeMergedRulesToSingleRepresentativeClass(consolidatedStyles)
+            consolidatedStyles = canon.rules || consolidatedStyles
+            if (canon.renames && canon.renames.length) {
+                applySectionScopedClassRenames(contentLines, canon.renames)
+            }
+            var usedApSecBem = buildUsedApSectionClassBySectionFromRules(consolidatedStyles)
+            stripUnusedApSectionBemFromContentLines(contentLines, usedApSecBem)
             for (var i = 0; i < consolidatedStyles.length; i++) {
                 var r = consolidatedStyles[i]
-                codeLines.push(r.sel + " { " + r.decl + " }")
+                var d = dedupeCssDecl(r && r.decl ? String(r.decl) : "")
+                if (!d) continue
+                codeLines.push(r.sel + " { " + d + " }")
             }
             codeLines.push("")
         }
