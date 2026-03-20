@@ -221,6 +221,33 @@
       font-weight: 500;
     }
 
+    /* PC/MO 분석 진행 중 상태 텍스트 */
+    @keyframes ap-analysis-pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.38;
+      }
+    }
+
+    .analysis-pulse,
+    #aiRefineStatus.is-analyzing {
+      animation: ap-analysis-pulse 1.05s ease-in-out infinite;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+      .analysis-pulse,
+      #aiRefineStatus.is-analyzing {
+        animation: none;
+        opacity: 1;
+      }
+    }
+
     .dataToolbarStatus.error {
       color: #c53030;
     }
@@ -562,6 +589,196 @@
       box-shadow: 0 2px 12px rgba(0, 0, 0, .15);
       border-radius: 8px;
     }
+
+    /* 유틸 */
+    .u-hidden {
+      display: none !important;
+    }
+
+    .fontRow.is-collapsed {
+      display: none !important;
+    }
+
+    /* 코드 탭 / AI 영역 (기존 inline 정리) */
+    .codePanelCol {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .codeToolbarRow {
+      flex-shrink: 0;
+      padding: 8px 12px 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .hint--flush {
+      margin-left: 0;
+    }
+
+    .aiRefineBar {
+      flex-shrink: 0;
+      padding: 8px 12px;
+      border-bottom: 1px solid #e7e7e7;
+      background: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .aiRefineRow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .aiRefineLabel {
+      font-size: 11px;
+      font-weight: 700;
+      color: #334;
+    }
+
+    .aiRefineSep {
+      font-size: 10px;
+      color: #888;
+    }
+
+    .field--key {
+      width: 180px;
+    }
+
+    .field--model {
+      width: 110px;
+    }
+
+    .field--edge {
+      width: 62px;
+    }
+
+    .aiRefineHintLabel {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin: 0;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    #aiRefineStatus {
+      margin-left: 0;
+      font-size: 11px;
+    }
+
+    #aiAuditReport {
+      display: none;
+      max-height: 360px;
+      overflow: auto;
+      font-size: 10px;
+      line-height: 1.45;
+      border: 1px solid #dde4ea;
+      border-radius: 8px;
+      padding: 10px;
+      background: #fff;
+      color: #223;
+    }
+
+    #aiAuditReport.is-visible {
+      display: block;
+    }
+
+    #aiAuditReport .ap-alt-audit-section {
+      margin: 0 0 14px 0;
+    }
+
+    #aiAuditReport .ap-alt-audit-heading {
+      display: block;
+      margin-bottom: 8px;
+      color: #1565c0;
+    }
+
+    #aiAuditReport .ap-alt-audit-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr;
+      min-width: 0;
+    }
+
+    #aiAuditReport .ap-alt-audit-grid--cols2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    #aiAuditReport .ap-alt-audit-card {
+      padding: 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #fff;
+      min-width: 0;
+    }
+
+    .aiRefineFootnote {
+      font-size: 10px;
+      color: #667;
+      line-height: 1.5;
+    }
+
+    #panel-code textarea#codeOut {
+      flex: 1;
+      min-height: 0;
+    }
+
+    .previewToolbarHint {
+      display: none;
+      font-size: 11px;
+      color: #b8860b;
+      margin-left: 8px;
+    }
+
+    .previewToolbarHint.is-visible {
+      display: inline;
+    }
+
+    #previewFrame {
+      flex: 1;
+      min-height: 0;
+      width: 100%;
+      border: 0;
+      background: #fff;
+    }
+
+    #previewFrame.previewFrame--mo {
+      width: 375px;
+      max-width: 100%;
+    }
+
+    .previewEmptyMsg {
+      padding: 12px;
+      color: #666;
+    }
+
+    /* Detail: MO 블록 (JS 문자열용) */
+    .detailKvMo {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #e0e4e8;
+    }
+
+    .detailKvMo h4 {
+      margin: 0 0 8px 0;
+      font-size: 12px;
+    }
+
+    .detailKvMoTitle--unmatched {
+      color: #b8860b;
+    }
+
+    .detailKvMoTitle--matched {
+      color: #0d6db7;
+    }
   </style>
 </head>
 
@@ -573,7 +790,7 @@
     <input id="projectName" class="field" placeholder="project (ex: iope)" />
     <span class="hint" id="rootHint">PC: ROOT 1개 선택 | MO: ROOT 2개 선택 후 브레이크포인트 매칭</span>
   </header>
-  <div id="fontRow" class="fontRow" style="display:none;">
+  <div id="fontRow" class="fontRow is-collapsed">
     <span class="fontRowLabel">폰트 (체크=텍스트로 처리, 미체크=이미지로 처리)</span>
     <div id="fontCheckboxes" class="fontCheckboxes"></div>
   </div>
@@ -627,38 +844,33 @@
 
     <!-- ===== CODE ===== -->
     <div id="panel-code" class="panel">
-      <div style="display:flex;flex-direction:column;flex:1;min-height:0;">
-        <div style="flex-shrink:0;padding:8px 12px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+      <div class="codePanelCol">
+        <div class="codeToolbarRow">
           <button type="button" id="exportZip" class="gray">Export ZIP</button>
-          <span class="hint" style="margin-left:0;">_cms.html + assets/images/page_{project}_secXX_imgYY</span>
+          <span class="hint hint--flush">_cms.html + assets/images/page_{project}_secXX_imgYY</span>
         </div>
 
-        <div id="aiRefineBar" style="flex-shrink:0;padding:8px 12px;border-bottom:1px solid #e7e7e7;background:#f8fafc;display:flex;flex-direction:column;gap:8px;">
-          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-            <span style="font-size:11px;font-weight:700;color:#334;">AI</span>
+        <div id="aiRefineBar" class="aiRefineBar">
+          <div class="aiRefineRow">
+            <span class="aiRefineLabel">AI</span>
             <button type="button" id="btnAiAudit" class="gray" title="SEO·GEO·접근성·시멘틱·alt·헤딩 검수 리포트">분석</button>
             <button type="button" id="btnApplyAltProposals" class="gray" title="마지막 분석의 alt를 그대로 적용·헤딩은 동일 분석 headingAudit에 맞춰 패치">반영</button>
-            <span style="font-size:10px;color:#888;">|</span>
-            <input type="password" id="openaiKey" class="field" style="width:180px;" placeholder="OpenAI API 키" autocomplete="off" />
-            <select id="aiModel" class="field" style="width:110px;">
+            <span class="aiRefineSep">|</span>
+            <input type="password" id="openaiKey" class="field field--key" placeholder="OpenAI API 키" autocomplete="off" />
+            <select id="aiModel" class="field field--model">
               <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
               <option value="gpt-4o">gpt-4o</option>
             </select>
-            <label class="hint" style="display:inline-flex;align-items:center;gap:4px;margin:0;cursor:pointer;white-space:nowrap;" title="미리보기 에셋을 작은 JPEG로 줄여 alt 판별에만 사용 (API 토큰 절약)">
-              <input type="checkbox" id="aiVisionAlt" checked />
-              alt·썸네일
-            </label>
-            <input type="number" id="aiVisionMaxEdge" class="field" style="width:62px;" min="128" max="768" step="32" value="384" title="썸네일 긴 변 최대(px). 작을수록 용량·토큰 감소" />
-            <span id="aiRefineStatus" class="hint" style="margin-left:0;font-size:11px;"></span>
+            <span id="aiRefineStatus" class="hint"></span>
           </div>
-          <div id="aiAuditReport" style="display:none;max-height:360px;overflow:auto;font-size:10px;line-height:1.45;border:1px solid #dde4ea;border-radius:8px;padding:10px;background:#fff;color:#223;"></div>
-          <div style="font-size:10px;color:#667;line-height:1.5;">
-            <b>분석</b> = SEO · GEO · 접근성 · 시멘틱 마크업 · alt · 헤딩 검수 리포트 (alt·썸네일 켜면 에셋을 저해상도 JPEG로 첨부) /
+          <div id="aiAuditReport"></div>
+          <div class="aiRefineFootnote">
+            <b>분석</b> = SEO · GEO · 접근성 · 시멘틱 마크업 · alt · 헤딩 검수 리포트 /
             <b>반영</b> = 마지막 분석의 alt 제안을 그대로 적용 · 헤딩은 동일 분석의 <code>headingAudit</code>에 맞춰 패치 생성
           </div>
         </div>
 
-        <textarea id="codeOut" placeholder="선택 분석 후 섹션 코드가 표시됩니다" style="flex:1;"></textarea>
+        <textarea id="codeOut" placeholder="선택 분석 후 섹션 코드가 표시됩니다"></textarea>
       </div>
     </div>
 
@@ -666,11 +878,11 @@
     <div id="panel-preview" class="panel">
       <div class="previewToolbar">
         <button type="button" class="viewBtn active" id="previewViewPc" data-view="pc">PC</button>
-        <button type="button" class="viewBtn" id="previewViewMo" data-view="mo">MO</button>
-        <span class="previewToolbarHint" id="previewStructureHint" style="display:none;font-size:11px;color:#b8860b;margin-left:8px;">레이어 구조가 다르면 PC/MO를 각각 표시합니다</span>
+        <button type="button" class="viewBtn u-hidden" id="previewViewMo" data-view="mo">MO</button>
+        <span class="previewToolbarHint" id="previewStructureHint">레이어 구조가 다르면 PC/MO를 각각 표시합니다</span>
       </div>
       <div id="previewViewport">
-        <iframe id="previewFrame" style="flex:1;min-height:0;width:100%;border:0;background:#fff;" sandbox="allow-same-origin" title="미리보기"></iframe>
+        <iframe id="previewFrame" sandbox="allow-scripts allow-same-origin" title="미리보기"></iframe>
       </div>
     </div>
   </div>
@@ -699,8 +911,8 @@
       var wrap = $("#fontCheckboxes");
       var row = $("#fontRow");
       if (!wrap || !row) return;
-      if (!usedFonts.length) { row.style.display = "none"; wrap.innerHTML = ""; return; }
-      row.style.display = "flex";
+      if (!usedFonts.length) { row.classList.add("is-collapsed"); wrap.innerHTML = ""; return; }
+      row.classList.remove("is-collapsed");
       wrap.innerHTML = usedFonts.map(function (f) {
         var id = "font_" + f.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
         var checked = fontChecked[f] !== false;
@@ -726,6 +938,7 @@
       if (st) {
         st.textContent = on ? "분석 중…" : st.textContent;
         st.classList.toggle("waiting", !!on);
+        st.classList.toggle("analysis-pulse", !!on);
       }
     }
 
@@ -771,12 +984,12 @@
       previewViewMode = mode === "mo" ? "mo" : "pc";
       if (mode === "mo") {
         if (viewport) viewport.classList.add("viewMo");
-        if (frame) { frame.style.width = "375px"; frame.style.maxWidth = "100%"; frame.style.flex = "1"; }
+        if (frame) frame.classList.add("previewFrame--mo");
         if (btnPc) btnPc.classList.remove("active");
         if (btnMo) btnMo.classList.add("active");
       } else {
         if (viewport) viewport.classList.remove("viewMo");
-        if (frame) { frame.style.width = "100%"; frame.style.maxWidth = ""; frame.style.flex = "1"; }
+        if (frame) frame.classList.remove("previewFrame--mo");
         if (btnPc) btnPc.classList.add("active");
         if (btnMo) btnMo.classList.remove("active");
       }
@@ -788,8 +1001,8 @@
     function updatePreviewToolbar() {
       var hint = document.getElementById("previewStructureHint");
       var btnMo = document.getElementById("previewViewMo");
-      if (hint) hint.style.display = separateViews ? "inline" : "none";
-      if (btnMo) btnMo.style.display = mobileDataTree && previewImagesReady ? "" : "none";
+      if (hint) hint.classList.toggle("is-visible", !!separateViews);
+      if (btnMo) btnMo.classList.toggle("u-hidden", !(mobileDataTree && previewImagesReady));
     }
 
     // ====== state (code.js RESULT를 UI에서 유지) ======
@@ -821,6 +1034,7 @@
       var isWaiting = !t || t === "분석 대기 중…" || (t && t.indexOf("분석 중") === 0);
       st.classList.toggle("waiting", isWaiting);
       st.classList.toggle("error", t === "ERROR");
+      st.classList.toggle("analysis-pulse", !!(t && t.indexOf("분석 중") === 0));
     }
 
     $("#openAll").onclick = function () { toggleAll(true); };
@@ -1187,13 +1401,13 @@
 
       if (mobileDataTree && node.path && node.path.length) {
         if (separateViews) {
-          html += "<div class='kv' style='margin-top:12px;padding-top:12px;border-top:1px solid #e0e4e8;'><h4 style='margin:0 0 8px 0;font-size:12px;color:#b8860b;'>MO</h4>";
+          html += "<div class='kv detailKvMo'><h4 class='detailKvMoTitle--unmatched'>MO</h4>";
           html += row("상태", "레이어 구조가 달라 매칭 불가");
           html += "</div>";
         } else {
           var moNode = getNodeByPath(mobileDataTree, node.path);
           if (moNode) {
-            html += "<div class='kv' style='margin-top:12px;padding-top:12px;border-top:1px solid #e0e4e8;'><h4 style='margin:0 0 8px 0;font-size:12px;color:#0d6db7;'>MO (매칭)</h4>";
+            html += "<div class='kv detailKvMo'><h4 class='detailKvMoTitle--matched'>MO (매칭)</h4>";
             var hasMoContent = false;
             if (moNode.textMeta) {
               var tm2 = moNode.textMeta;
@@ -1317,7 +1531,7 @@
         }
       } else {
         frame.removeAttribute("src");
-        frame.srcdoc = "<p style='padding:12px;color:#666'>분석 후 생성된 코드가 있으면 미리보기가 표시됩니다.</p>";
+        frame.srcdoc = "<p class='previewEmptyMsg'>분석 후 생성된 코드가 있으면 미리보기가 표시됩니다.</p>";
       }
     }
 
@@ -1397,7 +1611,14 @@
 
     function setAiStatus(msg) {
       var st = $("#aiRefineStatus");
-      if (st) st.textContent = msg || "";
+      if (!st) return;
+      var m = String(msg || "");
+      st.textContent = m;
+      var busy =
+        (m.indexOf("중") !== -1 || m.indexOf("실행 중") !== -1) &&
+        m.indexOf("실패") === -1 &&
+        m.indexOf("완료") === -1;
+      st.classList.toggle("is-analyzing", busy);
     }
 
     function ensureCodeExists() {
@@ -1711,8 +1932,8 @@
           "headingPatches는 그 판정(candidates.decision, recommendedLevel)·issues와 모순 없이 작성한다.",
           "분석에서 heading이 아니라고 본 문구를 억지로 승격하지 않는다.",
           "altProposals 배열은 클라이언트가 직전 검수 값으로 덮어쓸 수 있으나, 키는 반드시 포함하고 길이는 " +
-            ctx.nImg +
-            "개로 맞춘다(직전 검수 alt와 동일한 문자열을 그대로 넣어도 된다)."
+          ctx.nImg +
+          "개로 맞춘다(직전 검수 alt와 동일한 문자열을 그대로 넣어도 된다)."
         );
       }
       for (var r = 0; r < AP_AI_APPLY_RULES.length; r++) {
@@ -1985,7 +2206,7 @@
       var userSuffix =
         headingPayload &&
         "\n\n---\n직전 분석(동일 본문) headingAudit JSON. 위 HTML에 headingPatches를 만들 때 반드시 이 판정과 일관되게.\n" +
-          headingPayload;
+        headingPayload;
       return runOpenAiJsonApi(
         htmlCode,
         buildApApplySystemPrompt(htmlCode, { auditHeadingContext: !!headingPayload }),
@@ -2294,16 +2515,18 @@
       function altAuditBlock(alts) {
         alts = Array.isArray(alts) ? alts : [];
         if (!alts.length) return "";
+        var gridCols = alts.length >= 2 ? " ap-alt-audit-grid--cols2" : "";
         return (
-          '<div style="margin:0 0 14px 0;">' +
-          '<strong style="display:block;margin-bottom:8px;color:#1565c0;">Alt 검수</strong>' +
+          '<div class="ap-alt-audit-section">' +
+          '<strong class="ap-alt-audit-heading">Alt 검수</strong>' +
+          '<div class="ap-alt-audit-grid' + gridCols + '">' +
           alts.map(function (it) {
             var decisionStyle = "background:#eef2f7;color:#445;border:1px solid #d7dee7;";
             if (it.decision === "fix") decisionStyle = "background:#fff7e6;color:#b7791f;border:1px solid #f6d28b;";
             else if (it.decision === "empty") decisionStyle = "background:#edfdf3;color:#1c6b3b;border:1px solid #b7e4c7;";
             else if (it.decision === "ambiguous") decisionStyle = "background:#fde8e8;color:#c53030;border:1px solid #feb2b2;";
             return (
-              '<div style="margin-bottom:10px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">' +
+              '<div class="ap-alt-audit-card">' +
               '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">' +
               '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;background:#f6f8fb;color:#334;border:1px solid #e2e8f0;">img[' + esc(it.index) + "]</span>" +
               '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;' + decisionStyle + '">' + esc(it.decision || "") + "</span>" +
@@ -2315,7 +2538,7 @@
               "</div>"
             );
           }).join("") +
-          "</div>"
+          "</div></div>"
         );
       }
 
@@ -2420,7 +2643,7 @@
       if (!el) return;
       var inner = buildAuditReportInnerHtml(obj);
       el.innerHTML = inner;
-      el.style.display = inner.trim() ? "block" : "none";
+      el.classList.toggle("is-visible", !!inner.trim());
     }
 
     function runAiAudit() {
@@ -2431,10 +2654,9 @@
       var btn = $("#btnAiAudit");
       if (btn) btn.disabled = true;
       setAiStatus("검수 리포트 생성 중…");
-      var useVisionEl = $("#aiVisionAlt");
-      var maxEdgeEl = $("#aiVisionMaxEdge");
-      var useVision = useVisionEl && useVisionEl.checked;
-      var maxEdge = maxEdgeEl ? Number(maxEdgeEl.value) || 384 : 384;
+
+      var useVision = true;
+      var maxEdge = 384;
 
       var visionPromise = useVision
         ? buildVisionMultimodalAppend(codeForAudit, previewImages, maxEdge)

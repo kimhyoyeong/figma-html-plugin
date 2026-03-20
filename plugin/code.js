@@ -1,10 +1,15 @@
 // code.js — Figma → HTML/CMS Export Plugin
 figma.showUI(__html__, {width: 900, height: 1000})
 
-/**
- * 흐름: UI onmessage → 선택 노드 검사/매칭(PC/MO) → buildCodeAsync → 이미지 export → 결과 전달
- * 섹션: 1) Utils  2) HTML/CSS Builder  3) Asset Export  4) Node Inspect/Dump  5) Code Builder  6) UI Router
- */
+/** AI 분석 기본: alt·썸네일(비전) ON — ui.html `#aiVisionAlt` 초기값과 반드시 동일 유지 */
+var AP_AI_DEFAULT_ALT_VISION = true
+setTimeout(function () {
+    try {
+        figma.ui.postMessage({type: "AI_UI_DEFAULTS", aiVisionAlt: AP_AI_DEFAULT_ALT_VISION})
+    } catch (e) {}
+}, 0)
+
+/** UI onmessage → 분석/매칭 → buildCodeAsync → export. 섹션은 // ----- 주석으로 구분. (분할은 빌드 번들 필요) */
 
 // ----- Utils (포맷, escape, 노드 판별) -----
 /** 숫자를 소수 둘째 자리까지 반올림 */
@@ -311,6 +316,10 @@ function isContainer(node) {
 /** 노드가 보이는 상태(visible !== false)인지 */
 function isVisible(node) {
     return node != null && node.visible !== false
+}
+/** 보이는 자식이 하나라도 있는지 (이미지 fill 클론 export 등) */
+function hasVisibleChildren(node) {
+    return !!(node && node.children && node.children.some(function (c) { return c && isVisible(c) }))
 }
 /** Auto Layout이 켜진 노드 여부 */
 function isFlex(node) {
@@ -1054,25 +1063,25 @@ function exportNodeImageFillOnlyAsync(node) {
     }
 }
 
+/** imageHash → (필요 시) 자식 제거 클론 래스터 → 전체 노드 export */
+function exportImageFillThenCloneFallbackAsync(node) {
+    return exportImageFillOnlyAsync(node).then(function (fromHash) {
+        if (fromHash) return fromHash
+        if (hasImageFill(node) && isContainer(node) && hasVisibleChildren(node)) return exportNodeImageFillOnlyAsync(node)
+        return exportNodeImageAsync(node)
+    })
+}
+
 /**
- * IMAGE fill이 있으면 Figma imageHash 원본(JPEG/PNG)을 최우선.
- * 리프 RECT만 있던 경우 예전에는 곧바로 exportNodeImageAsync → JPG 재인코딩되어
- * "피그마엔 PNG인데 산출물은 jpg"가 발생함.
- * @param {SceneNode} node
- * @returns {Promise<string|null>}
+ * 배경/ap-image 공통. exportNodeImageAsync 는 자식 TEXT 까지 합쳐 래스터 → fill+TEXT 프레임은
+ * mustStrip 경로에서 fill/클론만 사용.
  */
 function exportImagePreferSourceBytesAsync(node) {
-    return exportImageFillOnlyAsync(node).then(function (dataUrl) {
+    var mustStripChildrenForRaster = hasImageFill(node) && isContainer(node) && hasTextInSubtree(node)
+    if (mustStripChildrenForRaster) return exportImageFillThenCloneFallbackAsync(node)
+    return exportNodeImageAsync(node).then(function (dataUrl) {
         if (dataUrl) return dataUrl
-        var useFillClone =
-            hasImageFill(node) &&
-            isContainer(node) &&
-            node.children &&
-            node.children.some(function (c) {
-                return c && isVisible(c)
-            })
-        if (useFillClone) return exportNodeImageFillOnlyAsync(node)
-        return exportNodeImageAsync(node)
+        return exportImageFillThenCloneFallbackAsync(node)
     })
 }
 
@@ -1103,20 +1112,41 @@ function isVectorOnlyTree(node) {
     }
     return true
 }
-/** 한 장 이미지로 묶을 후보인지 (clipsContent 또는 비텍스트 자식 2개 이상) */
+/**
+ * 한 장으로 래스터 합쳐야 하는 “합성” 후보.
+ * 예전: 비텍스트 자식 2개 이상이면 그룹 전체를 이미지로 뽑음 → 텍스트/버튼이 있는 배너도 한 PNG로 뭉개짐.
+ * 현재: clipsContent(마스크/클립)만 합성 후보. 그 외 그룹은 프레임으로 풀어 자식(이미지·텍스트) 각각 출력.
+ */
 function isCompositeCandidate(node) {
     if (!node || !isContainer(node)) return false
     try {
-        if (node.clipsContent) return true
-    } catch (e) {}
-    if (isFlex(node)) return false
-    var nonText = 0
-    for (var i = 0; i < node.children.length; i++) if (node.children[i].type !== "TEXT") nonText++
-    return nonText >= 2
+        return !!node.clipsContent
+    } catch (e) {
+        return false
+    }
 }
-/** 이미지로 export할 후보 노드인지 (image fill 또는 composite) */
+/**
+ * 이미지 export “후보” (시맨틱/배경 승격/덤프 등에서 사용).
+ * 실제로 한 장 PNG/JPG로 뭉개는지는 shouldExportAsSingleRasterImage() 와 별개.
+ *
+ * - true: 레이어에 IMAGE fill 이 있음, 또는 clipsContent(마스크 합성)
+ * - false: 이미지 fill 없고 클립 아님 → 일반 FRAME/GROUP (자식만 순회)
+ */
 function isImageCandidate(node) {
     return !!(node && (hasImageFill(node) || isCompositeCandidate(node)))
+}
+
+/**
+ * 노드를 단일 래스터(<img> 한 장)로 내보낼지 — renderImageNodeAsync 진입용.
+ *
+ * 1) isImageCandidate 가 false 이면 false (오토레이아웃 프레임에 텍스트만 있는 경우 등은 여기 해당 없음).
+ * 2) 서브트리에 Figma TEXT 가 있으면 false — 텍스트는 HTML로 두고 프레임은 renderFrameNodeAsync.
+ * 3) (1)(2) 로도 안 막히는 경우만 true — 예: 리프 사각형+이미지 fill, 클립 마스크만 있는 그룹+이미지만 등.
+ */
+function shouldExportAsSingleRasterImage(node) {
+    if (!isImageCandidate(node)) return false
+    if (isContainer(node) && hasTextInSubtree(node)) return false
+    return true
 }
 
 /** fill 중 하나라도 opacity < 1 이면 true (투명 필요) */
@@ -1146,21 +1176,14 @@ function hasMultipleImageLikeChildren(node) {
     return list.length >= 2
 }
 
-/** 겹친 composite(한 장으로 export해야 하는 경우)인지. clipsContent=true면 한 유닛으로 취급 */
-function isCompositeOneImage(node) {
-    try {
-        return !!(node && node.clipsContent === true)
-    } catch (e) {
-        return false
-    }
-}
-/** 서브트리 어딘가에 TEXT 노드가 있는지 */
+/** 서브트리 어딘가에 Figma TEXT 노드가 있는지 */
 function hasTextInSubtree(node) {
     if (!node) return false
     if (node.type === "TEXT") return true
-    if (!isContainer(node)) return false
-    for (var i = 0; i < node.children.length; i++) {
-        if (hasTextInSubtree(node.children[i])) return true
+    var kids = node.children
+    if (!kids || !kids.length) return false
+    for (var i = 0; i < kids.length; i++) {
+        if (hasTextInSubtree(kids[i])) return true
     }
     return false
 }
@@ -1373,7 +1396,7 @@ function buildSectionSemanticClasses(sectionNode, geoHints) {
             return
         }
         if (isContainer(n) && isImageCandidate(n)) {
-            if (hasMultipleImageLikeChildren(n) && !isCompositeOneImage(n)) {
+            if (hasMultipleImageLikeChildren(n) && !isCompositeCandidate(n)) {
                 for (var k2 = 0; k2 < (n.children || []).length; k2++) walkImg(n.children[k2])
                 return
             }
@@ -3262,7 +3285,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
     // 겹친 composite(clipsContent)일 때만 한 장으로 export. 분리된 이미지 2개 이상이면 ap-frame으로 풀어서 각각 figure로
     function renderImageNodeAsync(node, parent, secNo, secClass, depth, opts) {
         var id = node.id != null ? String(node.id) : ""
-        if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeOneImage(node)) {
+        if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node)) {
             var absImgGrp = isAbsoluteLike(node, parent)
             var declPartsImgGrp = []
             return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgImgGrp) {
@@ -3571,10 +3594,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
             return renderVectorNodeAsync(node, parent, secNo, secClass, depth, opts)
         }
 
-        // IMAGE (단일 이미지 또는 컴포지트 → 하나의 이미지로 export)
-        // 컨테이너에 텍스트가 있으면 이미지로 내보내지 않고 자식 재귀 렌더 (텍스트 유지)
-        // 겹친 composite(clipsContent)일 때만 한 장으로 export. 분리된 이미지 2개 이상이면 ap-frame으로 풀어서 각각 figure로
-        if (isImageCandidate(node) && !(isContainer(node) && hasTextInSubtree(node))) {
+        // IMAGE (단일 이미지 또는 컴포지트 → 하나의 이미지로 export) — 규칙: shouldExportAsSingleRasterImage
+        if (shouldExportAsSingleRasterImage(node)) {
             return renderImageNodeAsync(node, parent, secNo, secClass, depth, opts)
         }
 
@@ -3855,8 +3876,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
 
         var code = codeLines.join("\n").replace(/\u2028/g, "\n").replace(/\u2029/g, "\n")
         if (hasSlideSection) {
-            var swiperCss = '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css">'
-            var swiperScript = "<script src=\"https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js\"><\/script>\n<script>\ndocument.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.swiper').forEach(function(el){if(typeof Swiper!=='undefined')new Swiper(el,{pagination:{el:el.querySelector('.swiper-pagination')},navigation:{nextEl:el.querySelector('.swiper-button-next'),prevEl:el.querySelector('.swiper-button-prev')}})});});\n<\/script>"
+            // manifest networkAccess: cdnjs.cloudflare.com 만 허용 → jsdelivr 는 플러그인 UI/미리보기에서 차단됨
+            var swiperCdnBase = "https://cdnjs.cloudflare.com/ajax/libs/Swiper/11.0.0"
+            var swiperCss = '<link rel="stylesheet" href="' + swiperCdnBase + '/swiper-bundle.min.css">'
+            var swiperScript =
+                '<script src="' +
+                swiperCdnBase +
+                '/swiper-bundle.min.js"><\/script>\n<script>\ndocument.addEventListener(\'DOMContentLoaded\',function(){document.querySelectorAll(\'.swiper\').forEach(function(el){if(typeof Swiper!==\'undefined\')new Swiper(el,{pagination:{el:el.querySelector(\'.swiper-pagination\')},navigation:{nextEl:el.querySelector(\'.swiper-button-next\'),prevEl:el.querySelector(\'.swiper-button-prev\')}})});});\n<\/script>'
             code = swiperCss + "\n" + code + "\n" + swiperScript
         }
 
