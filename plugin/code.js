@@ -1386,10 +1386,12 @@ function sanitizeGeoRoleForBem(role) {
 /**
  * 섹션 트리 기준 시맨틱 보조 클래스 (id → 클래스 배열).
  * geoHints: AI 검수 GEO.structure [{ text, role }] — 본문 텍스트 매칭 시 ap-section__* 우선 반영.
+ * bgChildId: 배경 --bg-img 로 승격되어 HTML에서 빠지는 직계 이미지 노드 — ap-section__image 부여 제외(번호 밀림 방지).
  */
-function buildSectionSemanticClasses(sectionNode, geoHints) {
+function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
     if (geoHints != null && !Array.isArray(geoHints)) geoHints = null
     if (geoHints && geoHints.length > 64) geoHints = geoHints.slice(0, 64)
+    var bgSkipImgId = bgChildId != null && bgChildId !== "" ? String(bgChildId) : ""
     var map = {}
     function add(nid, cls) {
         if (nid == null) return
@@ -1511,6 +1513,7 @@ function buildSectionSemanticClasses(sectionNode, geoHints) {
 
     function tagImageNode(n) {
         if (!n || !n.id) return
+        if (bgSkipImgId && String(n.id) === bgSkipImgId) return
         var nm = String(n.name || "").toLowerCase()
         if (/logo|brand|wordmark|sym/.test(nm)) add(n.id, apSectionBem("logo"))
         else if (/icon|deco|decoration|divider|bullet|line/.test(nm)) add(n.id, apSectionBem("decoration"))
@@ -1561,7 +1564,7 @@ function buildSectionSemanticClasses(sectionNode, geoHints) {
     return map
 }
 
-/** 동일 ap-section__* 가 여러 노드면 첫 노드는 접미사 없음, 둘째부터 --02, --03… (ap-n-* 불사용) */
+/** 동일 ap-section__* 가 2개 이상이면 전부 --01, --02… / 섹션 안에 1개뿐이면 접미사 없음 (ap-n-* 불사용) */
 function disambiguateSectionSemantics(sectionNode, map) {
     var classToIds = {}
     for (var nid in map) {
@@ -1572,6 +1575,7 @@ function disambiguateSectionSemantics(sectionNode, map) {
             if (!classToIds[c]) classToIds[c] = []
             if (classToIds[c].indexOf(nid) < 0) classToIds[c].push(nid)
         }
+
     }
     var order = []
     function walkOrd(n) {
@@ -1591,7 +1595,7 @@ function disambiguateSectionSemantics(sectionNode, map) {
             return rank(a) - rank(b)
         })
         for (var k = 0; k < ids.length; k++) {
-            var newCls = k === 0 ? cls : cls + "--" + pad2(k + 1)
+            var newCls = cls + "--" + pad2(k + 1)
             var arr = map[ids[k]]
             var idx = arr.indexOf(cls)
             if (idx >= 0) arr[idx] = newCls
@@ -2637,6 +2641,25 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
         })
 }
 
+/**
+ * 배경으로 승격되는 풀블리드 직계 자식 id (비동기 export 없이 판별만). MO 오버라이드용 시맨틱과 PC 일치.
+ */
+function getSectionBgPromotedChildIdSync(sectionNode) {
+    if (!sectionNode || hasImageFill(sectionNode) || getSlideItems(sectionNode)) return null
+    var children = sectionNode.children || []
+    var sectionBox = getAbs(sectionNode)
+    if (!sectionBox || children.length === 0) return null
+    for (var i = 0; i < children.length; i++) {
+        var ch = children[i]
+        if (!ch || !isVisible(ch) || !isImageCandidate(ch)) continue
+        if (isContainer(ch) && ch.children && ch.children.length > 0) continue
+        var chBox = getAbs(ch)
+        if (!chBox) continue
+        if (chBox.w >= sectionBox.w * 0.9 && chBox.h >= sectionBox.h * 0.9) return ch.id != null ? String(ch.id) : null
+    }
+    return null
+}
+
 /** 섹션 배경: fill 또는 직계 자식 중 90% 이상 크기 이미지 → --bg-img 승격 (slide 섹션 제외) */
 function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
   var slideData = getSlideItems(sectionNode)
@@ -2973,7 +2996,11 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         var secTextByName = collectTextNodesByName(mSec)
         var sectionImageOverrideDone = {}
         var sectionTextOverrideDone = {}
-        var deskSem = buildSectionSemanticClasses(dSec, (options && options.geoStructure) || null)
+        var deskSem = buildSectionSemanticClasses(
+            dSec,
+            (options && options.geoStructure) || null,
+            getSectionBgPromotedChildIdSync(dSec),
+        )
         var deskMoOpts = { sectionSemantics: deskSem }
         walkPair(dSec, mSec, mSec, secClass, secImageByName, sectionImageOverrideDone, secTextByName, sectionTextOverrideDone, deskSem)
         // 이미지: 인덱스로 매칭 안 된 경우에만 레이어 name 기준으로 MO 매칭
@@ -4033,7 +4060,11 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
 
         // section style: height + background (incl child bg detection) + flex(섹션이 Auto Layout일 때)
         return buildSectionBackgroundAsync(sectionNode, cache, secNo).then(function (bg) {
-            var sectionSemantics = buildSectionSemanticClasses(sectionNode, geoStructure)
+            var sectionSemantics = buildSectionSemanticClasses(
+                sectionNode,
+                geoStructure,
+                bg.bgChildId != null ? String(bg.bgChildId) : "",
+            )
             var sectionRenderOpts = {
                 includeHidden: true,
                 sectionSemantics: sectionSemantics,
