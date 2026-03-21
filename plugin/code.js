@@ -1,8 +1,10 @@
 // code.js — Figma → HTML/CMS Export Plugin
-figma.showUI(__html__, {width: 900, height: 1000})
+figma.showUI(__html__, {width: 700, height: 1000})
 
 /** 참고: ui.html AI 검수는 비전(썸네일) 기본 사용. 이미지 바이너리는 PC/MO 분석 완료 후 RESULT_IMAGES_* 로 UI에 전달됨(ZIP만으로는 코드 탭에 붙여 넣은 경우 미전달). */
 var AP_AI_DEFAULT_ALT_VISION = true
+/** 시맨틱 title/subtitle: 이 크기(px) 이하 텍스트는 전부 ap-section__desc (디자인 미스매치 완화) */
+var AP_SECTION_TITLE_MIN_FS = 26
 setTimeout(function () {
     try {
         figma.ui.postMessage({type: "AI_UI_DEFAULTS", aiVisionAlt: AP_AI_DEFAULT_ALT_VISION})
@@ -160,17 +162,17 @@ function buildEllipseVarsDeclDiff(dNode, mNode) {
     return mDecl
 }
 
-/** btn 노드면 <a href="#">로 감싸기. TEXT 노드는 별도로 <a class="ap-text">로 출력하므로 여기서는 비텍스트만 감쌈 */
+/** btn 노드면 <a href="#" class="ap-btn">로 감싸기. TEXT/프레임 btn은 각각 ap-btn을 태그 class에 직접 포함 */
 function wrapIfBtn(node, html, depth) {
     if (!html || !isBtnNode(node)) return html
-    return indent(depth) + '<a href="#">' + "\n" + html + "\n" + indent(depth) + "</a>"
+    return indent(depth) + '<a href="#" class="ap-btn">' + "\n" + html + "\n" + indent(depth) + "</a>"
 }
 
-/** TEXT 노드용 태그: btn이면 <a href="#" class="ap-text">, 아니면 <span class="ap-text">. parentStyle 있으면 open에 style 속성 추가 */
+/** TEXT 노드용 태그: btn이면 <a href="#" class="ap-btn ap-text">, 아니면 <span class="ap-text">. parentStyle 있으면 open에 style 속성 추가 */
 function textNodeTag(node, textCls, dataIdAttr, depth, parentStyle) {
     var styleAttr = (parentStyle && String(parentStyle).trim()) ? ' style="' + String(parentStyle).trim() + '"' : ""
     var open = isBtnNode(node)
-        ? '<a href="#" class="' + textCls + '"' + dataIdAttr + styleAttr + ">"
+        ? '<a href="#" class="ap-btn ' + textCls + '"' + dataIdAttr + styleAttr + ">"
         : '<span class="' + textCls + '"' + dataIdAttr + styleAttr + ">"
     var close = isBtnNode(node) ? "</a>" : "</span>"
     return { open: open, close: close }
@@ -375,6 +377,18 @@ function isAbsoluteByParentNotFlex(node, parent) {
 /** 절대 위치 계열 판별 (in-parent / self absolute / parent not flex) 통합 */
 function isAbsoluteLike(node, parent) {
     return isAbsoluteInParent(node, parent) || isAbsolutePositioned(node) || isAbsoluteByParentNotFlex(node, parent)
+}
+
+/** 비 flex 컨테이너는 .ap-flex의 position:relative가 없음 → 직계 abs 자식이 있을 때만 명시 */
+function containerNeedsRelativeForAbsoluteChildren(node) {
+    if (!node || isFlex(node)) return false
+    var kids = node.children || []
+    for (var i = 0; i < kids.length; i++) {
+        var ch = kids[i]
+        if (!ch || !isVisible(ch)) continue
+        if (isAbsoluteLike(ch, node)) return true
+    }
+    return false
 }
 
 /** Auto Layout 설정을 CSS 변수용 객체로 추출. isFlex(node)일 때만 값 채움 */
@@ -1266,6 +1280,93 @@ var SECTION_STRUCTURE_LEVELS = [
     "unit",
 ]
 
+var AP_SECTION_ROLE_ORDER = [
+    "container",
+    "content",
+    "group",
+    "block",
+    "item",
+    "part",
+    "slot",
+    "cell",
+    "unit",
+]
+
+function getApSectionRole(cls) {
+    var m = String(cls || "").match(/^ap-section__(container|content|group|block|item|part|slot|cell|unit)(--[a-z0-9-]+)?$/)
+    return m ? m[1] : ""
+}
+
+function getApSectionRoleSuffix(cls) {
+    var m = String(cls || "").match(/^ap-section__(container|content|group|block|item|part|slot|cell|unit)(--[a-z0-9-]+)?$/)
+    return m && m[2] ? m[2] : ""
+}
+
+function getNextSectionRole(role) {
+    var idx = AP_SECTION_ROLE_ORDER.indexOf(String(role || ""))
+    if (idx < 0) return "part"
+    if (idx >= AP_SECTION_ROLE_ORDER.length - 1) return AP_SECTION_ROLE_ORDER[AP_SECTION_ROLE_ORDER.length - 1]
+    return AP_SECTION_ROLE_ORDER[idx + 1]
+}
+
+function replaceSectionRoleClass(arr, fromRole, toRole) {
+    if (!arr || !arr.length) return arr || []
+    var out = []
+    var replaced = false
+
+    for (var i = 0; i < arr.length; i++) {
+        var cls = arr[i]
+        var role = getApSectionRole(cls)
+
+        if (role && role === fromRole) {
+            var suffix = getApSectionRoleSuffix(cls)
+            var nextCls = "ap-section__" + toRole + suffix
+            if (out.indexOf(nextCls) < 0) out.push(nextCls)
+            replaced = true
+            continue
+        }
+
+        if (out.indexOf(cls) < 0) out.push(cls)
+    }
+
+    if (!replaced) return arr.slice()
+    return out
+}
+
+function demoteNestedDuplicateSectionRoles(sectionNode, classMap) {
+    if (!sectionNode || !classMap) return
+
+    function getOwnRoleFromClassMap(id) {
+        var arr = classMap[id] || []
+        for (var i = 0; i < arr.length; i++) {
+            var role = getApSectionRole(arr[i])
+            if (role) return role
+        }
+        return ""
+    }
+
+    function walk(node, parentRole) {
+        if (!node || !isVisible(node)) return
+
+        var id = node.id != null ? String(node.id) : ""
+        var ownRole = id ? getOwnRoleFromClassMap(id) : ""
+
+        if (id && parentRole && ownRole && parentRole === ownRole) {
+            var nextRole = getNextSectionRole(ownRole)
+            classMap[id] = replaceSectionRoleClass(classMap[id] || [], ownRole, nextRole)
+            ownRole = getOwnRoleFromClassMap(id)
+        }
+
+        if (isContainer(node) && node.children && node.children.length) {
+            for (var j = 0; j < node.children.length; j++) {
+                walk(node.children[j], ownRole || parentRole || "")
+            }
+        }
+    }
+
+    walk(sectionNode, "")
+}
+
 function normalizeGeoTextForMatch(s) {
     return String(s || "")
         .replace(/\s+/g, " ")
@@ -1277,8 +1378,9 @@ function sanitizeGeoRoleForBem(role) {
     var r = String(role || "")
         .toLowerCase()
         .replace(/[^a-z0-9-]/g, "")
-    var ok = {title: 1, subtitle: 1, description: 1, caption: 1, cta: 1, label: 1, body: 1}
-    return ok[r] ? r : "description"
+    if (r === "description") r = "desc"
+    var ok = {title: 1, subtitle: 1, desc: 1, caption: 1, cta: 1, label: 1, body: 1}
+    return ok[r] ? r : "desc"
 }
 
 /**
@@ -1304,8 +1406,11 @@ function buildSectionSemanticClasses(sectionNode, geoHints) {
             add(n.id, apSectionBem(role))
         }
         if (isContainer(n)) {
+            /** GROUP / INSTANCE / COMPONENT 는 레이아웃 단계를 한 칸 먹지 않음(빈 래퍼 통과) */
+            var passDepth =
+                n.type === "GROUP" || n.type === "INSTANCE" || n.type === "COMPONENT" ? depthFromSection : depthFromSection + 1
             for (var i = 0; i < (n.children || []).length; i++) {
-                walkStructure(n.children[i], depthFromSection + 1)
+                walkStructure(n.children[i], passDepth)
             }
         }
     }
@@ -1337,7 +1442,7 @@ function buildSectionSemanticClasses(sectionNode, geoHints) {
         return a.relY - b.relY
     })
 
-    var TEXT_ROLE_RE = /^ap-section__(title|subtitle|description|caption|cta|label|body)$/
+    var TEXT_ROLE_RE = /^ap-section__(title|subtitle|desc|description|caption|cta|label|body)$/
 
     function stripTextSemanticRoles(nid) {
         var s = String(nid)
@@ -1389,8 +1494,18 @@ function buildSectionSemanticClasses(sectionNode, geoHints) {
         if (b.fs !== a.fs) return b.fs - a.fs
         return a.relY - b.relY
     })
+    var bigRank = 0
     for (var rj = 0; rj < remaining.length; rj++) {
-        var roleRem = rj === 0 ? "title" : rj === 1 ? "subtitle" : "description"
+        var remFs = remaining[rj].fs != null ? Number(remaining[rj].fs) || 0 : 0
+        var roleRem
+        if (remFs <= AP_SECTION_TITLE_MIN_FS) {
+            roleRem = "desc"
+        } else {
+            if (bigRank === 0) roleRem = "title"
+            else if (bigRank === 1) roleRem = "subtitle"
+            else roleRem = "desc"
+            bigRank++
+        }
         add(remaining[rj].id, apSectionBem(roleRem))
     }
 
@@ -1438,12 +1553,15 @@ function buildSectionSemanticClasses(sectionNode, geoHints) {
     }
     walkFillMissing(sectionNode)
 
+    demoteNestedDuplicateSectionRoles(sectionNode, map)
+    disambiguateSectionSemantics(sectionNode, map)
+    demoteNestedDuplicateSectionRoles(sectionNode, map)
     disambiguateSectionSemantics(sectionNode, map)
 
     return map
 }
 
-/** 동일 ap-section__* 가 여러 노드면 --01, --02 로만 구분 (ap-n-* 불사용) */
+/** 동일 ap-section__* 가 여러 노드면 첫 노드는 접미사 없음, 둘째부터 --02, --03… (ap-n-* 불사용) */
 function disambiguateSectionSemantics(sectionNode, map) {
     var classToIds = {}
     for (var nid in map) {
@@ -1473,7 +1591,7 @@ function disambiguateSectionSemantics(sectionNode, map) {
             return rank(a) - rank(b)
         })
         for (var k = 0; k < ids.length; k++) {
-            var newCls = cls + "--" + pad2(k + 1)
+            var newCls = k === 0 ? cls : cls + "--" + pad2(k + 1)
             var arr = map[ids[k]]
             var idx = arr.indexOf(cls)
             if (idx >= 0) arr[idx] = newCls
@@ -2178,15 +2296,15 @@ function parseSimpleSectionScopedPart(part) {
     return { sec: m[1], cls: m[2].slice(1) }
 }
 
-/** 묶인 BEM 리프 중 `--숫자` 접미사 최소인 클래스를 대표로 */
+/** 묶인 BEM 리프 대표: 접미사 없는 베이스 클래스 우선, 없으면 --숫자 최소 */
 function representativeBemClassForMerge(leaves) {
     var scored = leaves.map(function (leaf) {
-        var n = 999999
         var mm = /--(\d+)$/.exec(leaf)
-        if (mm) n = parseInt(mm[1], 10)
-        return { leaf: leaf, n: n }
+        if (!mm) return { leaf: leaf, suffixed: 0, n: 0 }
+        return { leaf: leaf, suffixed: 1, n: parseInt(mm[1], 10) }
     })
     scored.sort(function (a, b) {
+        if (a.suffixed !== b.suffixed) return a.suffixed - b.suffixed
         if (a.n !== b.n) return a.n - b.n
         return String(a.leaf).localeCompare(String(b.leaf))
     })
@@ -3323,6 +3441,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
     codeLines.push("}")
     codeLines.push("")
     codeLines.push(".ap-flex {")
+    codeLines.push("  position:relative;")
     codeLines.push("  display:flex;")
     codeLines.push("  flex-direction:var(--ap-direction);")
     codeLines.push("  flex-wrap:var(--ap-wrap);")
@@ -3334,8 +3453,6 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
     codeLines.push("  padding-bottom:calc(var(--ap-pb)/var(--ap-width)*100cqi);")
     codeLines.push("  padding-left:calc(var(--ap-pl)/var(--ap-width)*100cqi);")
     codeLines.push("}")
-    codeLines.push(".ap-frame { position:relative; }")
-    codeLines.push("")
 
     codeLines.push(".ap-abs{ position:absolute; }")
     codeLines.push("")
@@ -3528,7 +3645,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
 
     // IMAGE (단일 이미지 또는 컴포지트 → 하나의 이미지로 export)
     // 컨테이너에 텍스트가 있으면 이미지로보내지 않고 자식 재귀 렌더 (텍스트 유지)
-    // 겹친 composite(clipsContent)일 때만 한 장으로 export. 분리된 이미지 2개 이상이면 ap-frame으로 풀어서 각각 figure로
+    // 겹친 composite(clipsContent)일 때만 한 장으로 export. 분리된 이미지 2개 이상이면 래퍼로 풀어서 각각 figure로
     function renderImageNodeAsync(node, parent, secNo, secClass, depth, opts) {
         var id = node.id != null ? String(node.id) : ""
         if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node)) {
@@ -3549,11 +3666,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
                 }
                 var fillWImgGrp = getFillFlexStartWidthDecl(node, parent)
                 if (fillWImgGrp) declPartsImgGrp.push(fillWImgGrp)
+                if (!isFlex(node) && !absImgGrp && containerNeedsRelativeForAbsoluteChildren(node)) declPartsImgGrp.push("position:relative")
                 if (declPartsImgGrp.length && id) {
                     pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declPartsImgGrp.join(";"))
                 }
                 var chunksImg = []
-                var imgGrpFrameCls = apNodeClassList("ap-frame" + (absImgGrp ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : ""), id, opts)
+                var imgGrpBase = [isFlex(node) ? "ap-flex" : "", absImgGrp ? "ap-abs" : ""].filter(Boolean).join(" ")
+                var imgGrpFrameCls = apNodeClassList(imgGrpBase, id, opts)
                 var imgGrpTagOpen = indent(depth) + '<div class="' + imgGrpFrameCls + '">'
                 var childrenImgGrp = node.children || []
                 var idxImg = 0
@@ -3598,10 +3717,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
         var isFullWidth = node.layoutSizingHorizontal === "FILL" ||
             (parentBox && box && box.w != null && parentBox.w != null && r2(box.w) === r2(parentBox.w))
 
-        var cls = apNodeClassList("ap-frame" + (abs ? " ap-abs" : "") + (flex ? " ap-flex" : ""), id, opts)
+        var frameBase = [flex ? "ap-flex" : "", abs ? "ap-abs" : "", isBtnNode(node) ? "ap-btn" : ""].filter(Boolean).join(" ")
+        var cls = apNodeClassList(frameBase, id, opts)
 
         // style decl for this frame: flex vars + bg (frame는 background-image 가능)
         var declParts = []
+        /** 자기 자신이 ap-abs면 position은 클래스에만 있음 — relative를 deferred로 넣으면 섹션 셀렉터가 덮어써 깨짐 */
+        if (!flex && !abs && containerNeedsRelativeForAbsoluteChildren(node)) declParts.push("position:relative")
 
         if (flex) {
             var lv = getLayoutVars(node)
@@ -3716,7 +3838,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
                         pushDeferredStyle(ctx, selInSection(secClass, leafSel), itemDecl)
                     }
 
-                    // GROUP 등 컨테이너는 renderNodeAsync가 ap-frame 래퍼를 이미 출력
+                    // GROUP 등 컨테이너는 renderNodeAsync가 프레임 래퍼를 이미 출력
                     if (isChContainer) {
                         return renderNodeAsync(ch, node, secNo, secClass, depth + 1, opts).then(function (innerHtml) {
                             if (innerHtml) childChunks.push(innerHtml)
@@ -3738,7 +3860,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
     function renderGenericContainerAsync(node, parent, secNo, secClass, depth, opts) {
         var id = node.id != null ? String(node.id) : ""
         var abs2 = isAbsoluteLike(node, parent)
-        var declParts2Visual = []  // 배경/테두리/abs → 있으면 반드시 ap-frame 유지
+        var declParts2Visual = []  // 배경/테두리/abs → 있으면 반드시 래퍼 유지
         var declParts2Flex = []
 
         return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl2) {
@@ -3750,6 +3872,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
                 var absDecl3 = buildAbsDecl(node, parent)
                 if (absDecl3) declParts2Visual.push(absDecl3)
             }
+
+            if (!isFlex(node) && !abs2 && containerNeedsRelativeForAbsoluteChildren(node)) declParts2Visual.push("position:relative")
 
             if (isFlex(node)) {
                 var lv3 = getLayoutVars(node)
@@ -3782,7 +3906,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
 
             var isGroupBtn = isBtnNode(node)
             var groupTag = isGroupBtn ? "a" : "div"
-            var frameCls = apNodeClassList("ap-frame" + (abs2 ? " ap-abs" : "") + (isFlex(node) ? " ap-flex" : ""), id, opts)
+            var groupBase = [isFlex(node) ? "ap-flex" : "", abs2 ? "ap-abs" : "", isBtnNode(node) ? "ap-btn" : ""].filter(Boolean).join(" ")
+            var frameCls = apNodeClassList(groupBase, id, opts)
             var groupTagOpen = "<" + groupTag + (isGroupBtn ? ' href="#"' : "") + ' class="' + frameCls + '">'
             var chunks2 = []
             var j = 0
