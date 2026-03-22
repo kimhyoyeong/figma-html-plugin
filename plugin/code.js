@@ -323,6 +323,17 @@ function getAbs(node) {
     }
 }
 
+/** TEXT 래스터: 프레임(absoluteBoundingBox)이 아니라 실제 그려진 영역(absoluteRenderBounds) — 넓은 텍스트 박스·여백 방지 */
+function getTextRasterBounds(node) {
+    if (!node || node.type !== "TEXT") return null
+    try {
+        var rb = node.absoluteRenderBounds
+        if (rb && typeof rb.x === "number" && typeof rb.y === "number" && typeof rb.width === "number" && typeof rb.height === "number" && rb.width > 0 && rb.height > 0)
+            return {x: r2(rb.x), y: r2(rb.y), w: r2(rb.width), h: r2(rb.height)}
+    } catch (e) {}
+    return getAbs(node)
+}
+
 /** 자식이 있는 노드(컨테이너) 여부 */
 function isContainer(node) {
     return !!(node && "children" in node && node.children && node.children.length)
@@ -353,13 +364,13 @@ function isAbsoluteInParent(child, parent) {
     return false
 }
 
-/** Figma Absolute positioning 여부 */
+/** Figma Auto Layout 자식의 Absolute 배치 여부 (명시적으로 ABSOLUTE일 때만 true; undefined/null → AUTO와 동일) */
 function isAbsolutePositioned(node) {
     try {
         if (!node || !("layoutPositioning" in node)) return false
         var v = node.layoutPositioning
-        if (v === undefined || v === null) return true
-        return String(v).toUpperCase() !== "AUTO"
+        if (v === undefined || v === null) return false
+        return String(v).toUpperCase() === "ABSOLUTE"
     } catch (e) {
         return false
     }
@@ -470,6 +481,37 @@ function buildAbsDecl(childNode, parentNode) {
     return "left:calc(" + relX + "/var(--ap-width)*100cqi);" + "top:calc(" + relY + "/var(--ap-width)*100cqi);" + "width:calc(" + w + "/var(--ap-width)*100cqi);" + "height:calc(" + h + "/var(--ap-width)*100cqi)"
 }
 
+/** TEXT 래스터(.ap-image) 절대 배치: 시각적 bounds 기준 left/top/width/height */
+function buildAbsDeclTextRaster(childNode, parentNode) {
+    var box = getTextRasterBounds(childNode) || getAbs(childNode)
+    var parentBox = getAbs(parentNode)
+    if (!box || !parentBox) return ""
+    var relX = r2(box.x - parentBox.x)
+    var relY = r2(box.y - parentBox.y)
+    var w = box.w != null ? r2(box.w) : 0
+    var h = box.h != null ? r2(box.h) : 0
+    return "left:calc(" + relX + "/var(--ap-width)*100cqi);" + "top:calc(" + relY + "/var(--ap-width)*100cqi);" + "width:calc(" + w + "/var(--ap-width)*100cqi);" + "height:calc(" + h + "/var(--ap-width)*100cqi)"
+}
+
+/** PC/MO TEXT 래스터 절대 위치 비교 후 MO 기준 선언 */
+function buildAbsDeclTextRasterDiff(dChild, dParent, mChild, mParent) {
+    var dB = getTextRasterBounds(dChild) || getAbs(dChild)
+    var dPB = getAbs(dParent)
+    var mB = getTextRasterBounds(mChild) || getAbs(mChild)
+    var mPB = getAbs(mParent)
+    if (!dB || !dPB || !mB || !mPB) return ""
+    var dRelX = r2(dB.x - dPB.x),
+        dRelY = r2(dB.y - dPB.y),
+        dW = r2(dB.w != null ? dB.w : 0),
+        dH = r2(dB.h != null ? dB.h : 0)
+    var mRelX = r2(mB.x - mPB.x),
+        mRelY = r2(mB.y - mPB.y),
+        mW = r2(mB.w != null ? mB.w : 0),
+        mH = r2(mB.h != null ? mB.h : 0)
+    if (dRelX === mRelX && dRelY === mRelY && dW === mW && dH === mH) return ""
+    return buildAbsDeclTextRaster(mChild, mParent)
+}
+
 /** PC(d)와 MO(m) 레이아웃 변수 비교 후 달라진 것만 MO 값으로 선언 */
 function buildFlexVarsDeclDiff(dLv, mLv) {
     if (!mLv) return ""
@@ -512,13 +554,13 @@ function buildAbsDeclDiff(dChild, dParent, mChild, mParent) {
 
 /** PC(d)와 MO(m) 이미지 크기 비교 후 달라진 것만 MO 값으로 선언 */
 function getImageSizeDeclDiff(dNode, mNode) {
-    var dAbs = getAbs(dNode)
-    var mAbs = getAbs(mNode)
-    if (!mAbs || (mAbs.w == null && mAbs.h == null)) return ""
-    var dw = dAbs && dAbs.w != null ? r2(dAbs.w) : null
-    var dh = dAbs && dAbs.h != null ? r2(dAbs.h) : null
-    var mw = mAbs.w != null ? r2(mAbs.w) : null
-    var mh = mAbs.h != null ? r2(mAbs.h) : null
+    var dBox = dNode && dNode.type === "TEXT" ? getTextRasterBounds(dNode) : getAbs(dNode)
+    var mBox = mNode && mNode.type === "TEXT" ? getTextRasterBounds(mNode) : getAbs(mNode)
+    if (!mBox || (mBox.w == null && mBox.h == null)) return ""
+    var dw = dBox && dBox.w != null ? r2(dBox.w) : null
+    var dh = dBox && dBox.h != null ? r2(dBox.h) : null
+    var mw = mBox.w != null ? r2(mBox.w) : null
+    var mh = mBox.h != null ? r2(mBox.h) : null
     if (dw === mw && dh === mh) return ""
     var parts = []
     if (mw != null) parts.push("--ap-w:" + mw)
@@ -1234,6 +1276,17 @@ function getLeafSelectorForNode(ch, opts) {
     return nodeSel(String(ch.id))
 }
 
+/** ap-section__image(+접미사) 시맨틱 — 크기는 --ap-w/--ap-h·.ap-image img 규칙으로 두고 flex fill width:100% 제외 */
+function nodeHasApSectionImageSemantic(nodeId, opts) {
+    var sid = nodeId != null ? String(nodeId) : ""
+    if (!sid || !opts || !opts.sectionSemantics) return false
+    var sem = opts.sectionSemantics[sid] || []
+    for (var i = 0; i < sem.length; i++) {
+        if (/^ap-section__image(?:--[0-9]{2})?$/.test(String(sem[i] || ""))) return true
+    }
+    return false
+}
+
 /** 섹션 서브트리에서 .ap-image로 출력되는 노드들을 레이어 name 기준으로 수집 (MO 이미지 이름 매칭용) */
 function collectImageNodesByName(root) {
     var map = {}
@@ -1386,12 +1439,11 @@ function sanitizeGeoRoleForBem(role) {
 /**
  * 섹션 트리 기준 시맨틱 보조 클래스 (id → 클래스 배열).
  * geoHints: AI 검수 GEO.structure [{ text, role }] — 본문 텍스트 매칭 시 ap-section__* 우선 반영.
- * bgChildId: 배경 --bg-img 로 승격되어 HTML에서 빠지는 직계 이미지 노드 — ap-section__image 부여 제외(번호 밀림 방지).
+ * bgChildId: 섹션 배경으로만 승격된 직계 이미지 — HTML/CSS에 해당 노드가 없으므로 시맨틱·중복 접미사·이미지 번호에서 제외.
  */
 function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
     if (geoHints != null && !Array.isArray(geoHints)) geoHints = null
     if (geoHints && geoHints.length > 64) geoHints = geoHints.slice(0, 64)
-    var bgSkipImgId = bgChildId != null && bgChildId !== "" ? String(bgChildId) : ""
     var map = {}
     function add(nid, cls) {
         if (nid == null) return
@@ -1513,7 +1565,6 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
 
     function tagImageNode(n) {
         if (!n || !n.id) return
-        if (bgSkipImgId && String(n.id) === bgSkipImgId) return
         var nm = String(n.name || "").toLowerCase()
         if (/logo|brand|wordmark|sym/.test(nm)) add(n.id, apSectionBem("logo"))
         else if (/icon|deco|decoration|divider|bullet|line/.test(nm)) add(n.id, apSectionBem("decoration"))
@@ -1556,6 +1607,9 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
     }
     walkFillMissing(sectionNode)
 
+    var bgSkip = bgChildId != null ? String(bgChildId) : ""
+    if (bgSkip && Object.prototype.hasOwnProperty.call(map, bgSkip)) delete map[bgSkip]
+
     demoteNestedDuplicateSectionRoles(sectionNode, map)
     disambiguateSectionSemantics(sectionNode, map)
     demoteNestedDuplicateSectionRoles(sectionNode, map)
@@ -1564,7 +1618,46 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
     return map
 }
 
-/** 동일 ap-section__* 가 2개 이상이면 전부 --01, --02… / 섹션 안에 1개뿐이면 접미사 없음 (ap-n-* 불사용) */
+/**
+ * ap-section__image / ap-section__content 는 섹션 트리 순서로 한 번에 번호 부여.
+ * promoteRaster 이후 무접미사 image 가 생겨도 기존 --01… 과 충돌하지 않음.
+ * 1개면 접미사 없음, 2개 이상이면 전부 --01, --02…
+ */
+function renumberApSectionElemGlobally(sectionNode, map, elemPart) {
+    if (!sectionNode || !map) return
+    var base = "ap-section__" + elemPart
+    var re = new RegExp("^" + base + "(?:--\\d{2})?$")
+    var orderedIds = []
+    function walkOrd2(n) {
+        if (!n || !isVisible(n)) return
+        if (n.id) orderedIds.push(String(n.id))
+        if (isContainer(n)) for (var j = 0; j < (n.children || []).length; j++) walkOrd2(n.children[j])
+    }
+    walkOrd2(sectionNode)
+    var hits = []
+    for (var oi = 0; oi < orderedIds.length; oi++) {
+        var nid = orderedIds[oi]
+        if (!Object.prototype.hasOwnProperty.call(map, nid)) continue
+        var arr = map[nid]
+        if (!arr || !arr.length) continue
+        for (var ai = 0; ai < arr.length; ai++) {
+            if (re.test(String(arr[ai] || ""))) {
+                hits.push({ id: nid, idx: ai })
+                break
+            }
+        }
+    }
+    if (hits.length === 0) return
+    if (hits.length === 1) {
+        map[hits[0].id][hits[0].idx] = base
+        return
+    }
+    for (var hi = 0; hi < hits.length; hi++) {
+        map[hits[hi].id][hits[hi].idx] = base + "--" + pad2(hi + 1)
+    }
+}
+
+/** 동일 ap-section__* 가 여러 노드면: 그 외 역할은 첫 노드 접미사 없음·둘째부터 --02… (image/content 는 renumberApSectionElemGlobally) */
 function disambiguateSectionSemantics(sectionNode, map) {
     var classToIds = {}
     for (var nid in map) {
@@ -1575,7 +1668,6 @@ function disambiguateSectionSemantics(sectionNode, map) {
             if (!classToIds[c]) classToIds[c] = []
             if (classToIds[c].indexOf(nid) < 0) classToIds[c].push(nid)
         }
-
     }
     var order = []
     function walkOrd(n) {
@@ -1594,13 +1686,18 @@ function disambiguateSectionSemantics(sectionNode, map) {
         ids = ids.slice().sort(function (a, b) {
             return rank(a) - rank(b)
         })
+        var clsStr = String(cls || "")
+        var baseNm = clsStr.replace(/--\d{2}$/, "")
+        if (baseNm === "ap-section__content" || baseNm === "ap-section__image") continue
         for (var k = 0; k < ids.length; k++) {
-            var newCls = cls + "--" + pad2(k + 1)
-            var arr = map[ids[k]]
-            var idx = arr.indexOf(cls)
-            if (idx >= 0) arr[idx] = newCls
+            var newCls = k === 0 ? clsStr : baseNm + "--" + pad2(k + 1)
+            var arrM = map[ids[k]]
+            var idx = arrM.indexOf(clsStr)
+            if (idx >= 0) arrM[idx] = newCls
         }
     }
+    renumberApSectionElemGlobally(sectionNode, map, "image")
+    renumberApSectionElemGlobally(sectionNode, map, "content")
 }
 
 /** 지연 CSS용: 섹션 스코프 안 시맨틱 클래스만 (ap-n 없음) */
@@ -1619,6 +1716,40 @@ function cssInnerSelForNode(id, opts, forImgChild) {
         }
     }
     return forImgChild ? "." + pick + " > img" : "." + pick
+}
+
+/** TEXT 래스터 시 ap-section__title/__desc 등 제거 후 이미지 레이아웃(ap-section__image)과 동일 계열로 맞춤 */
+var RASTER_STRIP_TEXT_ROLE_RE = /^ap-section__(title|subtitle|desc|description|caption|cta|label|body)(--|$)/
+
+function optsWithRasterTextAsImageSemantics(id, opts) {
+    if (!opts) return { sectionSemantics: {} }
+    var sid = id != null ? String(id) : ""
+    if (!sid) return opts
+    var sem = opts.sectionSemantics || {}
+    var orig = sem[sid] ? sem[sid].slice() : []
+    var disambigSuffix = ""
+    for (var oi = 0; oi < orig.length; oi++) {
+        var m = /^ap-section__(?:title|subtitle|desc|description|caption|cta|label|body)(--[0-9]{2})$/.exec(String(orig[oi] || ""))
+        if (m) disambigSuffix = m[1]
+    }
+    var arr = orig.filter(function (c) {
+        return !RASTER_STRIP_TEXT_ROLE_RE.test(String(c || ""))
+    })
+    var hasImgLike = arr.some(function (c) {
+        return /^ap-section__(image|logo|decoration)(--|$)/.test(String(c || ""))
+    })
+    if (!hasImgLike) arr.push(apSectionBem("image") + disambigSuffix)
+    var nextSem = {}
+    for (var k in sem) {
+        if (Object.prototype.hasOwnProperty.call(sem, k)) nextSem[k] = sem[k]
+    }
+    nextSem[sid] = arr
+    var out = {}
+    for (var ko in opts) {
+        if (Object.prototype.hasOwnProperty.call(opts, ko)) out[ko] = opts[ko]
+    }
+    out.sectionSemantics = nextSem
+    return out
 }
 
 /** base + 시맨틱만 (ap-n-* 출력 안 함) */
@@ -1662,7 +1793,8 @@ function exportNodeImageAsync(node) {
                     return null
                 })
         }
-        var textOpts = isText ? {useAbsoluteBounds: true} : undefined
+        // false = visual bounds(글리프에 가까움). true면 텍스트 프레임 전체가 PNG/CSS에 잡혀 넓은 박스·여백이 됨
+        var textOpts = isText ? {useAbsoluteBounds: false} : undefined
         /** 동일 포맷으로 width → 800 → 제약 없음 순 시도 */
         function tryFormatSequence(fmt) {
             return doExport(fmt, w, textOpts).then(function (result) {
@@ -1710,13 +1842,13 @@ function exportNodeSvgAsync(node) {
     }
 }
 
-/** 이미지 노드 크기로 img용 CSS var 선언 */
+/** 이미지 노드 크기로 img용 CSS var 선언 (TEXT 래스터는 시각적 bounds) */
 function getImageSizeDecl(node) {
-    var abs = getAbs(node)
-    if (!abs || (abs.w == null && abs.h == null)) return ""
+    var box = node && node.type === "TEXT" ? getTextRasterBounds(node) : getAbs(node)
+    if (!box || (box.w == null && box.h == null)) return ""
     var parts = []
-    if (abs.w != null) parts.push("--ap-w:" + abs.w)
-    if (abs.h != null) parts.push("--ap-h:" + abs.h)
+    if (box.w != null) parts.push("--ap-w:" + box.w)
+    if (box.h != null) parts.push("--ap-h:" + box.h)
     return parts.join(";")
 }
 
@@ -1946,7 +2078,9 @@ function getTextSummaryAsync(tn) {
         } catch (e) {
             out.fontFamilies = []
         }
-        if (!out.fontFamilies) out.fontFamilies = out.fontFamily ? [out.fontFamily] : []
+        if (!out.fontFamilies || out.fontFamilies.length === 0) {
+            out.fontFamilies = out.fontFamily ? [out.fontFamily] : []
+        }
 
         var isMixed = false
         try {
@@ -2043,8 +2177,103 @@ function getTextSummaryAsync(tn) {
             }
         }
 
+        if ((!out.fontFamilies || out.fontFamilies.length === 0) && len > 0 && typeof tn.getStyledTextSegments === "function") {
+            try {
+                var segsFn = tn.getStyledTextSegments(["fontName"])
+                if (segsFn && segsFn.length) {
+                    var seenG = {}
+                    for (var gi = 0; gi < segsFn.length; gi++) {
+                        var gnm = segsFn[gi].fontName
+                        if (gnm && gnm !== figma.mixed && gnm.family) {
+                            var gff = String(gnm.family)
+                            var gk = gff.toLowerCase().trim()
+                            if (gk && !seenG[gk]) {
+                                seenG[gk] = true
+                                out.fontFamilies.push(gff)
+                            }
+                        }
+                    }
+                }
+            } catch (eGfam) {}
+        }
+        if (!out.fontFamilies || out.fontFamilies.length === 0) {
+            out.fontFamilies = out.fontFamily ? [out.fontFamily] : []
+        }
+        if (out.fontFamilies.length > 1) {
+            var seenD = {}
+            out.fontFamilies = out.fontFamilies.filter(function (fam) {
+                var dk = String(fam || "").toLowerCase().trim()
+                if (!dk || seenD[dk]) return false
+                seenD[dk] = true
+                return true
+            })
+        }
+
         return out
     })
+}
+
+/**
+ * 폰트 패밀리 문자열 정규화 (매칭용).
+ * Noto* 전부 동일 키(noto) — Sans/Serif/CJK/KR/Mono/Color Emoji 등 구분 없음.
+ */
+function canonicalizeFontFamilyAlias(s) {
+    var t = String(s || "").trim()
+    if (!t) return ""
+    t = t.replace(/\s+/g, " ").trim()
+    if (/^noto/i.test(t)) return "noto"
+    return t
+}
+
+function normalizeFontFamilyForMatch(s) {
+    return canonicalizeFontFamilyAlias(
+        String(s || "")
+            .toLowerCase()
+            .trim()
+            .replace(/[\-_]+/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+    )
+}
+
+/** 분석 결과 usedFonts / UI 체크 한 줄. Noto 계열은 전부 "Noto"로 합침 */
+function usedFontListLabel(figFamily) {
+    if (!figFamily) return ""
+    if (normalizeFontFamilyForMatch(figFamily) === "noto") return "Noto"
+    return String(figFamily).trim()
+}
+
+/**
+ * allowedNorm: normalizeFontFamilyForMatch 적용된 UI 허용 목록.
+ * Figma "Cera Pro Medium" ↔ 체크 "Cera Pro" 등 접두 일치 허용.
+ */
+function figFontFamilyMatchesAllowedList(figFamily, allowedNorm) {
+    if (!allowedNorm || !allowedNorm.length) return true
+    var f = normalizeFontFamilyForMatch(figFamily)
+    if (!f) return false
+    for (var i = 0; i < allowedNorm.length; i++) {
+        var a = allowedNorm[i]
+        if (!a) continue
+        if (f === a) return true
+        if (f.length > a.length && f.slice(0, a.length + 1) === a + " ") return true
+        if (a.length > f.length && a.slice(0, f.length + 1) === f + " ") return true
+    }
+    return false
+}
+
+/**
+ * UI 허용 폰트 목록과 비교해 TEXT를 HTML로 둘지 (buildCodeAsync / renderTextNodeAsync).
+ * unrestricted: 첫 분석 등 — allowedHtml 무시하고 전부 HTML.
+ * 그 외: allowedHtml 비면(체크 0개) 전부 이미지, 있으면 목록 매칭.
+ */
+function textFamiliesAllowedAsHtml(families, allowedHtml, unrestricted) {
+    if (unrestricted) return true
+    if (!allowedHtml || !allowedHtml.length) return false
+    if (!families || !families.length) return false
+    for (var ti = 0; ti < families.length; ti++) {
+        if (!figFontFamilyMatchesAllowedList(families[ti], allowedHtml)) return false
+    }
+    return true
 }
 
 /** 텍스트 스타일 → CSS 변수 (--ap-fs, --ap-lh, --ap-clr 등) */
@@ -2150,6 +2379,68 @@ function getTextSummarySync(tn) {
         return null
     }
 }
+
+/** TEXT 노드 폰트 패밀리 목록 (동기, textFamiliesAllowedAsHtml / 래스터 판별용) */
+function getTextFontFamiliesSync(tn) {
+    if (!tn || tn.type !== "TEXT") return []
+    var out = []
+    try {
+        var fn = tn.fontName
+        if (fn && fn !== figma.mixed && typeof fn === "object" && fn.family) return [String(fn.family)]
+        if (fn === figma.mixed) {
+            var len = 0
+            try {
+                len = tn.characters ? tn.characters.length : 0
+            } catch (eLen) {
+                len = 0
+            }
+            if (len > 0 && typeof tn.getRangeAllFontNames === "function") {
+                var names = tn.getRangeAllFontNames(0, len)
+                var seen = {}
+                for (var i = 0; i < names.length; i++) {
+                    var fam = names[i] && names[i].family ? String(names[i].family) : ""
+                    if (fam && !seen[fam]) {
+                        seen[fam] = true
+                        out.push(fam)
+                    }
+                }
+            }
+        }
+    } catch (e) {}
+    return out
+}
+
+/**
+ * HTML 텍스트가 아닌(폰트 필터로 래스터) TEXT는 시맨틱에서 title/subtitle 등을 제거하고
+ * ap-section__image 를 부여 — 접미사(--01…)는 호출부에서 promote 이후 disambiguateSectionSemantics 로 통일.
+ */
+function promoteRasterTextNodesToImageSemantics(sectionNode, map, allowedHtml, unrestricted) {
+    if (!sectionNode || !map) return
+    var rasterIdsOrdered = []
+    function walkCollect(n) {
+        if (!n || !isVisible(n)) return
+        if (n.type === "TEXT" && n.id != null) {
+            var families = getTextFontFamiliesSync(n)
+            if (!textFamiliesAllowedAsHtml(families, allowedHtml, unrestricted)) rasterIdsOrdered.push(String(n.id))
+        }
+        if (isContainer(n)) for (var i = 0; i < n.children.length; i++) walkCollect(n.children[i])
+    }
+    walkCollect(sectionNode)
+    for (var ri = 0; ri < rasterIdsOrdered.length; ri++) {
+        var sid = rasterIdsOrdered[ri]
+        var arr = (map[sid] || []).slice().filter(function (c) {
+            return !RASTER_STRIP_TEXT_ROLE_RE.test(String(c || ""))
+        })
+        var hasImg = arr.some(function (c) {
+            return /^ap-section__(image|logo|decoration)(--|$)/.test(String(c || ""))
+        })
+        if (!hasImg) {
+            arr.push(apSectionBem("image"))
+            map[sid] = arr
+        }
+    }
+}
+
 /** deferred 스타일 배열에 셀렉터별 선언 누적 (같은 sel이면 decl 병합) */
 function pushDeferredStyle(ctx, sel, decl) {
     if (!ctx || !ctx.deferredStyles || !sel || !decl) return
@@ -2641,25 +2932,6 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
         })
 }
 
-/**
- * 배경으로 승격되는 풀블리드 직계 자식 id (비동기 export 없이 판별만). MO 오버라이드용 시맨틱과 PC 일치.
- */
-function getSectionBgPromotedChildIdSync(sectionNode) {
-    if (!sectionNode || hasImageFill(sectionNode) || getSlideItems(sectionNode)) return null
-    var children = sectionNode.children || []
-    var sectionBox = getAbs(sectionNode)
-    if (!sectionBox || children.length === 0) return null
-    for (var i = 0; i < children.length; i++) {
-        var ch = children[i]
-        if (!ch || !isVisible(ch) || !isImageCandidate(ch)) continue
-        if (isContainer(ch) && ch.children && ch.children.length > 0) continue
-        var chBox = getAbs(ch)
-        if (!chBox) continue
-        if (chBox.w >= sectionBox.w * 0.9 && chBox.h >= sectionBox.h * 0.9) return ch.id != null ? String(ch.id) : null
-    }
-    return null
-}
-
 /** 섹션 배경: fill 또는 직계 자식 중 90% 이상 크기 이미지 → --bg-img 승격 (slide 섹션 제외) */
 function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
   var slideData = getSlideItems(sectionNode)
@@ -2816,15 +3088,13 @@ function resolveDesktopMobile(sel) {
     return {desktopRoot: b, mobileRoot: a, breakpoint: r2(wa) || 750}
 }
 
-/** ROOT의 섹션으로 쓸 노드 목록. 래퍼 1개(직계 자식 1개 컨테이너)면 그 자식들을 섹션으로 사용 → 모바일 프레임 구조 대응 */
+/** 선택한 ROOT 프레임 전체 = HTML `<section>` 1개. 직계 자식마다 섹션을 나누면 배경 전용 레이어가 빈 ap-section--01, 본문이 --02로 갈라지는 등 루트 레이아웃이 깨짐. (여러 장별 HTML 섹션이 필요하면 파일/페이지를 나눠 ROOT를 각각 선택) */
+/** 선택 ROOT의 보이는 직계 자식 각각 = HTML `<section>` 하나(ap-section--01..). (한 장만 있으면 섹션 1개 — 직계 자식이 곧 섹션 노드이지, 선택 프레임 전체를 한 블록으로 합치지 않음) */
 function getSectionNodes(root) {
     if (!root || !isContainer(root)) return []
-    var kids = (root.children || []).filter(function (c) { return c && isVisible(c) })
-    if (kids.length === 1 && isContainer(kids[0])) {
-        var inner = (kids[0].children || []).filter(function (c) { return c && isVisible(c) })
-        if (inner.length > 0) return inner
-    }
-    return kids
+    return (root.children || []).filter(function (c) {
+        return c && isVisible(c)
+    })
 }
 
 /** PC/MO 루트가 동일한 레이어 순서·구조인지 (visible 자식 기준, 타입·순서만 비교) */
@@ -2904,7 +3174,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 } else {
                     var fillW = getFillFlexStartWidthDecl(m, mNode)
                     var fillWD = getFillFlexStartWidthDecl(d, dNode)
-                    if (fillW && fillW !== fillWD) declParts.push(fillW)
+                    if (fillW && fillW !== fillWD && !nodeHasApSectionImageSemantic(d.id, moOpts)) declParts.push(fillW)
                     else {
                         var mBox = getAbs(m)
                         var dBox = getAbs(d)
@@ -2918,13 +3188,26 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var mBoxH = getAbs(m)
                 if (mBoxH && mBoxH.h != null) declParts.push("min-height:calc(" + r2(mBoxH.h) + "/var(--ap-width)*100cqi)")
             } else if (d.type === "TEXT" && m.type === "TEXT") {
-                sel = ".ap-section--" + secClass + " " + cssInnerSelForNode(String(d.id), moOpts, false)
-                var tsD = getTextSummarySync(d)
-                var tsM = getTextSummarySync(m)
-                if (tsM) {
-                    var textDecl = buildTextVarsDeclDiff(tsD, tsM)
-                    if (textDecl) declParts.push(textDecl)
+                if (ownImageSet && ownImageSet[String(d.id)]) {
+                    var moRasterOpts = optsWithRasterTextAsImageSemantics(String(d.id), moOpts)
+                    sel = ".ap-section--" + secClass + " " + cssInnerSelForNode(String(d.id), moRasterOpts, false)
+                    var szTr = getImageSizeDeclDiff(d, m)
+                    if (szTr) declParts.push(szTr)
+                    var mAbsTr = isAbsoluteLike(m, mNode)
+                    if (mAbsTr) {
+                        var adTr = buildAbsDeclTextRasterDiff(d, dNode, m, mNode)
+                        if (adTr) declParts.push(adTr)
+                    }
                     if (textOverrideDone && d.id != null) textOverrideDone[String(d.id)] = true
+                } else {
+                    sel = ".ap-section--" + secClass + " " + cssInnerSelForNode(String(d.id), moOpts, false)
+                    var tsD = getTextSummarySync(d)
+                    var tsM = getTextSummarySync(m)
+                    if (tsM) {
+                        var textDecl = buildTextVarsDeclDiff(tsD, tsM)
+                        if (textDecl) declParts.push(textDecl)
+                        if (textOverrideDone && d.id != null) textOverrideDone[String(d.id)] = true
+                    }
                 }
             } else {
                 var leafSelRaw = getLeafSelectorForNode(d, moOpts)
@@ -2935,7 +3218,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 }
                 var fillW2 = getFillFlexStartWidthDecl(m, mNode)
                 var fillW2D = getFillFlexStartWidthDecl(d, dNode)
-                if (fillW2 && fillW2 !== fillW2D) declParts.push(fillW2)
+                if (fillW2 && fillW2 !== fillW2D && !nodeHasApSectionImageSemantic(d.id, moOpts)) declParts.push(fillW2)
                 var mAbs2 = isAbsoluteLike(m, mNode)
                 if (mAbs2) {
                     var ad2 = buildAbsDeclDiff(d, dNode, m, mNode)
@@ -2996,11 +3279,20 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         var secTextByName = collectTextNodesByName(mSec)
         var sectionImageOverrideDone = {}
         var sectionTextOverrideDone = {}
-        var deskSem = buildSectionSemanticClasses(
-            dSec,
-            (options && options.geoStructure) || null,
-            getSectionBgPromotedChildIdSync(dSec),
-        )
+        var deskSem = buildSectionSemanticClasses(dSec, (options && options.geoStructure) || null)
+        var allowedMo = Array.isArray(options.allowedFonts)
+            ? options.allowedFonts
+                  .map(function (f) {
+                      return normalizeFontFamilyForMatch(f)
+                  })
+                  .filter(Boolean)
+            : []
+        var fontMoActive = options.fontHtmlFilterActive === true
+        promoteRasterTextNodesToImageSemantics(dSec, deskSem, allowedMo, !fontMoActive)
+        demoteNestedDuplicateSectionRoles(dSec, deskSem)
+        disambiguateSectionSemantics(dSec, deskSem)
+        demoteNestedDuplicateSectionRoles(dSec, deskSem)
+        disambiguateSectionSemantics(dSec, deskSem)
         var deskMoOpts = { sectionSemantics: deskSem }
         walkPair(dSec, mSec, mSec, secClass, secImageByName, sectionImageOverrideDone, secTextByName, sectionTextOverrideDone, deskSem)
         // 이미지: 인덱스로 매칭 안 된 경우에만 레이어 name 기준으로 MO 매칭
@@ -3031,17 +3323,17 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                     var tsD = getTextSummarySync(dNode)
                     var tsM = getTextSummarySync(mText)
                     if (tsM) {
-                        var textDecl = buildTextVarsDeclDiff(tsD, tsM)
-                        if (textDecl) {
-                            lines.push(
-                                "  .ap-section--" +
-                                    secCls +
-                                    " " +
-                                    cssInnerSelForNode(String(dNode.id), deskMoOpts, false) +
-                                    "{ " +
-                                    textDecl +
-                                    " }"
-                            )
+                        var deskRasterOpts = optsWithRasterTextAsImageSemantics(String(dNode.id), deskMoOpts)
+                        var deskTxtSel =
+                            ownImageSet && ownImageSet[String(dNode.id)]
+                                ? cssInnerSelForNode(String(dNode.id), deskRasterOpts, false)
+                                : cssInnerSelForNode(String(dNode.id), deskMoOpts, false)
+                        if (ownImageSet && ownImageSet[String(dNode.id)]) {
+                            var declTrN = getImageSizeDeclDiff(dNode, mText)
+                            if (declTrN) lines.push("  .ap-section--" + secCls + " " + deskTxtSel + "{ " + declTrN + " }")
+                        } else {
+                            var textDecl = buildTextVarsDeclDiff(tsD, tsM)
+                            if (textDecl) lines.push("  .ap-section--" + secCls + " " + deskTxtSel + "{ " + textDecl + " }")
                         }
                     }
                 }
@@ -3216,11 +3508,13 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         allowedFonts: Array.isArray(allowedFonts)
             ? allowedFonts
                   .map(function (f) {
-                      return String(f).trim().toLowerCase()
+                      return normalizeFontFamilyForMatch(f)
                   })
                   .filter(Boolean)
             : [],
         imageSuffix: options.imageSuffix != null ? String(options.imageSuffix) : "",
+        /** 이전에 분석해 폰트 UI가 있음 → 빈 allowedFonts = 체크 전부 해제 = 텍스트도 전부 이미지 */
+        fontHtmlFilterActive: options.fontHtmlFilterActive === true,
         usedFonts: {},
         text: {},
         textMeta: {},
@@ -3237,7 +3531,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
 
     var sectionNodes = getSectionNodes(root)
     if (!sectionNodes || sectionNodes.length === 0) {
-        return Promise.reject(new Error("보이는 섹션이 없습니다. ROOT 프레임의 직계 자식(또는 래퍼 안)에 표시된 레이어가 있는지 확인하세요."))
+        return Promise.reject(new Error("보이는 섹션이 없습니다. ROOT 프레임의 직계 자식 레이어가 최소 1개 보이도록 선택했는지 확인하세요."))
     }
     var sections = []
 
@@ -3293,7 +3587,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                     cache.textMeta[node.id] = ts
                 }
                 ;(ts.fontFamilies || (ts.fontFamily ? [ts.fontFamily] : [])).forEach(function (f) {
-                    if (f) cache.usedFonts[f] = true
+                    if (f) cache.usedFonts[usedFontListLabel(f)] = true
                 })
                 var textDisplay = ts.text.indexOf("\n") >= 0 || ts.text.length > 60 ? ts.textShort : ts.text
                 props.push(indent(depth + 1) + dumpPadKey("text") + '"' + textDisplay + '"')
@@ -3384,7 +3678,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
             })
     }
 
-    var legend = ["", "  ─── LEGEND ───", "  ROOT = 선택 1개 | 직계 자식 = ap-section (ap-section--01..)", "  " + dumpPadKey("flex") + "AutoLayout 정보", "  " + dumpPadKey("layoutChild") + "width/height(fill|auto|Npx), align-self, flex-grow", "  " + dumpPadKey("bg") + "배경: image, color:#hex, border (둘 다 있으면 둘 다 표기, export는 image 우선)", "  " + dumpPadKey("bgImage") + "image일 때 내보낸 이미지 경로 (assets/images/...)", "  " + dumpPadKey("sectionRelative") + "해당 ap-section 기준 상대 좌표 (x,y,w,h)", ""]
+    var legend = ["", "  ─── LEGEND ───", "  ROOT = 선택 1개 | 직계 자식(보이는 레이어) 각각 = ap-section (ap-section--01..)", "  " + dumpPadKey("flex") + "AutoLayout 정보", "  " + dumpPadKey("layoutChild") + "width/height(fill|auto|Npx), align-self, flex-grow", "  " + dumpPadKey("bg") + "배경: image, color:#hex, border (둘 다 있으면 둘 다 표기, export는 image 우선)", "  " + dumpPadKey("bgImage") + "image일 때 내보낸 이미지 경로 (assets/images/...)", "  " + dumpPadKey("sectionRelative") + "해당 ap-section 기준 상대 좌표 (x,y,w,h)", ""]
 
     function flattenNode(n) {
         return [n.label].concat(n.props).concat(
@@ -3435,6 +3729,10 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
     var exportedNodeIds = {}
     var ownImageNodeIds = {}
     var ctx = {deferredStyles: deferredStyles, exportedNodeIds: exportedNodeIds, ownImageNodeIds: ownImageNodeIds}
+
+    /** 첫 분석(fontHtmlFilterActive 아님): 필터 없음. 이후: allowedFonts로만 HTML 허용. */
+    var fontHtmlUnrestricted = cache.fontHtmlFilterActive !== true
+    var allowedFontsForHtml = Array.isArray(cache.allowedFonts) ? cache.allowedFonts : []
 
     var sectionList = sectionNodesParam && sectionNodesParam.length >= 0 ? sectionNodesParam : (root.children || [])
     var rootBox = getAbs(root)
@@ -3579,7 +3877,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
         return isBtnNode(node) ? html : wrapIfBtn(node, html, depth)
     }
 
-    // TEXT: 허용 폰트 목록에 없으면 이미지로 내보냄 (project 이미지와 동일하게 path 사용)
+    // TEXT: 체크된 허용 폰트만 HTML, 목록 밖(미체크) 패밀리는 래스터 이미지
     function renderTextNodeAsync(node, parent, secNo, secClass, depth, opts) {
         var id = node.id != null ? String(node.id) : ""
         var dataIdAttr = ""
@@ -3587,15 +3885,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
         var textCls = apNodeClassList("ap-text" + (textAbs ? " ap-abs" : ""), id, opts)
         return getTextSummaryAsync(node)
             .then(function (ts) {
-                var allowed = cache.allowedFonts || []
-                var fontFamilyLower = (ts.fontFamily || "").toLowerCase().trim()
                 var families = ts.fontFamilies && ts.fontFamilies.length ? ts.fontFamilies : ts.fontFamily ? [ts.fontFamily] : []
-                var fontAllowed =
-                    allowed.length === 0 ||
-                    (families.length > 0 &&
-                        families.every(function (f) {
-                            return allowed.indexOf(String(f).toLowerCase().trim()) >= 0
-                        }))
+                var fontAllowed = textFamiliesAllowedAsHtml(families, allowedFontsForHtml, fontHtmlUnrestricted)
 
                 if (fontAllowed) {
                     pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, true, opts)
@@ -3612,9 +3903,18 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
                         var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, { skipExport: isVideoNode(node) }) : dataUrl
                         var altText = getImageAltText(node)
                         if (id) ctx.ownImageNodeIds[id] = true
-                        var imgWrapCls = apNodeClassList("ap-image", id, opts)
-                        pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, false)
-                        return wrapIfBtn(node, indent(depth) + '<div class="' + imgWrapCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>', depth)
+                        var rasterOpts = optsWithRasterTextAsImageSemantics(id, opts)
+                        var imgWrapCls = apNodeClassList(("ap-image" + (textAbs ? " ap-abs" : "")).trim(), id, rasterOpts)
+                        if (textAbs && id) {
+                            var traDecl = buildAbsDeclTextRaster(node, parent)
+                            if (traDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, rasterOpts, false)), traDecl)
+                        }
+                        pushDeferredImageImgSizeVars(ctx, secClass, id, node, rasterOpts, textAbs)
+                        return wrapIfBtn(
+                            node,
+                            indent(depth) + '<div class="' + imgWrapCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>',
+                            depth
+                        )
                     })
                     .catch(function () {
                         pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, false, opts)
@@ -3658,13 +3958,18 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
             var ellipseHtml = '<div class="' + ellipseCls + '"></div>'
             return Promise.resolve(wrapIfBtn(node, indent(depth) + ellipseHtml, depth))
         }
+        var svgImgAbs = isAbsoluteLike(node, parent)
         return exportNodeSvgAsync(node).then(function (dataUrl) {
             if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
             var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, { skipExport: isVideoNode(node) }) : dataUrl || ""
+            if (svgImgAbs && id) {
+                var svgAbsDecl = buildAbsDecl(node, parent)
+                if (svgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), svgAbsDecl)
+            }
             var altText = getImageAltText(node)
             if (id) ctx.ownImageNodeIds[id] = true
-            var svgImgCls = apNodeClassList("ap-image", id, opts)
-            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, false)
+            var svgImgCls = apNodeClassList(("ap-image" + (svgImgAbs ? " ap-abs" : "")).trim(), id, opts)
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, svgImgAbs)
             var html = indent(depth) + '<div class="' + svgImgCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>'
             return wrapIfBtn(node, html, depth)
         })
@@ -3692,7 +3997,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
                     if (flexImgGrp) declPartsImgGrp.push(flexImgGrp)
                 }
                 var fillWImgGrp = getFillFlexStartWidthDecl(node, parent)
-                if (fillWImgGrp) declPartsImgGrp.push(fillWImgGrp)
+                if (fillWImgGrp && !nodeHasApSectionImageSemantic(node.id, opts)) declPartsImgGrp.push(fillWImgGrp)
                 if (!isFlex(node) && !absImgGrp && containerNeedsRelativeForAbsoluteChildren(node)) declPartsImgGrp.push("position:relative")
                 if (declPartsImgGrp.length && id) {
                     pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declPartsImgGrp.join(";"))
@@ -3758,7 +4063,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
             if (flexDecl) declParts.push(flexDecl)
         }
 
-        if (isFullWidth) {
+        if (isFullWidth && !nodeHasApSectionImageSemantic(node.id, opts)) {
 
             declParts.push("width:100%")
 
@@ -3766,7 +4071,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
 
         if (!isFullWidth) {
             var fillWidthDecl = getFillFlexStartWidthDecl(node, parent)
-            if (fillWidthDecl) declParts.push(fillWidthDecl)
+            if (fillWidthDecl && !nodeHasApSectionImageSemantic(node.id, opts)) declParts.push(fillWidthDecl)
             else if (!abs) {
                 var sizingH = node.layoutSizingHorizontal
                 if (sizingH === "FIXED" && box && box.w != null) declParts.push("width:calc(" + box.w + "/var(--ap-width)*100cqi)")
@@ -3858,7 +4163,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
                     var strokeDeclCh = buildStrokeDecl(ch)
                     if (strokeDeclCh) itemDeclParts.push(strokeDeclCh)
                     var fillWidthCh = getFillFlexStartWidthDecl(ch, node)
-                    if (fillWidthCh) itemDeclParts.push(fillWidthCh)
+                    if (fillWidthCh && !chAbs && !nodeHasApSectionImageSemantic(ch.id, opts)) itemDeclParts.push(fillWidthCh)
                     var itemDecl = itemDeclParts.join(";")
 
                     if (itemDecl && leafSel) {
@@ -3909,7 +4214,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
             }
 
             var fillWidthDecl2 = getFillFlexStartWidthDecl(node, parent)
-            if (fillWidthDecl2) declParts2Flex.push(fillWidthDecl2)
+            if (fillWidthDecl2 && !nodeHasApSectionImageSemantic(node.id, opts)) declParts2Flex.push(fillWidthDecl2)
 
             var children2 = node.children || []
             var visibleChildren = children2.filter(function (c) { return c && (opts && opts.includeHidden ? true : isVisible(c)) })
@@ -3917,7 +4222,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
             var groupHasVisualAttrs = declParts2Visual.length > 0
             var declParts2 = declParts2Visual.concat(declParts2Flex)
             var groupHasAttrs = declParts2.length > 0
-            var skipGroupWrapper = singleChild && !groupHasVisualAttrs
+            // flex 전용 변수만 있어도 래퍼 유지(단일 자식이어도 ap-flex DOM이 사라지면 레이아웃·겹침 붕괴)
+            var skipGroupWrapper = singleChild && !groupHasAttrs
 
             if (groupHasAttrs && id && !skipGroupWrapper) {
                 pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declParts2.join(";"))
@@ -4040,7 +4346,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
             var strokeDeclVirtual = buildStrokeDecl(ch)
             if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)
             var fillWidthVirtual = getFillFlexStartWidthDecl(ch, sectionNode)
-            if (fillWidthVirtual) itemDeclParts.push(fillWidthVirtual)
+            if (fillWidthVirtual && !nodeHasApSectionImageSemantic(ch.id, opts)) itemDeclParts.push(fillWidthVirtual)
             var itemDecl = itemDeclParts.join(";")
             if (itemDecl && leafSel) pushDeferredStyle(ctx, selInSection(secClass, leafSel), itemDecl)
             if (isChContainer) return renderNodeAsync(ch, sectionNode, secNo, secClass, depth, opts)
@@ -4060,11 +4366,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
 
         // section style: height + background (incl child bg detection) + flex(섹션이 Auto Layout일 때)
         return buildSectionBackgroundAsync(sectionNode, cache, secNo).then(function (bg) {
-            var sectionSemantics = buildSectionSemanticClasses(
-                sectionNode,
-                geoStructure,
-                bg.bgChildId != null ? String(bg.bgChildId) : "",
-            )
+            var sectionSemantics = buildSectionSemanticClasses(sectionNode, geoStructure, bg.bgChildId)
+            promoteRasterTextNodesToImageSemantics(sectionNode, sectionSemantics, allowedFontsForHtml, fontHtmlUnrestricted)
+            demoteNestedDuplicateSectionRoles(sectionNode, sectionSemantics)
+            disambiguateSectionSemantics(sectionNode, sectionSemantics)
+            demoteNestedDuplicateSectionRoles(sectionNode, sectionSemantics)
+            disambiguateSectionSemantics(sectionNode, sectionSemantics)
             var sectionRenderOpts = {
                 includeHidden: true,
                 sectionSemantics: sectionSemantics,
@@ -4183,7 +4490,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
                         var strokeDeclVirtual = buildStrokeDecl(ch)
                         if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)
                         var fillWidthVirtual = getFillFlexStartWidthDecl(ch, sectionNode)
-                        if (fillWidthVirtual) itemDeclParts.push(fillWidthVirtual)
+                        if (fillWidthVirtual && !nodeHasApSectionImageSemantic(ch.id, sectionRenderOpts)) itemDeclParts.push(fillWidthVirtual)
                         var itemDecl = itemDeclParts.join(";")
 
                         if (itemDecl && leafSel) pushDeferredStyle(ctx, selInSection(secClass, leafSel), itemDecl)
@@ -4301,6 +4608,23 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
 figma.ui.onmessage = function (msg) {
     if (!msg) return
 
+    /** ROOT 1개=PC만, 2개=PC+MO(가로 큰 쪽 PC) @media 오버라이드 */
+    if (msg.type === "RUN_ANALYZE") {
+        var selPick = figma.currentPage.selection
+        if (!selPick || !selPick.length) {
+            figma.ui.postMessage({ type: "ERROR", message: "ROOT 1개(PC만) 또는 2개(PC+MO) 선택 후 분석" })
+            return
+        }
+        if (selPick.length > 2) {
+            figma.ui.postMessage({
+                type: "ERROR",
+                message: "ROOT는 1개 또는 2개만 선택합니다. 2개일 때 가로가 큰 프레임=PC, 작은 프레임=MO",
+            })
+            return
+        }
+        msg = Object.assign({}, msg, { type: selPick.length === 1 ? "RUN_DESKTOP" : "RUN_MOBILE" })
+    }
+
     if (msg.type === "RUN_DESKTOP") {
         _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
         var sel = figma.currentPage.selection
@@ -4311,14 +4635,21 @@ figma.ui.onmessage = function (msg) {
         var root = sel[0]
         var projectName = msg.projectName || "project"
         var allowedFonts = msg.allowedFonts || []
+        var fontHtmlFilterActive = msg.fontHtmlFilterActive === true
         figma.ui.postMessage({type: "LOADING", value: true})
 
-        dumpTreeAsync(root, projectName, allowedFonts, {phase: "desktop", geoStructure: msg.geoStructure || null})
+        dumpTreeAsync(root, projectName, allowedFonts, {
+            phase: "desktop",
+            geoStructure: msg.geoStructure || null,
+            fontHtmlFilterActive: fontHtmlFilterActive,
+        })
             .then(function (payload) {
                 figma.ui.postMessage({type: "LOADING", value: false})
                 var images = payload.images || []
+                var ingestId = "i" + Date.now() + "-" + String(Math.random()).slice(2, 10)
                 figma.ui.postMessage({
                     type: "RESULT",
+                    ingestId: ingestId,
                     text: payload.text,
                     dataTree: payload.dataTree,
                     code: payload.code,
@@ -4329,9 +4660,9 @@ figma.ui.onmessage = function (msg) {
                     mobileDataTree: undefined,
                 })
                 images.forEach(function (item, i) {
-                    figma.ui.postMessage({type: "RESULT_IMAGES_CHUNK", index: i, name: item.name, dataUrl: item.dataUrl})
+                    figma.ui.postMessage({type: "RESULT_IMAGES_CHUNK", ingestId: ingestId, index: i, name: item.name, dataUrl: item.dataUrl})
                 })
-                figma.ui.postMessage({type: "RESULT_IMAGES_END"})
+                figma.ui.postMessage({type: "RESULT_IMAGES_END", ingestId: ingestId})
             })
             .catch(function (e) {
                 figma.ui.postMessage({type: "LOADING", value: false})
@@ -4353,18 +4684,29 @@ figma.ui.onmessage = function (msg) {
         var breakpoint = resolved.breakpoint
         var projectNameMo = msg.projectName || "project"
         var allowedFontsMo = msg.allowedFonts || []
+        var fontHtmlFilterActiveMo = msg.fontHtmlFilterActive === true
         figma.ui.postMessage({type: "LOADING", value: true})
 
-        dumpTreeAsync(rootDesktop, projectNameMo, allowedFontsMo, {phase: "desktop", geoStructure: msg.geoStructure || null})
+        dumpTreeAsync(rootDesktop, projectNameMo, allowedFontsMo, {
+            phase: "desktop",
+            geoStructure: msg.geoStructure || null,
+            fontHtmlFilterActive: fontHtmlFilterActiveMo,
+        })
             .then(function (payload) {
                 return loadFontsForMobileTreeAsync(rootMobile).then(function () {
-                    return dumpTreeAsync(rootMobile, projectNameMo, allowedFontsMo, {phase: "mobile", imageSuffix: "_mo"}).then(function (moPayload) {
+                    return dumpTreeAsync(rootMobile, projectNameMo, allowedFontsMo, {
+                        phase: "mobile",
+                        imageSuffix: "_mo",
+                        fontHtmlFilterActive: fontHtmlFilterActiveMo,
+                    }).then(function (moPayload) {
                         var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                         // 구조 불일치여도 PC 기준 단일 뷰 + @media MO 오버라이드만 사용 (텍스트/이미지는 1:1 매칭 가능, frame 구조는 PC 기준·MO는 사람이 수정)
                         var code = combinePcMoAsBreakpoint(payload.code || "", rootDesktop, rootMobile, breakpoint, {
                             exportedNodeIds: payload.exportedNodeIds,
                             ownImageNodeIds: payload.ownImageNodeIds,
                             geoStructure: msg.geoStructure || null,
+                            allowedFonts: allowedFontsMo,
+                            fontHtmlFilterActive: fontHtmlFilterActiveMo,
                         })
                         var separateViews = false
                         var images = (payload.images || []).concat(moPayload.images || [])
@@ -4389,8 +4731,10 @@ figma.ui.onmessage = function (msg) {
             .then(function (out) {
                 figma.ui.postMessage({type: "LOADING", value: false})
                 var images = out.images || []
+                var ingestId = "i" + Date.now() + "-" + String(Math.random()).slice(2, 10)
                 figma.ui.postMessage({
                     type: "RESULT",
+                    ingestId: ingestId,
                     text: out.payload.text,
                     dataTree: out.payload.dataTree,
                     code: out.code,
@@ -4401,16 +4745,17 @@ figma.ui.onmessage = function (msg) {
                     mobileDataTree: out.mobileDataTree,
                     separateViews: out.separateViews,
                     hybridMismatchSecs: out.hybridMismatchSecs,
+                    moBreakpoint: breakpoint,
                 })
                 try {
                     for (var i = 0; i < images.length; i++) {
                         var item = images[i]
-                        figma.ui.postMessage({type: "RESULT_IMAGES_CHUNK", index: i, name: item.name, dataUrl: item.dataUrl})
+                        figma.ui.postMessage({type: "RESULT_IMAGES_CHUNK", ingestId: ingestId, index: i, name: item.name, dataUrl: item.dataUrl})
                     }
                 } catch (chunkErr) {
                     figma.ui.postMessage({type: "ERROR", message: "이미지 전송 중 오류: " + String(chunkErr && chunkErr.message ? chunkErr.message : chunkErr)})
                 }
-                figma.ui.postMessage({type: "RESULT_IMAGES_END"})
+                figma.ui.postMessage({type: "RESULT_IMAGES_END", ingestId: ingestId})
             })
             .catch(function (e) {
                 figma.ui.postMessage({type: "LOADING", value: false})
@@ -4433,6 +4778,7 @@ figma.ui.onmessage = function (msg) {
         }
         var projectName2 = msg.projectName || "project"
         var allowedFonts2 = msg.allowedFonts || []
+        var fontHtmlFilterActiveZip = msg.fontHtmlFilterActive === true
         /** UI 코드 탭에 표시된 문자열(분석 직후·AI 정리 후 등). 있으면 ZIP _cms.html에 이걸 쓰고, 이미지만 피그마에서 다시 export */
         var codeFromTab = msg.code != null && String(msg.code).trim() ? String(msg.code) : ""
 
@@ -4451,7 +4797,7 @@ figma.ui.onmessage = function (msg) {
         }
 
         // 1) PC dump
-        dumpTreeAsync(rootDesktop, projectName2, allowedFonts2, {phase: "desktop"})
+        dumpTreeAsync(rootDesktop, projectName2, allowedFonts2, {phase: "desktop", fontHtmlFilterActive: fontHtmlFilterActiveZip})
             .then(function (payload) {
                 var code = payload.code || ""
                 var images = payload.images || []
@@ -4463,10 +4809,16 @@ figma.ui.onmessage = function (msg) {
                             phase: "mobile",
                             imageSuffix: "_mo",
                             exportWidth: Math.min(2400, Math.round(2 * breakpoint)),
+                            fontHtmlFilterActive: fontHtmlFilterActiveZip,
                         }).then(function (moPayload) {
                             var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                             // 구조 불일치여도 PC 기준 단일 뷰 + @media MO 오버라이드만 사용
-                            code = combinePcMoAsBreakpoint(code, rootDesktop, rootMobile, breakpoint, { exportedNodeIds: payload.exportedNodeIds, ownImageNodeIds: payload.ownImageNodeIds })
+                            code = combinePcMoAsBreakpoint(code, rootDesktop, rootMobile, breakpoint, {
+                                exportedNodeIds: payload.exportedNodeIds,
+                                ownImageNodeIds: payload.ownImageNodeIds,
+                                allowedFonts: allowedFonts2,
+                                fontHtmlFilterActive: fontHtmlFilterActiveZip,
+                            })
 
                             images = (images || []).concat(moPayload.images || [])
                             return {code: code, images: images}

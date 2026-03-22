@@ -4,6 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <style>
+    /* --- Base · 헤더 · 탭 · 패널 공통 --- */
     body {
       margin: 0;
       font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -161,7 +162,7 @@
       cursor: pointer;
     }
 
-    /* ====== DATA TREE VIEW ====== */
+    /* --- 데이터 탭(툴바 · 트리 · 상세) --- */
     .dataWrap {
       flex: 1;
       min-height: 0;
@@ -537,6 +538,7 @@
       min-height: 0;
     }
 
+    /* --- 미리보기 패널 --- */
     .previewToolbar {
       display: flex;
       gap: 6px;
@@ -572,22 +574,73 @@
       min-height: 0;
       display: flex;
       flex-direction: column;
-      align-items: center;
+      align-items: stretch;
       background: #e0e4e8;
       overflow: auto;
     }
 
-    #previewViewport.viewMo {
-      padding: 12px 0;
-    }
-
-    #previewViewport.viewMo iframe {
-      width: 374px;
-      max-width: 100%;
+    .previewSingleWrap {
       flex: 1;
       min-height: 0;
-      box-shadow: 0 2px 12px rgba(0, 0, 0, .15);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .previewSplitWrap {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: row;
+      gap: 12px;
+      padding: 12px;
+      align-items: stretch;
+      justify-content: center;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .previewPane {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      min-width: 0;
+    }
+
+    .previewPane--pc {
+      flex: 1 1 55%;
+    }
+
+    .previewPane--mo {
+      flex: 0 0 auto;
+      width: min(100%, 390px);
+      max-width: 100%;
+    }
+
+    .previewPaneLabel {
+      flex-shrink: 0;
+      font-size: 11px;
+      font-weight: 700;
+      color: #334155;
+      padding: 0 0 6px 2px;
+      letter-spacing: 0.02em;
+    }
+
+    .previewPane iframe {
+      flex: 1;
+      min-height: 280px;
+      width: 100%;
+      border: 0;
+      background: #fff;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, .12);
       border-radius: 8px;
+    }
+
+    .previewToolbarDualHint {
+      font-size: 11px;
+      font-weight: 600;
+      color: #0d99ff;
+      margin-left: 4px;
     }
 
     /* 유틸 */
@@ -599,7 +652,7 @@
       display: none !important;
     }
 
-    /* 코드 탭 / AI 영역 (기존 inline 정리) */
+    /* --- 코드 탭 · AI 검수/반영 --- */
     .codePanelCol {
       display: flex;
       flex-direction: column;
@@ -742,6 +795,7 @@
       display: inline;
     }
 
+    /* 단일 미리보기 iframe */
     #previewFrame {
       flex: 1;
       min-height: 0;
@@ -753,6 +807,12 @@
     #previewFrame.previewFrame--mo {
       width: 375px;
       max-width: 100%;
+    }
+
+    /* 단일 미리보기(이미지 로딩 중·PC 전용) */
+    .previewSingleWrap iframe#previewFrame {
+      flex: 1;
+      min-height: 0;
     }
 
     .previewEmptyMsg {
@@ -784,14 +844,13 @@
 
 <body>
   <header>
-    <button id="runDesktop">PC 분석</button>
-    <button id="runMobile" class="gray">MO 분석</button>
+    <button id="runAnalyze" type="button">분석</button>
 
     <input id="projectName" class="field" placeholder="project (ex: iope)" />
-    <span class="hint" id="rootHint">PC: ROOT 1개 선택 | MO: ROOT 2개 선택 후 브레이크포인트 매칭</span>
+    <span class="hint" id="rootHint">ROOT 1개: PC 한 벌 · ROOT 2개: PC+MO(가로 큰 쪽=PC) @media 오버라이드</span>
   </header>
   <div id="fontRow" class="fontRow is-collapsed">
-    <span class="fontRowLabel">폰트 (체크=텍스트로 처리, 미체크=이미지로 처리)</span>
+    <span class="fontRowLabel">폰트 (체크 = HTML 텍스트, 미체크 = 해당 패밀리는 이미지로 출력 · 웹폰트 참고)</span>
     <div id="fontCheckboxes" class="fontCheckboxes"></div>
   </div>
 
@@ -877,12 +936,25 @@
     <!-- ===== PREVIEW ===== -->
     <div id="panel-preview" class="panel">
       <div class="previewToolbar">
-        <button type="button" class="viewBtn active" id="previewViewPc" data-view="pc">PC</button>
+        <button type="button" class="viewBtn u-hidden" id="previewViewPc" data-view="pc">PC</button>
         <button type="button" class="viewBtn u-hidden" id="previewViewMo" data-view="mo">MO</button>
+        <span id="previewToolbarDualHint" class="previewToolbarDualHint u-hidden">PC · MO 동시 미리보기</span>
         <span class="previewToolbarHint" id="previewStructureHint">레이어 구조가 다르면 PC/MO를 각각 표시합니다</span>
       </div>
       <div id="previewViewport">
-        <iframe id="previewFrame" sandbox="allow-scripts allow-same-origin" title="미리보기"></iframe>
+        <div id="previewSingleWrap" class="previewSingleWrap">
+          <iframe id="previewFrame" sandbox="allow-scripts allow-same-origin" title="미리보기 PC"></iframe>
+        </div>
+        <div id="previewSplitWrap" class="previewSplitWrap u-hidden">
+          <div class="previewPane previewPane--pc">
+            <div class="previewPaneLabel">PC</div>
+            <iframe id="previewFramePc" sandbox="allow-scripts allow-same-origin" title="미리보기 PC"></iframe>
+          </div>
+          <div class="previewPane previewPane--mo">
+            <div class="previewPaneLabel">MO</div>
+            <iframe id="previewFrameMo" sandbox="allow-scripts allow-same-origin" title="미리보기 MO"></iframe>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -890,9 +962,19 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script>
     /* =========================================================
-       UI (ui.html)
-       - RESULT payload 표시/프리뷰/트리뷰/ZIP 다운로드 담당
-       - code.js 에서 postMessage로 전달받은 데이터를 렌더링만 함
+       Figma HTML Export — plugin/ui.html
+       code.js 가 postMessage 로 넘긴 payload 만 렌더 (로직은 code.js)
+
+       [스크립트 흐름]
+       OpenAI 프롬프트/상수
+       → DOM·프로젝트·폰트
+       → 분석 상태 변수 + 미리보기 툴바
+       → 로딩/탭/미리보기 PC·MO 토글
+       → escapeHtml · 상태바 · onmessage (RESULT/ZIP/에러)
+       → 데이터 트리·Detail
+       → 미리보기 HTML 조립 · iframe
+       → OpenAI 키 · 코드 검수/반영
+       → Export ZIP
        ========================================================= */
 
     // ====== OpenAI 프롬프트 (편집 시 이 블록만 찾으면 됨) ======
@@ -1185,7 +1267,7 @@
     var AP_AI_VISION_USER_APPEND_BLOCK_LINE =
       "image {{BLOCK_NUM}} → DOM img[{{IMG_ORDER}}] · 파일 {{FILE_NAME}}";
 
-    // ====== dom helpers ======
+    // ====== DOM · 프로젝트명 · 폰트 ======
     function $(s) { return document.querySelector(s); }
 
     function getProjectName() {
@@ -1194,8 +1276,46 @@
     }
     var usedFonts = [];
     var fontChecked = {};
+    var hasAnalyzedOnce = false;
+
+    /** code.js normalizeFontFamilyForMatch 와 동일하게 Noto* → 키 "noto" (체크 한 덩어리) */
+    function normalizeFontKey(family) {
+      var k = String(family || "")
+        .toLowerCase()
+        .trim()
+        .replace(/[\-_]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      var compact = k.replace(/\s/g, "");
+      if (/^noto/i.test(compact)) return "noto";
+      return k;
+    }
+
+    function getFontCheckedValue(family) {
+      return fontChecked[normalizeFontKey(family)] !== false;
+    }
+
+    function setFontCheckedValue(family, checked) {
+      var key = normalizeFontKey(family);
+      if (!key) return;
+      fontChecked[key] = checked !== false;
+    }
+
+    function syncFontState(nextFonts, preserveExisting) {
+      var next = {};
+      (nextFonts || []).forEach(function (family) {
+        var key = normalizeFontKey(family);
+        if (!key) return;
+        next[key] = preserveExisting && Object.prototype.hasOwnProperty.call(fontChecked, key)
+          ? fontChecked[key] !== false
+          : true;
+      });
+      fontChecked = next;
+    }
+
+    /** 체크된 폰트만 HTML 텍스트로 — 라벨 표시와 동일하게 !== false (기본 체크) */
     function getAllowedFonts() {
-      return usedFonts.filter(function (f) { return fontChecked[f]; });
+      return usedFonts.filter(function (f) { return getFontCheckedValue(f); });
     }
     function renderFontCheckboxes() {
       var wrap = $("#fontCheckboxes");
@@ -1203,26 +1323,69 @@
       if (!wrap || !row) return;
       if (!usedFonts.length) { row.classList.add("is-collapsed"); wrap.innerHTML = ""; return; }
       row.classList.remove("is-collapsed");
-      wrap.innerHTML = usedFonts.map(function (f) {
-        var id = "font_" + f.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
-        var checked = fontChecked[f] !== false;
-        return "<label><input type='checkbox' id='" + escapeHtml(id) + "' data-font='" + escapeHtml(f) + "' " + (checked ? "checked" : "") + ">" + escapeHtml(f) + "</label>";
+      wrap.innerHTML = usedFonts.map(function (f, i) {
+        var id = "font_" + i + "_" + f.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
+        var checked = getFontCheckedValue(f);
+        return "<label><input type=\"checkbox\" id=\"" + escapeHtml(id) + "\" data-ap-ffi=\"" + i + "\" " + (checked ? "checked" : "") + ">" + escapeHtml(f) + "</label>";
       }).join("");
       wrap.querySelectorAll("input[type=checkbox]").forEach(function (cb) {
-        cb.onchange = function () { fontChecked[this.getAttribute("data-font")] = this.checked; };
+        cb.onchange = function () {
+          var idx = parseInt(this.getAttribute("data-ap-ffi"), 10);
+          var fam = usedFonts[idx];
+          if (fam != null) setFontCheckedValue(fam, this.checked);
+        };
       });
     }
 
-    function setLoading(on, desktopBtnLabel, mobileBtnLabel) {
-      var btnPc = $("#runDesktop");
-      var btnMo = $("#runMobile");
-      if (btnPc) {
-        btnPc.disabled = !!on;
-        btnPc.textContent = desktopBtnLabel != null ? desktopBtnLabel : (on ? "분석 중…" : "PC 분석");
-      }
-      if (btnMo) {
-        btnMo.disabled = !!on;
-        btnMo.textContent = mobileBtnLabel != null ? mobileBtnLabel : (on ? "분석 중…" : "MO 분석");
+    // ====== 분석/미리보기 상태 (code.js RESULT와 동기) ======
+    var previewImages = [];
+    /** code.js 가 RESULT / CHUNK / END 에 붙이는 배치 ID — 메시지 순서 뒤바뀜 시 이미지 초기화 버그 방지 */
+    var previewIngestId = null;
+    var previewImagesCommittedIngestId = null;
+    var zipImagesBuffer = [];
+    var resultImagesBuffer = [];
+    var previewImagesReady = true;
+    var zipImagesCode = "";
+    var payloadText = "";
+    var dataTree = null;
+    var mobileDataTree = null;
+    /** PC+MO 분석 시 @media max-width와 동일 — MO 미리보기 viewport */
+    var lastMoBreakpoint = null;
+    /** 단일 iframe 모드에서만 사용 (이미지 로딩 중 PC/MO 토글) */
+    var previewViewMode = "pc";
+    var separateViews = false;
+    var hybridMismatchSecs = [];
+    var selectedNode = null;
+    var vectorTypes = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "LINE", "ELLIPSE", "POLYGON", "RECTANGLE"];
+
+    function isHybridPreviewSplit() {
+      return !!(mobileDataTree && previewImagesReady);
+    }
+
+    /** MO iframe·meta viewport 폭(px), bp와 375 중 작은 값 */
+    function previewMoViewportCssPx() {
+      return Math.min(375, (typeof lastMoBreakpoint === "number" && lastMoBreakpoint > 0) ? lastMoBreakpoint : 375);
+    }
+
+    function updatePreviewToolbar() {
+      var hint = document.getElementById("previewStructureHint");
+      var btnPc = document.getElementById("previewViewPc");
+      var btnMo = document.getElementById("previewViewMo");
+      var dualHint = document.getElementById("previewToolbarDualHint");
+      var split = isHybridPreviewSplit();
+      if (hint) hint.classList.toggle("is-visible", !!separateViews);
+      if (dualHint) dualHint.classList.toggle("u-hidden", !split);
+      if (btnPc) btnPc.classList.toggle("u-hidden", split || !mobileDataTree);
+      if (btnMo) btnMo.classList.toggle("u-hidden", split || !(mobileDataTree && previewImagesReady));
+    }
+
+    updatePreviewToolbar();
+
+    function setLoading(on, btnLabel) {
+      var btn = $("#runAnalyze");
+      if (btn) {
+        btn.disabled = !!on;
+        btn.textContent = !on ? "분석" : (btnLabel != null ? btnLabel : "분석 중…");
       }
       var st = $("#dataStatus");
       if (st) {
@@ -1243,17 +1406,20 @@
       }
     }
 
-    $("#runDesktop").onclick = function () {
+    $("#runAnalyze").onclick = function () {
       if (this.disabled) return;
       resetAiAnalysisState();
-      setLoading(true, "PC 분석 중…", "MO 분석");
-      parent.postMessage({ pluginMessage: { type: "RUN_DESKTOP", projectName: getProjectName(), allowedFonts: getAllowedFonts() } }, "*");
-    };
-    $("#runMobile").onclick = function () {
-      if (this.disabled) return;
-      resetAiAnalysisState();
-      setLoading(true, "PC 분석", "MO 분석 중…");
-      parent.postMessage({ pluginMessage: { type: "RUN_MOBILE", projectName: getProjectName(), allowedFonts: getAllowedFonts() } }, "*");
+      setLoading(true, "분석 중…");
+      // 첫 분석: 폰트 목록 없음 → [] = 플러그인에서 필터 없음(전부 HTML). 이후: 체크된 폰트만 전달(미체크는 이미지).
+      var allowedFontsForAnalyze = hasAnalyzedOnce ? getAllowedFonts() : [];
+      parent.postMessage({
+        pluginMessage: {
+          type: "RUN_ANALYZE",
+          projectName: getProjectName(),
+          allowedFonts: allowedFontsForAnalyze,
+          fontHtmlFilterActive: hasAnalyzedOnce,
+        },
+      }, "*");
     };
 
     document.querySelectorAll(".tab").forEach(function (btn) {
@@ -1264,7 +1430,6 @@
         this.classList.add("active");
         var panel = document.getElementById("panel-" + t);
         if (panel) panel.classList.add("active");
-        if (t === "preview") refreshPreview();
       };
     });
 
@@ -1290,28 +1455,6 @@
     document.getElementById("previewViewPc").onclick = function () { setPreviewView("pc"); };
     document.getElementById("previewViewMo").onclick = function () { setPreviewView("mo"); };
 
-    function updatePreviewToolbar() {
-      var hint = document.getElementById("previewStructureHint");
-      var btnMo = document.getElementById("previewViewMo");
-      if (hint) hint.classList.toggle("is-visible", !!separateViews);
-      if (btnMo) btnMo.classList.toggle("u-hidden", !(mobileDataTree && previewImagesReady));
-    }
-
-    // ====== state (code.js RESULT를 UI에서 유지) ======
-
-    var previewImages = [];
-    var zipImagesBuffer = [];
-    var resultImagesBuffer = [];
-    var previewImagesReady = true;
-    var zipImagesCode = "";
-    var payloadText = "";
-    var dataTree = null;
-    var mobileDataTree = null;
-    var separateViews = false;
-    var hybridMismatchSecs = [];
-    var selectedNode = null;
-    var vectorTypes = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "LINE", "ELLIPSE", "POLYGON", "RECTANGLE"];
-
     function escapeHtml(s) {
       if (s == null) return "";
       return String(s)
@@ -1332,7 +1475,7 @@
     $("#openAll").onclick = function () { toggleAll(true); };
     $("#closeAll").onclick = function () { toggleAll(false); };
 
-    // ====== plugin -> UI message handler ======
+    // ====== code.js → UI (postMessage) ======
     onmessage = function (e) {
       var msg = e.data.pluginMessage;
       if (!msg) return;
@@ -1343,39 +1486,73 @@
       if (msg.type === "RESULT") {
         setLoading(false);
 
+        var nImgExpect = msg.imageCount || 0;
+        var lateResultAfterImages =
+          nImgExpect > 0 &&
+          msg.ingestId != null &&
+          msg.ingestId === previewImagesCommittedIngestId &&
+          previewImagesReady;
+
         payloadText = msg.text || "";
         dataTree = msg.dataTree || null;
         mobileDataTree = msg.mobileDataTree || null;
+        if (mobileDataTree && typeof msg.moBreakpoint === "number" && msg.moBreakpoint > 0) {
+          lastMoBreakpoint = msg.moBreakpoint;
+        } else {
+          lastMoBreakpoint = null;
+        }
+        if (!mobileDataTree && previewViewMode === "mo") {
+          setPreviewView("pc");
+        }
         separateViews = !!msg.separateViews;
         hybridMismatchSecs = msg.hybridMismatchSecs && Array.isArray(msg.hybridMismatchSecs) ? msg.hybridMismatchSecs : [];
         if (msg.vectorTypes && msg.vectorTypes.length) vectorTypes = msg.vectorTypes;
 
-        usedFonts = msg.usedFonts || [];
-        usedFonts.forEach(function (f) { if (fontChecked[f] === undefined) fontChecked[f] = true; });
+        usedFonts = Array.isArray(msg.usedFonts) ? msg.usedFonts.slice() : [];
+        syncFontState(usedFonts, true);
+        hasAnalyzedOnce = true;
         renderFontCheckboxes();
 
         $("#out").value = payloadText;
         $("#codeOut").value = msg.code != null ? msg.code : "";
 
-        previewImages = msg.images || [];
-        resultImagesBuffer = [];
-        previewImagesReady = (msg.imageCount || 0) <= 0;
-        if ((msg.imageCount || 0) <= 0) refreshPreview();
+        if (!lateResultAfterImages) {
+          previewIngestId = msg.ingestId != null ? msg.ingestId : null;
+          previewImagesCommittedIngestId = null;
+          resultImagesBuffer = [];
+          previewImagesReady = nImgExpect <= 0;
+          if (nImgExpect <= 0) {
+            previewImages = msg.images || [];
+            refreshPreview();
+          } else {
+            previewImages = [];
+          }
+        }
 
         renderDataTree(dataTree);
         updatePreviewToolbar();
         var sectionCount = dataTree && dataTree.sections ? dataTree.sections.length : 0;
         var statusBase = sectionCount > 0 ? ("완료 · 섹션 " + sectionCount + "개") : "완료 · 섹션 0개 (보이는 자식 없음)";
-        setStatusText(separateViews ? statusBase + " · 레이어 구조가 다르면 PC/MO를 각각 표시합니다" : statusBase);
+        setStatusText(
+          separateViews
+            ? statusBase + " · 레이어 구조가 다르면 PC/MO를 각각 표시합니다"
+            : mobileDataTree
+              ? statusBase + " · PC+MO @media 오버라이드 포함"
+              : statusBase
+        );
       }
 
       if (msg.type === "RESULT_IMAGES_CHUNK") {
+        if (previewIngestId != null && msg.ingestId != null && msg.ingestId !== previewIngestId) return;
+        if (previewIngestId != null && msg.ingestId == null) return;
         resultImagesBuffer.push({ name: msg.name || ("img_" + (msg.index ?? 0) + ".png"), dataUrl: msg.dataUrl || "" });
       }
       if (msg.type === "RESULT_IMAGES_END") {
+        if (previewIngestId != null && msg.ingestId != null && msg.ingestId !== previewIngestId) return;
         previewImages = resultImagesBuffer.slice();
         resultImagesBuffer = [];
         previewImagesReady = true;
+        if (msg.ingestId != null) previewImagesCommittedIngestId = msg.ingestId;
         refreshPreview();
         updatePreviewToolbar();
       }
@@ -1450,10 +1627,15 @@
         payloadText = "ERROR: " + (msg.message || "");
         dataTree = null;
         mobileDataTree = null;
+        lastMoBreakpoint = null;
+        previewIngestId = null;
+        previewImagesCommittedIngestId = null;
         separateViews = false;
         hybridMismatchSecs = [];
         selectedNode = null;
         usedFonts = [];
+        syncFontState([], false);
+        hasAnalyzedOnce = false;
         renderFontCheckboxes();
 
         $("#out").value = payloadText;
@@ -1466,14 +1648,18 @@
 
         previewImages = [];
         previewImagesReady = true;
-        refreshPreview();
+        if (previewViewMode === "mo") {
+          setPreviewView("pc");
+        } else {
+          refreshPreview();
+        }
         updatePreviewToolbar();
 
         setStatusText("ERROR");
       }
     };
 
-    // ====== Tree rendering ======
+    // ====== 데이터 트리 · Detail 패널 ======
     function renderDataTree(dt) {
       $("#tree").innerHTML = "";
       selectedNode = null;
@@ -1485,10 +1671,10 @@
         emptyMsg.className = "muted";
         emptyMsg.style.cssText = "padding:12px; line-height:1.5;";
         emptyMsg.innerHTML =
-          "섹션이 없습니다.<br><br>" +
-          "• ROOT로 선택한 프레임의 <b>보이는 자식 레이어</b>가 각각 섹션이 됩니다.<br>" +
-          "• 자식이 없거나 모두 숨김(visible=false)이면 표시되지 않습니다.<br>" +
-          "• 프레임 1개만 선택했는지, 자식 레이어가 보이도록 설정되어 있는지 확인하세요.";
+          "섹션 트리가 없습니다.<br><br>" +
+          "• ROOT로 선택한 프레임에 <b>보이는 직계 자식</b>이 있어야 합니다(자식마다 섹션 1개).<br>" +
+          "• 자식이 없거나 전부 숨김이면 표시되지 않습니다.<br>" +
+          "• 여러 섹션이 필요하면 ROOT 아래에 프레임을 나란히 두세요.";
         $("#tree").appendChild(emptyMsg);
         return;
       }
@@ -1755,9 +1941,42 @@
       $("#tree").querySelectorAll("details").forEach(function (d) { d.open = open; });
     }
 
-    // ====== Preview ======
+    // ====== 미리보기: HTML 조립 · iframe · blob URL ======
+    /** PC 미리보기 meta width (중첩 iframe에서 뷰포트 클램프 보정) */
+    var PREVIEW_PC_LAYOUT_WIDTH = 1440;
     var previewBlobUrl = null;
-    var previewViewMode = "pc";
+    var previewBlobUrlPc = null;
+    var previewBlobUrlMo = null;
+
+    function revokeAllPreviewBlobs() {
+      if (previewBlobUrl) {
+        URL.revokeObjectURL(previewBlobUrl);
+        previewBlobUrl = null;
+      }
+      if (previewBlobUrlPc) {
+        URL.revokeObjectURL(previewBlobUrlPc);
+        previewBlobUrlPc = null;
+      }
+      if (previewBlobUrlMo) {
+        URL.revokeObjectURL(previewBlobUrlMo);
+        previewBlobUrlMo = null;
+      }
+    }
+
+    function tryAssignIframeContent(frame, html, which) {
+      if (!frame) return;
+      try {
+        frame.removeAttribute("src");
+        frame.srcdoc = html;
+      } catch (e) {
+        var blob = new Blob([html], { type: "text/html;charset=utf-8" });
+        var u = URL.createObjectURL(blob);
+        if (which === "pc") previewBlobUrlPc = u;
+        else if (which === "mo") previewBlobUrlMo = u;
+        else previewBlobUrl = u;
+        frame.src = u;
+      }
+    }
 
     function stripEmbeddedAuditReport(html) {
       return String(html || "").replace(
@@ -1766,13 +1985,33 @@
       );
     }
 
-    function getPreviewHtml(forExport, forceViewportWidth) {
+    function escapeForRegExp(s) {
+      return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    /** 중첩 iframe에서 뷰포트가 좁게 고정될 때 MO @media가 항상 참이 되는 것을 막기 위해, 해당 bp만 무력화 */
+    function suppressHybridMoMediaAtBreakpoint(fragment, bp) {
+      var num = Number(bp);
+      if (!(num > 0)) return String(fragment || "");
+      var esc = escapeForRegExp(String(num));
+      var mediaRe = new RegExp("@media\\s*\\(\\s*max-width\\s*:\\s*" + esc + "\\s*px\\s*\\)", "gi");
+      var out = String(fragment || "").replace(mediaRe, "@media (max-width:0px)");
+      var attrRe = new RegExp("(media\\s*=\\s*[\"'])(\\(\\s*max-width\\s*:\\s*" + esc + "\\s*px\\s*\\))([\"'])", "gi");
+      return out.replace(attrRe, "$1(max-width:0px)$3");
+    }
+
+    function getPreviewHtml(forExport, forceViewportWidth, previewStripMoMq) {
       var raw = stripEmbeddedAuditReport(($("#codeOut") && $("#codeOut").value) || "");
       if (!raw.trim()) return "";
 
       var styleMatches = raw.match(/<style>[\s\S]*?<\/style>/ig) || [];
       var style = styleMatches.join("\n");
       var body = raw.replace(/<style>[\s\S]*?<\/style>/ig, "").replace(/^\s+/, "");
+
+      if (!forExport && previewStripMoMq && typeof lastMoBreakpoint === "number" && lastMoBreakpoint > 0) {
+        style = suppressHybridMoMediaAtBreakpoint(style, lastMoBreakpoint);
+        body = suppressHybridMoMediaAtBreakpoint(body, lastMoBreakpoint);
+      }
 
       if (!forExport && previewImages.length) {
         var pathToDataUrl = {};
@@ -1801,31 +2040,103 @@
       return '<!DOCTYPE html><html><head><meta charset="utf-8">' + viewport + baseStyle + "</head><body>" + style + "\n\n" + body + "</body></html>";
     }
 
+    function syncPreviewChromeToState() {
+      if (isHybridPreviewSplit()) return;
+      var viewport = document.getElementById("previewViewport");
+      var frame = document.getElementById("previewFrame");
+      var btnPc = document.getElementById("previewViewPc");
+      var btnMo = document.getElementById("previewViewMo");
+      var moOn = previewViewMode === "mo" && !!mobileDataTree;
+      if (viewport) viewport.classList.toggle("viewMo", moOn);
+      if (frame) frame.classList.toggle("previewFrame--mo", moOn);
+      if (btnPc) btnPc.classList.toggle("active", !moOn);
+      if (btnMo) btnMo.classList.toggle("active", !!moOn);
+    }
+
     function refreshPreview() {
-      var frame = $("#previewFrame");
+      var frame = document.getElementById("previewFrame");
+      var framePc = document.getElementById("previewFramePc");
+      var frameMo = document.getElementById("previewFrameMo");
+      var singleWrap = document.getElementById("previewSingleWrap");
+      var splitWrap = document.getElementById("previewSplitWrap");
       if (!frame) return;
 
-      if (previewBlobUrl) {
-        URL.revokeObjectURL(previewBlobUrl);
-        previewBlobUrl = null;
-      }
+      var split = isHybridPreviewSplit();
+      if (singleWrap) singleWrap.classList.toggle("u-hidden", split);
+      if (splitWrap) splitWrap.classList.toggle("u-hidden", !split);
 
-      var viewportWidth = (previewViewMode === "mo") ? 375 : 0;
-      var html = getPreviewHtml(false, viewportWidth);
-      if (html) {
-        try {
-          frame.removeAttribute("src");
-          frame.srcdoc = html;
-        } catch (e) {
-          var blob = new Blob([html], { type: "text/html;charset=utf-8" });
-          previewBlobUrl = URL.createObjectURL(blob);
-          frame.src = previewBlobUrl;
+      revokeAllPreviewBlobs();
+
+      var emptyMsg = "<p class='previewEmptyMsg'>분석 후 생성된 코드가 있으면 미리보기가 표시됩니다.</p>";
+      var codeVal = ($("#codeOut") && $("#codeOut").value) || "";
+
+      if (split) {
+        var vpRoot = document.getElementById("previewViewport");
+        if (vpRoot) vpRoot.classList.remove("viewMo");
+        frame.classList.remove("previewFrame--mo");
+        frame.style.width = "";
+        frame.style.maxWidth = "";
+        var moW = previewMoViewportCssPx();
+        if (frameMo) {
+          frameMo.style.width = moW + "px";
+          frameMo.style.maxWidth = "100%";
         }
       } else {
-        frame.removeAttribute("src");
-        frame.srcdoc = "<p class='previewEmptyMsg'>분석 후 생성된 코드가 있으면 미리보기가 표시됩니다.</p>";
+        syncPreviewChromeToState();
+        if (frameMo) {
+          frameMo.style.width = "";
+          frameMo.style.maxWidth = "";
+        }
       }
+
+      if (!stripEmbeddedAuditReport(codeVal).trim()) {
+        if (split) {
+          tryAssignIframeContent(framePc, emptyMsg, "pc");
+          tryAssignIframeContent(frameMo, emptyMsg, "mo");
+        } else {
+          tryAssignIframeContent(frame, emptyMsg, "single");
+        }
+        return;
+      }
+
+      if (split) {
+        var htmlPc = getPreviewHtml(false, PREVIEW_PC_LAYOUT_WIDTH, true);
+        var htmlMo = getPreviewHtml(false, previewMoViewportCssPx(), false);
+        tryAssignIframeContent(framePc, htmlPc || emptyMsg, "pc");
+        tryAssignIframeContent(frameMo, htmlMo || emptyMsg, "mo");
+        return;
+      }
+
+      var layoutViewport = PREVIEW_PC_LAYOUT_WIDTH;
+      var stripMoMq = true;
+      if (previewViewMode === "mo" && mobileDataTree) {
+        stripMoMq = false;
+        layoutViewport = previewMoViewportCssPx();
+        frame.style.width = layoutViewport + "px";
+        frame.style.maxWidth = "100%";
+      } else {
+        frame.style.width = "";
+        frame.style.maxWidth = "";
+      }
+      var html = getPreviewHtml(false, layoutViewport, stripMoMq);
+      tryAssignIframeContent(frame, html || emptyMsg, "single");
     }
+
+    /** 탭 전환 시에는 새로고침하지 않음 · 코드 수정·분석 결과 반영 시에만 갱신 */
+    var previewFromCodeTimer = null;
+    var PREVIEW_FROM_CODE_DEBOUNCE_MS = 320;
+    function schedulePreviewRefreshFromCode() {
+      if (previewFromCodeTimer) clearTimeout(previewFromCodeTimer);
+      previewFromCodeTimer = setTimeout(function () {
+        previewFromCodeTimer = null;
+        refreshPreview();
+      }, PREVIEW_FROM_CODE_DEBOUNCE_MS);
+    }
+
+    (function bindCodeOutPreviewRefresh() {
+      var el = document.getElementById("codeOut");
+      if (el) el.addEventListener("input", schedulePreviewRefreshFromCode);
+    })();
 
     // ====== AI 정리: OpenAI 키는 figma.clientStorage (code.js 경유) ======
     var cachedOpenaiKey = "";
@@ -1899,6 +2210,7 @@
     function setCodeValue(v) {
       var codeEl = getCodeEl();
       if (codeEl) codeEl.value = String(v || "");
+      schedulePreviewRefreshFromCode();
     }
 
     function setAiStatus(msg) {
@@ -3278,7 +3590,15 @@
       var btn = this;
       btn.disabled = true;
       btn.textContent = "내보내는 중…";
-      parent.postMessage({ pluginMessage: { type: "EXPORT_ZIP", projectName: getProjectName(), allowedFonts: getAllowedFonts(), code: code } }, "*");
+      parent.postMessage({
+        pluginMessage: {
+          type: "EXPORT_ZIP",
+          projectName: getProjectName(),
+          allowedFonts: getAllowedFonts(),
+          fontHtmlFilterActive: hasAnalyzedOnce,
+          code: code,
+        },
+      }, "*");
     };
 
     function setExportZipReady() {
