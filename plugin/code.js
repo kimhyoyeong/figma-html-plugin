@@ -1,17 +1,15 @@
-// code.js — Figma → HTML/CMS Export Plugin
+// Figma → HTML/CMS export. 큰 구역은 // ----- 섹션 주석으로 구분.
 figma.showUI(__html__, {width: 900, height: 900})
 
-/** 참고: ui.html AI 검수는 비전(썸네일) 기본 사용. 이미지 바이너리는 PC/MO 분석 완료 후 RESULT_IMAGES_* 로 UI에 전달됨(ZIP만으로는 코드 탭에 붙여 넣은 경우 미전달). */
+// ui 검수: 비전 기본 ON. 이미지 바이너리는 PC/MO 분석 후 RESULT_IMAGES_* 로만 UI 전달(ZIP만으로 코드만 붙은 경우 미전달).
 var AP_AI_DEFAULT_ALT_VISION = true
-/** 시맨틱 title/subtitle: 이 크기(px) 이하 텍스트는 전부 ap-section__desc (디자인 미스매치 완화) */
+// 시맨틱 title/subtitle: 이 px 이하 → ap-section__desc
 var AP_SECTION_TITLE_MIN_FS = 26
 setTimeout(function () {
     try {
         figma.ui.postMessage({type: "AI_UI_DEFAULTS", aiVisionAlt: AP_AI_DEFAULT_ALT_VISION})
     } catch (e) {}
 }, 0)
-
-/** UI onmessage → 분석/매칭 → buildCodeAsync → export. 섹션은 // ----- 주석으로 구분. (분할은 빌드 번들 필요) */
 
 // ----- Utils (포맷, escape, 노드 판별) -----
 /** 숫자를 소수 둘째 자리까지 반올림 */
@@ -726,15 +724,13 @@ function buildStrokeDeclDiff(dNode, mNode) {
 }
 
 // ----- Asset Export (이미지/리소스 export, 파일명·포맷) -----
-/** @param {Uint8Array} bytes */
+// 바이너리 헤더·PNG/WebP (bytes: Uint8Array)
 function readUint32BE(bytes, offset) {
     return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0
 }
-/** @param {Uint8Array} bytes */
 function isJpegBytes(bytes) {
     return !!(bytes && bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
 }
-/** @param {Uint8Array} bytes */
 function isPngBytes(bytes) {
     return !!(
         bytes &&
@@ -749,7 +745,6 @@ function isPngBytes(bytes) {
         bytes[7] === 0x0a
     )
 }
-/** @param {Uint8Array} bytes */
 function isGifBytes(bytes) {
     return !!(
         bytes &&
@@ -762,7 +757,6 @@ function isGifBytes(bytes) {
         bytes[5] === 0x61
     )
 }
-/** @param {Uint8Array} bytes */
 function isWebpBytes(bytes) {
     return !!(
         bytes &&

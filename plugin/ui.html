@@ -1010,27 +1010,9 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script>
-    /* =========================================================
-       Figma HTML Export — plugin/ui.html
-       code.js 가 postMessage 로 넘긴 payload 만 렌더 (로직은 code.js)
+    /* ui.html: 렌더·OpenAI·미리보기. 비즈니스 로직은 code.js (postMessage). */
 
-       [스크립트 흐름]
-       OpenAI 프롬프트/상수
-       → DOM·프로젝트·폰트
-       → 분석 상태 변수 + 미리보기 툴바
-       → 로딩/탭/미리보기 PC·MO 토글
-       → escapeHtml · 상태바 · onmessage (RESULT/ZIP/에러)
-       → 데이터 트리·Detail
-       → 미리보기 HTML 조립 · iframe
-       → OpenAI 키 · 코드 검수/반영
-       → Export ZIP
-       ========================================================= */
-
-    // ====== OpenAI 프롬프트 (편집 시 이 블록만 찾으면 됨) ======
-    /**
-     * 분석 버튼 전용 — 검수 리포트
-     * {{N_IMG}}, {{LANG}} 자동 치환
-     */
+    // ----- OpenAI: 분석 검수 프롬프트 ({{N_IMG}}, {{LANG}} 치환) -----
     var AP_AI_ANALYSIS_SYSTEM_PROMPT_TEMPLATE = [
       "당신은 HTML/CSS 검수 리포트 생성 엔진이다.",
       "반드시 하나의 JSON 객체만 출력한다. HTML, CSS, 설명, 코드블록은 절대 출력하지 않는다.",
@@ -1181,16 +1163,14 @@
       "head, meta, title, og, canonical, schema, html/body 등 문서 바깥 영역은 절대 판단하지 마세요.\n" +
       "본문 안에서 확인 가능한 문제만 간결하게 보고해 주세요.\n\n---\n";
 
-    /**
-     * 반영(AP_AI_APPLY) system 본문 머리 — {{N_IMG}}, {{LANG}} 는 expandApPlaceholders로 치환
-     */
+    // 반영(AP_AI_APPLY) system 머리 — expandApPlaceholders로 {{N_IMG}}, {{LANG}}
     var AP_AI_APPLY_SYSTEM_BASE_LINES = [
       "출력은 JSON 객체 하나만. HTML/CSS/마크다운 금지.",
       "필수 키: altProposals (string[] 길이={{N_IMG}}), headingPatches ([{before,after}] 배열).",
       "선택: applyNotes (string[], 한국어 짧은 요약)."
     ];
 
-    /** user에 직전 headingAudit JSON이 붙을 때 system에 추가 ({{N_IMG}}) */
+    // 반영: user에 직전 headingAudit 붙을 때 system에 추가
     var AP_AI_APPLY_SYSTEM_AUDIT_HEADING_LINES = [
       "user 메시지 하단에 직전 검수 headingAudit JSON이 첨부되어 있다.",
       "headingPatches는 그 판정(candidates.decision, recommendedLevel)·issues와 모순 없이 작성한다.",
@@ -1201,9 +1181,7 @@
     var AP_AI_APPLY_SYSTEM_LANG_LINE =
       "페이지 언어: {{LANG}} — alt 등 노출 문구는 해당 언어 톤에 맞출 것.";
 
-    /**
-     * 반영(AP_AI_APPLY) 규칙 레지스트리 ({{N_IMG}} 치환)
-     */
+    // 반영 규칙 레지스트리 ({{N_IMG}})
     var AP_AI_APPLY_RULES = [
       {
         id: "alt",
@@ -1271,11 +1249,11 @@
     var AP_AI_APPLY_USER_PROMPT_PREFIX =
       "아래 HTML/CSS에 대해 시스템 지시를 수행하고 JSON만 출력.\n\n---\n";
 
-    /** 반영 API: 직전 검수 headingAudit을 user에 붙일 때 앞에 붙는 고정 안내 */
+    // 반영 API: 직전 headingAudit user 접두 안내
     var AP_AI_APPLY_USER_HEADING_AUDIT_SUFFIX_PREFIX =
       "\n\n---\n직전 분석(동일 본문) headingAudit JSON. 위 HTML에 headingPatches를 만들 때 반드시 이 판정과 일관되게.\n";
 
-    /** 분석 API: 비전 첨부 시 system 끝에 덧붙임 */
+    // 분석: 비전 첨부 시 system 덧붙임
     var AP_AI_ANALYSIS_VISION_SYSTEM_APPEND =
       "\n\n[시각 입력 필수 활용] user 메시지 하단 멀티파트에서 슬롯 안내 텍스트(예: DOM img[n]) 직후에 오는 image_url JPEG가 해당 img[n]과 1:1이다(안내에 썸네일 없음·JPEG 실패면 그 슬롯은 텍스트만). article.ap-post 의 <img> DOM 순서를 그대로 따른다. " +
       "alt·proposal은 **주로** 해당 JPEG에 보이는 내용으로 쓴다. 제품명·브랜드는 **동일 본문 조각(주어진 HTML) 안에 이미 텍스트로 나온 것**을 찾아 그림과 맞으면 짧게 반영할 수 있다. 같은 슬롯의 src·파일명·안내 파일명에서 드러나는 명칭도 그림과 모순되지 않으면 **보조**로 짧게 붙일 수 있다. (문단·캡션 **문장 전체** 복붙·의역은 금지.) " +
@@ -1283,22 +1261,12 @@
       "이미지가 텍스트(타이포·슬로건·카피) 위주면 alt는 JPEG에 보이는 문구를 전사한다(주변 HTML이 아님). " +
       "그 외에서 글자·브랜드가 판독되지 않으면 억지 전사하지 말고 보이는 시각 정보만 서술하거나 decision ambiguous로 둔다. 순수 장식은 proposal 빈 문자열.";
 
-    /** 한 요청당 비전 첨부 상한 (과도한 페이로드 방지) */
     var AP_VISION_MAX_IMAGES = 40;
-
-    /** 검수 리포트 상단 「Alt·비전 진단」 블록 표시 여부 */
-    var AP_UI_SHOW_VISION_DIAGNOSTICS = false;
-
-    /** 비전 JPEG 리사이즈 긴 변 기본(px). ~384는 작은 글자·질감 판별에 불리할 수 있음(상한 768). */
+    var AP_UI_SHOW_VISION_DIAGNOSTICS = false; // 검수 리포트 「Alt·비전 진단」
     var AP_VISION_LONG_EDGE_DEFAULT = 640;
-
-    /**
-     * OpenAI Vision image_url detail. alt·미세 텍스트는 high 권장(토큰·요금↑). 절감: low.
-     * @type {"low"|"high"|"auto"}
-     */
-    var AP_VISION_API_DETAIL = "high";
-
-    /** 멀티모달 user 안내 — {{MAX_EDGE}}, {{API_DETAIL}}, {{VISION_MAX}}, {{TRUNCATED}} */
+    /** @type {"low"|"high"|"auto"} */
+    var AP_VISION_API_DETAIL = "high"; // alt·미세 텍스트: high 권장 · low 절감
+    // 멀티모달 user: {{MAX_EDGE}}, {{API_DETAIL}}, {{VISION_MAX}}, {{TRUNCATED}}
     var AP_AI_VISION_USER_APPEND_INTRO_LINES = [
       "",
       "---",
@@ -1316,7 +1284,7 @@
     var AP_AI_VISION_USER_APPEND_BLOCK_LINE =
       "image {{BLOCK_NUM}} → DOM img[{{IMG_ORDER}}] · 파일 {{FILE_NAME}}";
 
-    // ====== DOM · 프로젝트명 · 폰트 ======
+    // ----- DOM · 프로젝트명 · 폰트 -----
     function $(s) { return document.querySelector(s); }
 
     function getProjectName() {
@@ -1386,7 +1354,7 @@
       });
     }
 
-    // ====== 분석/미리보기 상태 (code.js RESULT와 동기) ======
+    // ----- 분석/미리보기 상태 (code.js RESULT와 동기) -----
     var previewImages = [];
     /** code.js 가 RESULT / CHUNK / END 에 붙이는 배치 ID — 메시지 순서 뒤바뀜 시 이미지 초기화 버그 방지 */
     var previewIngestId = null;
@@ -1524,7 +1492,7 @@
     $("#openAll").onclick = function () { toggleAll(true); };
     $("#closeAll").onclick = function () { toggleAll(false); };
 
-    // ====== code.js → UI (postMessage) ======
+    // ----- code.js → UI (postMessage) -----
     onmessage = function (e) {
       var msg = e.data.pluginMessage;
       if (!msg) return;
@@ -1708,7 +1676,7 @@
       }
     };
 
-    // ====== 데이터 트리 · Detail 패널 ======
+    // ----- 데이터 트리 · Detail 패널 -----
     function renderDataTree(dt) {
       $("#tree").innerHTML = "";
       selectedNode = null;
@@ -1990,7 +1958,7 @@
       $("#tree").querySelectorAll("details").forEach(function (d) { d.open = open; });
     }
 
-    // ====== 미리보기: HTML 조립 · iframe · blob URL ======
+    // ----- 미리보기: HTML 조립 · iframe · blob URL -----
     /** PC 미리보기 meta width (중첩 iframe에서 뷰포트 클램프 보정) */
     var PREVIEW_PC_LAYOUT_WIDTH = 1440;
     var previewBlobUrl = null;
@@ -2193,7 +2161,7 @@
       if (el) el.addEventListener("input", schedulePreviewRefreshFromCode);
     })();
 
-    // ====== AI 정리: OpenAI 키는 figma.clientStorage (code.js 경유) ======
+    // ----- OpenAI 키 · 검수/반영 (저장은 figma.clientStorage, code.js 경유) -----
     var cachedOpenaiKey = "";
     (function requestStoredOpenaiKey() {
       parent.postMessage({ pluginMessage: { type: "LOAD_OPENAI_KEY" } }, "*");
@@ -2217,9 +2185,7 @@
       });
     }
 
-    // --------------------------------------------------
-    // 공통 유틸
-    // --------------------------------------------------
+    // ----- 공통 유틸 -----
     function getCodeEl() {
       return $("#codeOut");
     }
