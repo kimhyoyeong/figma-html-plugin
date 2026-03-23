@@ -395,55 +395,102 @@
       opacity: .95;
     }
 
-    /* AI 반영 패널: 변경 diff */
+    /* AI 반영 패널: 변경 diff (전폭 카드 · 변경 전/후 분리) */
     .ap-diff-block {
-      margin: 0 0 12px 0;
-      padding: 8px 10px;
-      background: #f6f8fb;
-      border-radius: 8px;
+      margin: 0 0 14px 0;
+      padding: 10px 12px;
+      background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+      border-radius: 10px;
       border: 1px solid #e2e8f0;
     }
 
-    .ap-diff-block>strong {
+    .ap-diff-block > strong {
       display: block;
       font-size: 11px;
-      color: #0d47a1;
-      margin-bottom: 6px;
+      font-weight: 700;
+      color: #0f172a;
+      letter-spacing: -0.02em;
+      margin-bottom: 10px;
+    }
+
+    .ap-diff-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-width: 0;
     }
 
     .ap-diff-row {
-      font-size: 10px;
-      line-height: 1.5;
-      margin-bottom: 6px;
-      word-break: break-all;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 10px 12px;
+      background: #fff;
+      border: 1px solid #e8edf3;
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      min-width: 0;
     }
 
-    .ap-diff-row:last-child {
-      margin-bottom: 0;
+    .ap-diff-label {
+      display: block;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #64748b;
+      margin-bottom: 2px;
+    }
+
+    .ap-diff-label--from {
+      color: #b45309;
+    }
+
+    .ap-diff-label--to {
+      color: #15803d;
+    }
+
+    .ap-diff-arrow-row {
+      text-align: center;
+      color: #94a3b8;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+      padding: 2px 0;
+      user-select: none;
+    }
+
+    .ap-diff-from,
+    .ap-diff-to {
+      display: block;
+      margin: 0;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 10px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      max-width: 100%;
     }
 
     .ap-diff-from {
-      color: #6d4c41;
-      background: #fff8e6;
-      padding: 2px 6px;
-      border-radius: 4px;
-      display: inline;
-      max-width: 100%;
-    }
-
-    .ap-diff-arrow {
-      color: #78909c;
-      margin: 0 6px;
-      font-weight: 700;
+      color: #78350f;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-left: 3px solid #f59e0b;
     }
 
     .ap-diff-to {
-      color: #1b5e20;
-      background: #e8f5e9;
-      padding: 2px 6px;
-      border-radius: 4px;
-      display: inline;
-      max-width: 100%;
+      color: #14532d;
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-left: 3px solid #22c55e;
+    }
+
+    .ap-diff-arrow {
+      display: none;
     }
 
     .detail {
@@ -754,14 +801,16 @@
       color: #1565c0;
     }
 
-    #aiAuditReport .ap-alt-audit-grid {
+    #aiAuditReport .ap-alt-audit-grid,
+    #aiAuditReport .ap-audit-result-grid {
       display: grid;
       gap: 10px;
       grid-template-columns: 1fr;
       min-width: 0;
     }
 
-    #aiAuditReport .ap-alt-audit-grid--cols2 {
+    #aiAuditReport .ap-alt-audit-grid--cols2,
+    #aiAuditReport .ap-audit-result-grid--cols2 {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
@@ -857,7 +906,7 @@
   <div class="wrap">
     <div class="tabs">
       <button type="button" class="tab active" data-tab="data">데이터</button>
-      <button type="button" class="tab" data-tab="code">코드</button>
+      <button type="button" class="tab" data-tab="code">코드·AI</button>
       <button type="button" class="tab" data-tab="preview">미리보기</button>
       <span class="dataToolbarStatus waiting" id="dataStatus">분석 대기 중…</span>
     </div>
@@ -912,7 +961,7 @@
         <div id="aiRefineBar" class="aiRefineBar">
           <div class="aiRefineRow">
             <span class="aiRefineLabel">AI</span>
-            <button type="button" id="btnAiAudit" class="gray" title="SEO·GEO·접근성·시멘틱·alt·헤딩 검수 리포트">분석</button>
+            <button type="button" id="btnAiAudit" class="gray" title="SEO·접근성·시멘틱·alt·헤딩 검수 리포트">분석</button>
             <button type="button" id="btnApplyAltProposals" class="gray" title="마지막 분석의 alt를 그대로 적용·헤딩은 동일 분석 headingAudit에 맞춰 패치">반영</button>
             <span class="aiRefineSep">|</span>
             <input type="password" id="openaiKey" class="field field--key" placeholder="OpenAI API 키" autocomplete="off" />
@@ -923,10 +972,10 @@
             <span id="aiRefineStatus" class="hint"></span>
           </div>
           <div id="aiAuditReport"></div>
-          <div class="aiRefineFootnote">
-            <b>분석</b> = SEO · GEO · 접근성 · 시멘틱 마크업 · alt · 헤딩 검수 리포트 /
+          <!--<div class="aiRefineFootnote">
+            <b>분석</b> = SEO · 접근성 · 시멘틱 마크업 · alt · 헤딩 검수 리포트 /
             <b>반영</b> = 마지막 분석의 alt 제안을 그대로 적용 · 헤딩은 동일 분석의 <code>headingAudit</code>에 맞춰 패치 생성
-          </div>
+          </div>-->
         </div>
 
         <textarea id="codeOut" placeholder="선택 분석 후 섹션 코드가 표시됩니다"></textarea>
@@ -993,7 +1042,7 @@
       "- CMS 본문 조각(fragment) 기준으로만 판단한다.",
       "",
       "목표:",
-      "- SEO(본문 기준), GEO, 접근성, 시맨틱 구조, alt 품질, heading 구조를 검수한다.",
+      "- SEO(본문·주제·엔티티), 접근성, 시맨틱 구조, alt 품질, heading 구조를 검수한다.",
       "- 코드 수정이 아니라 검수 리포트를 작성한다.",
       "- 명확하게 확인 가능한 문제만 보고한다.",
       "- 애매하면 과도하게 추정하지 말고 ambiguous로 판단한다.",
@@ -1002,13 +1051,12 @@
       "- 결과는 간결하고 핵심만 작성한다. 한국어로 작성한다.",
       "- 동일한 문제를 여러 섹션에서 반복하지 않는다.",
       "- 의미 없는 나열 금지. 중요한 문제만 보고한다.",
-      "- '문제 없으면 빈 배열'은 seo/geo/a11y/semantics의 issues·suggestions, headingAudit.issues 등에만 적용한다.",
+      "- '문제 없으면 빈 배열'은 seo/a11y/semantics의 issues·suggestions, headingAudit.issues 등에만 적용한다.",
       "- alts·altProposals는 예외: 아래 강제 규칙을 반드시 따른다.",
       "",
       "출력 키:",
       "- summary",
       "- seo",
-      "- geo",
       "- a11y",
       "- semantics",
       "- alts",
@@ -1022,10 +1070,8 @@
       "{ severity: 'high'|'medium'|'low', type: string, target: string, selectorHint: string, problem: string, why: string, fix: string }",
       "",
       "seo 형식:",
-      "{ issues: Issue[], suggestions: string[] }",
-      "",
-      "geo 형식:",
-      "{ structure: [{ text: string, role: 'title'|'subtitle'|'desc'|'caption'|'cta'|'label'|'body', evidence: string }], issues: Issue[], suggestions: string[], extractability: { titleClear: boolean, entityCoverage: string[], missingEntities: string[] } }",
+      "{ issues: Issue[], suggestions: string[], contentRoles?: [{ text: string, role: 'title'|'subtitle'|'desc'|'caption'|'cta'|'label'|'body', evidence: string }], extractability?: { titleClear: boolean, entityCoverage: string[], missingEntities: string[] } }",
+      "  * 주제·엔티티·텍스트 역할은 SEO에만 넣는다. contentRoles·extractability는 본문에서 도출 가능할 때만 채우며 생략 가능하다.",
       "",
       "a11y 형식:",
       "{ issues: Issue[], suggestions: string[] }",
@@ -1056,9 +1102,8 @@
       "",
       "- SEO:",
       "  * heading 오용, 텍스트 부족, 이미지 의존 정보, 의미 없는 반복 텍스트 위주로 판단한다.",
-      "",
-      "- GEO:",
-      "  * 페이지 주제, 섹션 목적, 주요 엔티티가 텍스트 기반으로 추출 가능한지 판단한다.",
+      "  * 페이지 주제, 섹션 목적, 브랜드·제품 등 주요 엔티티가 본문 텍스트에서 식별 가능한지 포함한다.",
+      "  * 동일 문제를 다른 키와 중복 나열하지 않는다.",
       "",
       "- 접근성:",
       "  * alt 품질, 장식 이미지 처리, 텍스트 대체 가능성 중심으로 판단한다.",
@@ -1090,9 +1135,11 @@
       "- Alt:",
       "  * 첨부 JPEG(비전)가 있는 슬롯: alt·proposal의 **주 내용**은 그 JPEG에 보이는 것으로 쓴다.",
       "  * 같은 슬롯의 src·파일명에서 읽히는 제품명·라인명·SKU 등은 그림과 모순되지 않는 한 **보조로만 짧게** 덧붙인다 (주 설명 대체 금지).",
+      "  * 제품명·브랜드·라인명은 **검수 대상 본문 조각(같은 fragment) 안의 텍스트**에 이미 나오면 그 문자열을 찾아, 이미지와 대응될 때만 alt에 **짧게** 넣는다. (페이지에 없는 이름을 추측·지어내지 않는다.)",
+      "  * 인접 문단·캡션·제목 **문장 전체**를 복사·요약해 alt를 채우는 것은 금지. 다만 위와 같이 **본문에 노출된 정식 명칭**만 발췌하는 것은 허용이다.",
       "",
       "  * alt 작성 우선순위:",
-      "    1) 제품 자체가 핵심이면 제품명·용기·제형·발색을 우선한다.",
+      "    1) 제품 자체가 핵심이면 시각(용기·제형·발색) + **해당 페이지 본문에 있는** 제품명·브랜드(있을 때)를 보조로 맞춘다.",
       "    2) 사용 장면이 핵심이면 모델 + 제품 사용 장면을 우선한다.",
       "    3) 텍스트 이미지(타이포·카피)면 이미지에 보이는 문구를 전사한다.",
       "    4) 배경·분위기·장식만 있으면 빈 문자열 또는 최소 설명으로 한다.",
@@ -1104,7 +1151,8 @@
       "    반드시 이미지에 보이는 사용 장면을 함께 포함한다.",
       "",
       "  * 비전이 없는 슬롯: src·파일명·현재 alt를 **보조 근거**로 보수적으로 작성한다.",
-      "    인접 HTML 본문·캡션·제목 문구를 alt로 복사하거나 요약하지 않는다.",
+      "    본문 조각 안에 제품명·브랜드가 텍스트로 있으면 그것을 찾아 그림과 맞으면 짧게 반영할 수 있다.",
+      "    인접 문단·캡션 **문장 전체**를 alt로 복사하거나 요약해 채우지 않는다.",
       "",
       "  * Figma 레이어명·파일명 그대로 복사한 alt, image/사진 등 generic alt는 수정 대상으로 본다.",
       "",
@@ -1165,11 +1213,12 @@
           "<img>는 문서 순서대로 총 {{N_IMG}}개.",
           "altProposals: string[], img 순서와 정확히 {{N_IMG}}개를 반환한다. 순수 장식 이미지는 빈 문자열.",
           "현재 alt가 적절하면 그대로 유지 가능하다.",
-          "주변 HTML 문장·캡션·제목을 alt로 복사하거나 그 내용을 요약해 넣지 않는다. alt의 주 내용은 이미지(또는 비전)에 보이는 것이어야 한다.",
+          "주변 문단·캡션 **문장 전체**를 alt로 복사하거나 요약해 넣지 않는다. alt의 주 내용은 이미지(또는 비전)에 보이는 것이어야 한다.",
+          "제품명·브랜드·라인명은 **같은 본문 조각 안에 텍스트로 이미 있으면** 그 문자열을 찾아, 이미지와 대응될 때만 **짧게** 넣는다. 페이지에 없는 이름을 지어내지 않는다.",
           "같은 img의 src·파일명에서 읽히는 제품명·시리즈명 등은 **보조로만 짧게** 쓸 수 있으며, alt의 주 설명을 대체하지 않는다.",
           "",
           "alt 작성 우선순위:",
-          "1) 제품 자체가 핵심이면 제품명·용기·제형·발색을 우선한다.",
+          "1) 제품 자체가 핵심이면 시각(용기·제형·발색) + **본문에 있는** 제품명·브랜드(있을 때)를 보조로 맞춘다.",
           "2) 사용 장면이 핵심이면 모델 + 제품 사용 장면을 우선한다.",
           "3) 텍스트 이미지(타이포·카피)면 이미지에 보이는 문구를 전사한다.",
           "4) 배경·분위기·장식만 있으면 빈 문자열 또는 최소 설명으로 한다.",
@@ -1229,7 +1278,7 @@
     /** 분석 API: 비전 첨부 시 system 끝에 덧붙임 */
     var AP_AI_ANALYSIS_VISION_SYSTEM_APPEND =
       "\n\n[시각 입력 필수 활용] user 메시지 하단 멀티파트에서 슬롯 안내 텍스트(예: DOM img[n]) 직후에 오는 image_url JPEG가 해당 img[n]과 1:1이다(안내에 썸네일 없음·JPEG 실패면 그 슬롯은 텍스트만). article.ap-post 의 <img> DOM 순서를 그대로 따른다. " +
-      "alt·proposal은 **주로** 해당 JPEG에 보이는 내용으로 쓴다. 같은 슬롯의 src·파일명·안내에 적힌 파일명에서 드러나는 제품명·라인명 등은 그림과 모순되지 않으면 **보조**로 짧게 붙일 수 있다(HTML 본문·캡션·인접 문단 복붙·의역은 금지). " +
+      "alt·proposal은 **주로** 해당 JPEG에 보이는 내용으로 쓴다. 제품명·브랜드는 **동일 본문 조각(주어진 HTML) 안에 이미 텍스트로 나온 것**을 찾아 그림과 맞으면 짧게 반영할 수 있다. 같은 슬롯의 src·파일명·안내 파일명에서 드러나는 명칭도 그림과 모순되지 않으면 **보조**로 짧게 붙일 수 있다. (문단·캡션 **문장 전체** 복붙·의역은 금지.) " +
       "뷰티(화장품·스킨케어) 제품 콘텐츠로 가정: alt는 제품·용기·질감·발색·제형·모델이 사용하는 제품 등 제품 연관 정보를 우선한다. 사람이 보이면 성별을 쓰지 말고 **모델**로만 지칭한다. " +
       "이미지가 텍스트(타이포·슬로건·카피) 위주면 alt는 JPEG에 보이는 문구를 전사한다(주변 HTML이 아님). " +
       "그 외에서 글자·브랜드가 판독되지 않으면 억지 전사하지 말고 보이는 시각 정보만 서술하거나 decision ambiguous로 둔다. 순수 장식은 proposal 빈 문자열.";
@@ -1255,14 +1304,14 @@
       "---",
       "첨부 image 블록은 article.ap-post 안 <img> DOM 순서와 1:1이다. 첫 번째 image = img[1], 두 번째 = img[2] … 동일 순서로 alts·altProposals를 작성한다.",
       "동일 에셋(src)을 쓰는 슬롯이어도 각각 JPEG가 따로 붙는다. 순서 밀림 없이 대응한다.",
-      "alt·proposal 작성 시: **주 근거**는 JPEG 픽셀이다. HTML 주변 텍스트(캡션·제목·본문)로 alt를 채우지 않는다. **보조**: 해당 img의 src·파일명·아래 슬롯 파일명에 나타나는 제품명·시리즈명은 그림과 어긋나지 않으면 짧게 덧붙일 수 있다. 이미지 안에 있는 문자는 전사한다(텍스트 이미지).",
+      "alt·proposal 작성 시: **주 근거**는 JPEG 픽셀이다. 문단·캡션 **문장 전체**를 alt로 채우지 않는다. **보조**: 동일 본문 조각 HTML 안에 이미 있는 제품명·브랜드·라인명은 찾아 그림과 대응되면 짧게 넣을 수 있다. src·파일명·슬롯 파일명의 명칭도 그림과 어긋나지 않으면 짧게 덧붙일 수 있다. 이미지 안에 있는 문자는 전사한다(텍스트 이미지).",
       "뷰티 제품 기준: 제품·용기·질감·발색 등 제품 연관 설명을 중심으로 쓴다. 인물은 남성·여성 구분 없이 **모델**로만 칭한다.",
       "이미지가 텍스트 위주면 alt는 그림 속 문구를 전사한다(주변 HTML 복사 아님).",
-      "JPEG 한 장(긴 변 최대 {{MAX_EDGE}}px, API detail={{API_DETAIL}}). '(썸네일 없음)'이면 src·파일명·현재 alt를 쓰고, 제품명은 경로·파일명에서만 보조한다. 인접 HTML 문장 복붙은 하지 않는다."
+      "JPEG 한 장(긴 변 최대 {{MAX_EDGE}}px, API detail={{API_DETAIL}}). '(썸네일 없음)'이면 src·파일명·현재 alt를 쓰고, 제품명은 **본문 조각에 텍스트로 이미 있으면** 그것을 우선 찾고, 없으면 경로·파일명을 보조한다. 문장 복붙은 하지 않는다."
     ];
 
     var AP_AI_VISION_USER_APPEND_TRUNC_LINE =
-      "※ article.ap-post 내 img가 {{VISION_MAX}}개를 넘어, 앞쪽 {{VISION_MAX}}개 슬롯만 JPEG 첨부. 나머지 {{TRUNCATED}}개 슬롯은 src·파일명·현재 alt를 보조로 참고(주변 HTML 본문·캡션 복붙 금지, 제품명은 경로·파일명에서만).";
+      "※ article.ap-post 내 img가 {{VISION_MAX}}개를 넘어, 앞쪽 {{VISION_MAX}}개 슬롯만 JPEG 첨부. 나머지 {{TRUNCATED}}개 슬롯은 src·파일명·현재 alt를 보조로 참고(문장 복붙 금지. 제품명은 **본문 조각에 있는 정식 명칭**을 찾고, 없으면 경로·파일명).";
 
     var AP_AI_VISION_USER_APPEND_BLOCK_LINE =
       "image {{BLOCK_NUM}} → DOM img[{{IMG_ORDER}}] · 파일 {{FILE_NAME}}";
@@ -2004,9 +2053,14 @@
       var raw = stripEmbeddedAuditReport(($("#codeOut") && $("#codeOut").value) || "");
       if (!raw.trim()) return "";
 
-      var styleMatches = raw.match(/<style>[\s\S]*?<\/style>/ig) || [];
+      // <style> 앞부분(<!--CMS-->, Swiper <link> 등)은 제거 후 style 뒤에 붙이면 순서가 뒤바뀌므로 유지
+      var styleIdx = raw.indexOf("<style>");
+      var prefixBeforeStyle = styleIdx > 0 ? raw.substring(0, styleIdx).trim() : "";
+      var rest = styleIdx >= 0 ? raw.substring(styleIdx) : raw;
+
+      var styleMatches = rest.match(/<style>[\s\S]*?<\/style>/ig) || [];
       var style = styleMatches.join("\n");
-      var body = raw.replace(/<style>[\s\S]*?<\/style>/ig, "").replace(/^\s+/, "");
+      var body = rest.replace(/<style>[\s\S]*?<\/style>/ig, "").replace(/^\s+/, "");
 
       if (!forExport && previewStripMoMq && typeof lastMoBreakpoint === "number" && lastMoBreakpoint > 0) {
         style = suppressHybridMoMediaAtBreakpoint(style, lastMoBreakpoint);
@@ -2037,7 +2091,8 @@
       var viewport = (forceViewportWidth > 0)
         ? '<meta name="viewport" content="width=' + forceViewportWidth + ', initial-scale=1">'
         : '<meta name="viewport" content="width=device-width, initial-scale=1">';
-      return '<!DOCTYPE html><html><head><meta charset="utf-8">' + viewport + baseStyle + "</head><body>" + style + "\n\n" + body + "</body></html>";
+      var inner = (prefixBeforeStyle ? prefixBeforeStyle + "\n" : "") + style + "\n\n" + body;
+      return '<!DOCTYPE html><html><head><meta charset="utf-8">' + viewport + baseStyle + "</head><body>" + inner + "</body></html>";
     }
 
     function syncPreviewChromeToState() {
@@ -3106,13 +3161,19 @@
           : '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;background:#fde8e8;color:#c53030;border:1px solid #feb2b2;">false</span>';
       }
 
+      function auditResultGridClass(n) {
+        n = Number(n) || 0;
+        return n >= 2 ? " ap-audit-result-grid--cols2" : "";
+      }
+
       function simpleList(title, arr) {
         arr = Array.isArray(arr) ? arr : [];
         if (!arr.length) return "";
+        var gridCls = "ap-audit-result-grid" + auditResultGridClass(arr.length);
         return (
           '<div style="margin:0 0 12px 0;">' +
           '<strong style="display:block;margin-bottom:6px;color:#1565c0;">' + esc(title) + '</strong>' +
-          '<ul style="margin:0 0 0 16px;padding:0;">' +
+          '<ul class="' + gridCls + '" style="list-style:none;margin:0;padding:0;">' +
           arr.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") +
           "</ul>" +
           "</div>"
@@ -3122,12 +3183,14 @@
       function issueList(title, issues) {
         issues = Array.isArray(issues) ? issues : [];
         if (!issues.length) return "";
+        var gridCls = "ap-audit-result-grid" + auditResultGridClass(issues.length);
         return (
           '<div style="margin:0 0 14px 0;">' +
           '<strong style="display:block;margin-bottom:8px;color:#1565c0;">' + esc(title) + '</strong>' +
+          '<div class="' + gridCls + '">' +
           issues.map(function (it) {
             return (
-              '<div style="margin-bottom:10px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">' +
+              '<div style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">' +
               '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">' +
               sevBadge(it.severity) +
               '<code style="font-size:10px;background:#f6f8fb;padding:1px 6px;border-radius:4px;border:1px solid #e2e8f0;">' + esc(it.type || "") + '</code>' +
@@ -3140,7 +3203,7 @@
               "</div>"
             );
           }).join("") +
-          "</div>"
+          "</div></div>"
         );
       }
 
@@ -3163,12 +3226,12 @@
         );
       }
 
-      function geoStructureTable(struct) {
+      function seoContentRolesTable(struct) {
         struct = Array.isArray(struct) ? struct : [];
         if (!struct.length) return "";
         return (
           '<div style="margin:0 0 12px 0;">' +
-          '<strong style="display:block;margin-bottom:6px;color:#1565c0;">GEO 구조</strong>' +
+          '<strong style="display:block;margin-bottom:6px;color:#1565c0;">주제·텍스트 역할 (SEO)</strong>' +
           '<table style="width:100%;border-collapse:collapse;font-size:10px;">' +
           "<thead>" +
           "<tr>" +
@@ -3193,14 +3256,14 @@
         );
       }
 
-      function geoExtractabilityBlock(extractability) {
+      function seoExtractabilityBlock(extractability) {
         extractability = extractability || {};
         var entityCoverage = Array.isArray(extractability.entityCoverage) ? extractability.entityCoverage : [];
         var missingEntities = Array.isArray(extractability.missingEntities) ? extractability.missingEntities : [];
         if (extractability.titleClear == null && !entityCoverage.length && !missingEntities.length) return "";
         return (
           '<div style="margin:0 0 12px 0;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">' +
-          '<strong style="display:block;margin-bottom:8px;color:#1565c0;">GEO 추출성</strong>' +
+          '<strong style="display:block;margin-bottom:8px;color:#1565c0;">주제·엔티티 명확성 (SEO)</strong>' +
           '<div style="margin-bottom:6px;">대표 주제 명확성: ' + ynBadge(!!extractability.titleClear) + "</div>" +
           '<div style="margin-bottom:6px;">회수된 엔티티: ' + (entityCoverage.length ? entityCoverage.map(esc).join(", ") : "없음") + "</div>" +
           '<div>누락 엔티티: ' + (missingEntities.length ? missingEntities.map(esc).join(", ") : "없음") + "</div>" +
@@ -3211,11 +3274,11 @@
       function altAuditBlock(alts) {
         alts = Array.isArray(alts) ? alts : [];
         if (!alts.length) return "";
-        var gridCols = alts.length >= 2 ? " ap-alt-audit-grid--cols2" : "";
+        var gridCols = auditResultGridClass(alts.length);
         return (
           '<div class="ap-alt-audit-section">' +
           '<strong class="ap-alt-audit-heading">Alt 검수</strong>' +
-          '<div class="ap-alt-audit-grid' + gridCols + '">' +
+          '<div class="ap-alt-audit-grid ap-audit-result-grid' + gridCols + '">' +
           alts.map(function (it) {
             var decisionStyle = "background:#eef2f7;color:#445;border:1px solid #d7dee7;";
             if (it.decision === "fix") decisionStyle = "background:#fff7e6;color:#b7791f;border:1px solid #f6d28b;";
@@ -3245,12 +3308,13 @@
         var out = "";
 
         if (outline.length) {
+          var og = "ap-audit-result-grid" + auditResultGridClass(outline.length);
           out += (
             '<div style="margin:0 0 12px 0;">' +
             '<strong style="display:block;margin-bottom:6px;color:#1565c0;">Heading outline</strong>' +
-            '<div style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">' +
+            '<div class="' + og + '">' +
             outline.map(function (it) {
-              return '<div style="margin-bottom:4px;"><code>' + esc(it.level || "") + "</code> · " + esc(it.text || "") + "</div>";
+              return '<div style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;"><code>' + esc(it.level || "") + "</code> · " + esc(it.text || "") + "</div>";
             }).join("") +
             "</div>" +
             "</div>"
@@ -3258,16 +3322,18 @@
         }
 
         if (candidates.length) {
+          var cg = "ap-audit-result-grid" + auditResultGridClass(candidates.length);
           out += (
             '<div style="margin:0 0 14px 0;">' +
             '<strong style="display:block;margin-bottom:8px;color:#1565c0;">Heading 후보 판정</strong>' +
+            '<div class="' + cg + '">' +
             candidates.map(function (it) {
               var decisionStyle = "background:#eef2f7;color:#445;border:1px solid #d7dee7;";
               if (it.decision === "title") decisionStyle = "background:#edfdf3;color:#1c6b3b;border:1px solid #b7e4c7;";
               else if (it.decision === "subtitle") decisionStyle = "background:#fff7e6;color:#b7791f;border:1px solid #f6d28b;";
               else if (it.decision === "ambiguous") decisionStyle = "background:#fde8e8;color:#c53030;border:1px solid #feb2b2;";
               return (
-                '<div style="margin-bottom:10px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">' +
+                '<div style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">' +
                 '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">' +
                 '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;' + decisionStyle + '">' + esc(it.decision || "") + "</span>" +
                 (it.recommendedLevel ? '<code style="font-size:10px;background:#f6f8fb;padding:1px 6px;border-radius:4px;border:1px solid #e2e8f0;">' + esc(it.recommendedLevel) + "</code>" : "") +
@@ -3278,7 +3344,7 @@
                 "</div>"
               );
             }).join("") +
-            "</div>"
+            "</div></div>"
           );
         }
 
@@ -3289,24 +3355,43 @@
         rows = Array.isArray(rows) ? rows : [];
         if (!rows.length) return "";
         return (
-          '<div class="ap-diff-block">' +
+          '<div class="ap-diff-block ap-diff-block--changes">' +
           "<strong>" + esc(title) + "</strong>" +
+          '<div class="ap-diff-rows">' +
           rows.map(function (r) {
             return (
               '<div class="ap-diff-row">' +
-              '<code class="ap-diff-from">' + r.from + "</code>" +
-              '<span class="ap-diff-arrow">→</span>' +
-              '<code class="ap-diff-to">' + r.to + "</code>" +
+              '<div><span class="ap-diff-label ap-diff-label--from">변경 전</span><code class="ap-diff-from">' +
+              r.from +
+              "</code></div>" +
+              '<div><span class="ap-diff-label ap-diff-label--to">변경 후</span><code class="ap-diff-to">' +
+              r.to +
+              "</code></div>" +
               "</div>"
             );
           }).join("") +
-          "</div>"
+          "</div></div>"
         );
       }
 
       var summary = obj.summary || {};
       var seo = obj.seo || {};
-      var geo = obj.geo || {};
+      var legacyGeo = obj.geo || {};
+      function mergeArrays(a, b) {
+        a = Array.isArray(a) ? a : [];
+        b = Array.isArray(b) ? b : [];
+        return a.concat(b);
+      }
+      var seoIssues = mergeArrays(seo.issues, legacyGeo.issues);
+      var seoSuggestions = mergeArrays(seo.suggestions, legacyGeo.suggestions);
+      var seoContentRolesRows = Array.isArray(seo.contentRoles) && seo.contentRoles.length
+        ? seo.contentRoles
+        : Array.isArray(seo.structure) && seo.structure.length
+          ? seo.structure
+          : Array.isArray(legacyGeo.structure)
+            ? legacyGeo.structure
+            : [];
+      var seoExtractabilityVal = seo.extractability != null ? seo.extractability : legacyGeo.extractability;
       var a11y = obj.a11y || {};
       var semantics = obj.semantics || {};
       var headingAudit = obj.headingAudit || {};
@@ -3394,12 +3479,10 @@
         visionDiagBlock +
         summaryBlock(summary) +
         applyDiff +
-        issueList("SEO 이슈", seo.issues) +
-        simpleList("SEO 제안", seo.suggestions) +
-        geoStructureTable(geo.structure) +
-        geoExtractabilityBlock(geo.extractability) +
-        issueList("GEO 이슈", geo.issues) +
-        simpleList("GEO 제안", geo.suggestions) +
+        issueList("SEO 이슈", seoIssues) +
+        simpleList("SEO 제안", seoSuggestions) +
+        seoContentRolesTable(seoContentRolesRows) +
+        seoExtractabilityBlock(seoExtractabilityVal) +
         issueList("접근성 이슈", a11y.issues) +
         simpleList("접근성 제안", a11y.suggestions) +
         issueList("시멘틱 마크업 이슈", semantics.issues) +

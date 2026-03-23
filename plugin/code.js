@@ -3412,16 +3412,17 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
 
 /** 전체 코드에서 base / section 스타일 / article HTML 분리 */
 function parseCodeIntoParts(code) {
-    if (!code || typeof code !== "string") return {baseStyles: "", sectionStyles: "", articleHtml: ""}
+    if (!code || typeof code !== "string") return {baseStyles: "", sectionStyles: "", articleHtml: "", headPrefix: ""}
     var styleStart = code.indexOf("<style>")
     var styleEnd = code.indexOf("</style>")
-    if (styleStart < 0 || styleEnd < 0 || styleEnd <= styleStart) return {baseStyles: "", sectionStyles: "", articleHtml: ""}
+    if (styleStart < 0 || styleEnd < 0 || styleEnd <= styleStart) return {baseStyles: "", sectionStyles: "", articleHtml: "", headPrefix: ""}
+    var headPrefix = styleStart > 0 ? code.substring(0, styleStart).trim() : ""
     var fullStyle = code.substring(styleStart + 7, styleEnd).trim()
     var sectionStart = fullStyle.search(/\n\.ap-section--/)
     var baseStyles = sectionStart >= 0 ? fullStyle.substring(0, sectionStart) : fullStyle
     var sectionStyles = sectionStart >= 0 ? fullStyle.substring(sectionStart).trim() : ""
     var articleHtml = code.substring(styleEnd + 8).trim()
-    return {baseStyles: baseStyles, sectionStyles: sectionStyles, articleHtml: articleHtml}
+    return {baseStyles: baseStyles, sectionStyles: sectionStyles, articleHtml: articleHtml, headPrefix: headPrefix}
 }
 
 /** sectionStyles에서 --bg-img/background-image → @media에 _mo 이미지 오버라이드 병합 */
@@ -3495,7 +3496,8 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
         if (String(ext).toLowerCase() === "svg") { return "<img " + before + "src=\"" + basePath + "." + ext + "\"" + after + ">"; }
         return '<picture><source media="(max-width:' + bp + 'px)" srcset="' + basePath + "_mo." + ext + '"><img ' + before + 'src="' + basePath + "." + ext + '"' + after + "></picture>"
     })
-    return styleBlock + articleHtml
+    var headPrefix = (pc.headPrefix || "").trim()
+    return (headPrefix ? headPrefix + "\n" : "") + styleBlock + articleHtml
 }
 /** 선택 루트 트리 덤프 + HTML/CSS 생성 + 이미지 export → 결과 및 이미지 목록 반환 */
 function dumpTreeAsync(root, projectName, allowedFonts, options) {
@@ -3738,6 +3740,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
     var rootBox = getAbs(root)
     var baseWidth = rootBox && rootBox.w ? r2(rootBox.w) : 1920
 
+    codeLines.push("<!--CMS-->")
     codeLines.push("<style>")
     codeLines.push("")
     codeLines.push(".ap-post,")
@@ -4604,6 +4607,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
         for (var k = 0; k < contentLines.length; k++) codeLines.push(contentLines[k])
         codeLines.push("  </div>")
         codeLines.push("</article>")
+        codeLines.push("<!--//CMS-->")
 
         var code = codeLines.join("\n").replace(/\u2028/g, "\n").replace(/\u2029/g, "\n")
         if (hasSlideSection) {
