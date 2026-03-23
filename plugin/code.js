@@ -1,5 +1,5 @@
 // code.js — Figma → HTML/CMS Export Plugin
-figma.showUI(__html__, {width: 700, height: 1000})
+figma.showUI(__html__, {width: 900, height: 900})
 
 /** 참고: ui.html AI 검수는 비전(썸네일) 기본 사용. 이미지 바이너리는 PC/MO 분석 완료 후 RESULT_IMAGES_* 로 UI에 전달됨(ZIP만으로는 코드 탭에 붙여 넣은 경우 미전달). */
 var AP_AI_DEFAULT_ALT_VISION = true
@@ -4578,7 +4578,24 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
         }
         if (hasSlideSection) {
             codeLines.push("")
-            codeLines.push(".ap-section .swiper { width:100%; height:100%; min-height:200px; }")
+            codeLines.push(".ap-post .swiper {")
+            codeLines.push("  width:100%; height:100%; min-height:200px;")
+            codeLines.push("  --swiper-navigation-color:#000;")
+            codeLines.push("  --swiper-theme-color:#000;")
+            codeLines.push("  --swiper-pagination-bullet-size:8px;")
+            codeLines.push("}")
+            codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after { content:none; }")
+            codeLines.push(".ap-post .swiper-button-prev,")
+            codeLines.push(".ap-post .swiper-button-next {")
+            codeLines.push("  width: clamp(0px, calc(40 / var(--ap-width) * 100cqi), 40px);")
+            codeLines.push("  height: clamp(0px, calc(80 / var(--ap-width) * 100cqi), 80px);")
+            codeLines.push(
+                '  background-image: url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 27 44\'%3E%3Cpath d=\'M27,22L27,22L5,44l-2.1-2.1L22.8,22L2.9,2.1L5,0L27,22L27,22z\' fill=\'%23007aff\' style=\'&%2310; fill: black;&%2310;\'/%3E%3C/svg%3E");'
+            )
+            codeLines.push("  background-repeat: no-repeat;")
+            codeLines.push("  background-size: contain;")
+            codeLines.push("}")
+            codeLines.push(".ap-post .swiper-button-prev { transform: rotate(180deg); }")
             codeLines.push("")
         }
         codeLines.push("</style>")

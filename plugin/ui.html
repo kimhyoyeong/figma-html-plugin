@@ -846,11 +846,11 @@
   <header>
     <button id="runAnalyze" type="button">분석</button>
 
-    <input id="projectName" class="field" placeholder="project (ex: iope)" />
+    <input id="projectName" class="field" placeholder="project (ex: signia_serum)" />
     <span class="hint" id="rootHint">ROOT 1개: PC 한 벌 · ROOT 2개: PC+MO(가로 큰 쪽=PC) @media 오버라이드</span>
   </header>
   <div id="fontRow" class="fontRow is-collapsed">
-    <span class="fontRowLabel">폰트 (체크 = HTML 텍스트, 미체크 = 해당 패밀리는 이미지로 출력 · 웹폰트 참고)</span>
+    <span class="fontRowLabel">폰트 (체크 = 텍스트로 처리, 미체크 = 이미지로 처리)</span>
     <div id="fontCheckboxes" class="fontCheckboxes"></div>
   </div>
 
@@ -2826,7 +2826,7 @@
         .replace(/</g, "&lt;");
     }
 
-    /** DOMParser 직렬화: 전체 HTML이면 doctype+documentElement, 아니면 body.innerHTML */
+    /** DOMParser 직렬화: 전체 HTML이면 doctype+documentElement. 조각이면 head+body를 합친다(body만 쓰면 meta 뒤 <style>이 head에 남아 사라짐). */
     function serializeAuditDocumentAfterEdit(doc, originalRaw) {
       var raw = String(originalRaw || "");
       if (!doc || !doc.documentElement) return raw;
@@ -2840,8 +2840,14 @@
         }
         return prefix + doc.documentElement.outerHTML;
       }
+      var head = doc.head;
       var body = doc.body;
-      return body ? body.innerHTML : doc.documentElement.outerHTML;
+      var hs = head && head.innerHTML ? String(head.innerHTML).trim() : "";
+      var bs = body && body.innerHTML ? String(body.innerHTML).trim() : "";
+      if (hs && bs) return hs + "\n\n" + bs;
+      if (bs) return bs;
+      if (hs) return hs;
+      return doc.documentElement.outerHTML;
     }
 
     function applyAltProposalsToCodeRegex(html, list) {
