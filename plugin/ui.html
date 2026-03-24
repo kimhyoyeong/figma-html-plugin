@@ -4221,10 +4221,6 @@
             "검수 완료" +
             (summary.score != null ? " · score " + String(summary.score) : "");
           setAiStatus(statusDone);
-          var aw = Array.isArray(obj._apClientWarnings) ? obj._apClientWarnings.filter(Boolean) : [];
-          if (aw.length) {
-            alert("[AI 검수 알림]\n\n" + aw.join("\n\n"));
-          }
         })
         .catch(function (e) {
           setAiStatus("검수 실패: " + friendlyAiApiErrorMessage(e));
