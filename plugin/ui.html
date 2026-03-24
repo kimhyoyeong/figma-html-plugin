@@ -753,8 +753,12 @@
       width: 180px;
     }
 
+    .field--provider {
+      width: 92px;
+    }
+
     .field--model {
-      width: 110px;
+      width: 150px;
     }
 
     .field--edge {
@@ -969,11 +973,12 @@
             <button type="button" id="btnAiAudit" class="gray" title="SEO·접근성·시멘틱·alt·헤딩 검수 리포트">분석</button>
             <button type="button" id="btnApplyAltProposals" class="gray" title="마지막 분석의 alt를 그대로 적용·헤딩은 동일 분석 headingAudit에 맞춰 패치">반영</button>
             <span class="aiRefineSep">|</span>
-            <input type="password" id="openaiKey" class="field field--key" placeholder="OpenAI API 키" autocomplete="off" />
-            <select id="aiModel" class="field field--model">
-              <option value="gpt-4o-mini">gpt-4o-mini</option>
-              <option value="gpt-4o" selected>gpt-4o</option>
+            <select id="aiProvider" class="field field--provider">
+              <option value="openai" selected>OpenAI</option>
+              <option value="gemini">Gemini</option>
             </select>
+            <input type="password" id="apiKey" class="field field--key" placeholder="OpenAI API 키" autocomplete="off" />
+            <select id="aiModel" class="field field--model"></select>
             <span id="aiRefineStatus" class="hint"></span>
           </div>
           <div id="aiAuditReport"></div>
@@ -1633,9 +1638,11 @@
       }
 
       if (msg.type === "OPENAI_KEY_LOADED") {
-        cachedOpenaiKey = msg.key != null ? String(msg.key) : "";
-        var ok = $("#openaiKey");
-        if (ok && cachedOpenaiKey) ok.value = cachedOpenaiKey;
+        var loadedKey = msg.key != null ? String(msg.key) : "";
+        if (loadedKey) {
+          setCachedApiKey("openai", loadedKey);
+          if (getAiProvider() === "openai") syncApiKeyInputFromProvider();
+        }
       }
       if (msg.type === "OPENAI_KEY_SAVED") {
         var stAi = $("#aiRefineStatus");
@@ -1644,6 +1651,22 @@
       if (msg.type === "OPENAI_KEY_ERROR") {
         var stE = $("#aiRefineStatus");
         if (stE) stE.textContent = "키 저장 실패: " + (msg.message || "");
+      }
+
+      if (msg.type === "GEMINI_KEY_LOADED") {
+        var loadedGemini = msg.key != null ? String(msg.key) : "";
+        if (loadedGemini) {
+          setCachedApiKey("gemini", loadedGemini);
+          if (getAiProvider() === "gemini") syncApiKeyInputFromProvider();
+        }
+      }
+      if (msg.type === "GEMINI_KEY_SAVED") {
+        var stG = $("#aiRefineStatus");
+        if (stG) stG.textContent = "API 키 저장됨";
+      }
+      if (msg.type === "GEMINI_KEY_ERROR") {
+        var stGe = $("#aiRefineStatus");
+        if (stGe) stGe.textContent = "키 저장 실패: " + (msg.message || "");
       }
 
       if (msg.type === "ERROR") {
@@ -2170,10 +2193,124 @@
       if (el) el.addEventListener("input", schedulePreviewRefreshFromCode);
     })();
 
-    // ----- OpenAI 키 · 검수/반영 (저장은 figma.clientStorage, code.js 경유) -----
-    var cachedOpenaiKey = "";
-    (function requestStoredOpenaiKey() {
+    // ----- AI Provider · API 키 · 검수/반영 -----
+    var AI_PROVIDER_MODELS = {
+      openai: [
+        { value: "gpt-4o", label: "gpt-4o" },
+        { value: "gpt-4o-mini", label: "gpt-4o-mini" }
+      ],
+      gemini: [
+        { value: "gemini-2.5-flash", label: "gemini-2.5-flash" },
+        { value: "gemini-2.5-flash-lite", label: "gemini-2.5-flash-lite" }
+      ]
+    };
+    var AI_PROVIDER_PLACEHOLDERS = {
+      openai: "OpenAI API 키",
+      gemini: "Gemini API 키"
+    };
+    var AI_PROVIDER_STORAGE_KEYS = {
+      openai: "ap_openai_api_key",
+      gemini: "ap_gemini_api_key"
+    };
+    var cachedApiKeys = { openai: "", gemini: "" };
+
+    function safeLocalStorageGet(key) {
+      try {
+        return window.localStorage ? window.localStorage.getItem(key) || "" : "";
+      } catch (e) {
+        return "";
+      }
+    }
+
+    function safeLocalStorageSet(key, value) {
+      try {
+        if (window.localStorage) window.localStorage.setItem(key, String(value || ""));
+      } catch (e) { }
+    }
+
+    function getAiProvider() {
+      var providerEl = $("#aiProvider");
+      var v = providerEl && providerEl.value ? String(providerEl.value) : "openai";
+      return AI_PROVIDER_MODELS[v] ? v : "openai";
+    }
+
+    function getCachedApiKey(provider) {
+      provider = provider || getAiProvider();
+      return cachedApiKeys[provider] || "";
+    }
+
+    function setCachedApiKey(provider, value) {
+      provider = provider || getAiProvider();
+      cachedApiKeys[provider] = String(value || "").trim();
+      var storageKey = AI_PROVIDER_STORAGE_KEYS[provider];
+      if (storageKey) safeLocalStorageSet(storageKey, cachedApiKeys[provider]);
+    }
+
+    function getApiKeyInputValue() {
+      var keyEl = $("#apiKey");
+      return keyEl ? String(keyEl.value || "").trim() : "";
+    }
+
+    function syncApiKeyInputFromProvider() {
+      var provider = getAiProvider();
+      var keyEl = $("#apiKey");
+      if (!keyEl) return;
+      keyEl.placeholder = AI_PROVIDER_PLACEHOLDERS[provider] || "API 키";
+      keyEl.value = getCachedApiKey(provider);
+    }
+
+    function renderAiModelOptions() {
+      var provider = getAiProvider();
+      var modelEl = $("#aiModel");
+      if (!modelEl) return;
+      var prev = modelEl.value;
+      var list = AI_PROVIDER_MODELS[provider] || [];
+      modelEl.innerHTML = list.map(function (item, idx) {
+        var selected = prev ? item.value === prev : idx === 0;
+        return '<option value="' + escapeHtml(item.value) + '"' + (selected ? ' selected' : '') + '>' + escapeHtml(item.label) + '</option>';
+      }).join("");
+      if (!modelEl.value && list[0]) modelEl.value = list[0].value;
+    }
+
+    function saveCurrentProviderKey() {
+      var provider = getAiProvider();
+      var v = getApiKeyInputValue();
+      setCachedApiKey(provider, v);
+      if (provider === "openai") {
+        parent.postMessage(
+          { pluginMessage: { type: "SAVE_OPENAI_KEY", key: v } },
+          "*"
+        );
+      } else if (provider === "gemini") {
+        parent.postMessage(
+          { pluginMessage: { type: "SAVE_GEMINI_KEY", key: v } },
+          "*"
+        );
+      }
+    }
+
+    (function bootstrapAiProviderUi() {
+      cachedApiKeys.openai = safeLocalStorageGet(AI_PROVIDER_STORAGE_KEYS.openai);
+      cachedApiKeys.gemini = safeLocalStorageGet(AI_PROVIDER_STORAGE_KEYS.gemini);
+
+      var providerEl = $("#aiProvider");
+      var keyEl = $("#apiKey");
+
+      if (providerEl) {
+        providerEl.addEventListener("change", function () {
+          renderAiModelOptions();
+          syncApiKeyInputFromProvider();
+          setAiStatus("");
+        });
+      }
+      if (keyEl) {
+        keyEl.addEventListener("blur", saveCurrentProviderKey);
+      }
+
+      renderAiModelOptions();
+      syncApiKeyInputFromProvider();
       parent.postMessage({ pluginMessage: { type: "LOAD_OPENAI_KEY" } }, "*");
+      parent.postMessage({ pluginMessage: { type: "LOAD_GEMINI_KEY" } }, "*");
     })();
 
     window.__apLastAuditAltProposals = null;
@@ -2181,18 +2318,6 @@
     /** 분석 직후 스냅샷(반영 시 alt·헤딩 가이드 정합용). 반영 후에도 유지. */
     window.__apLastAnalysisReport = null;
     window.__apLastAnalysisImgCount = null;
-
-    var openaiKeyEl = $("#openaiKey");
-    if (openaiKeyEl) {
-      openaiKeyEl.addEventListener("blur", function () {
-        var v = String(this.value || "").trim();
-        cachedOpenaiKey = v;
-        parent.postMessage(
-          { pluginMessage: { type: "SAVE_OPENAI_KEY", key: v } },
-          "*"
-        );
-      });
-    }
 
     // ----- 공통 유틸 -----
     function getCodeEl() {
@@ -2357,19 +2482,25 @@
       return true;
     }
 
-    function ensureOpenAiKeyExists() {
-      var key = (openaiKeyEl && String(openaiKeyEl.value || "").trim()) || cachedOpenaiKey;
+    function ensureApiKeyExists() {
+      var provider = getAiProvider();
+      var label = provider === "gemini" ? "Gemini" : "OpenAI";
+      var key = getApiKeyInputValue() || getCachedApiKey(provider);
       if (!key) {
-        alert("OpenAI API 키를 입력한 뒤 포커스를 벗어나 저장하거나, 키를 입력하세요.");
+        alert(label + " API 키를 입력한 뒤 다시 시도하세요.");
         return "";
       }
-      cachedOpenaiKey = key;
+      setCachedApiKey(provider, key);
       return key;
     }
 
     function getAiModel() {
+      var provider = getAiProvider();
       var modelEl = $("#aiModel");
-      return (modelEl && modelEl.value) || "gpt-4o";
+      var current = (modelEl && modelEl.value) || "";
+      if (current) return current;
+      var list = AI_PROVIDER_MODELS[provider] || [];
+      return list[0] ? list[0].value : (provider === "gemini" ? "gemini-2.5-flash" : "gpt-4o");
     }
 
     function parseAuditDocument(htmlCode) {
@@ -2859,16 +2990,96 @@
       });
     }
 
+    function dataUrlToGeminiInlineData(dataUrl) {
+      var m = String(dataUrl || "").match(/^data:([^;]+);base64,(.+)$/);
+      if (!m) return null;
+      return { mime_type: m[1] || "image/jpeg", data: m[2] || "" };
+    }
+
+    function convertVisionAppendForGemini(visionAppend) {
+      if (!visionAppend || !visionAppend.length) return null;
+      var out = [];
+      for (var i = 0; i < visionAppend.length; i++) {
+        var part = visionAppend[i];
+        if (!part) continue;
+        if (part.type === "text") {
+          out.push({ text: String(part.text || "") });
+        } else if (part.type === "image_url") {
+          var url = part.image_url && part.image_url.url ? String(part.image_url.url) : "";
+          var inlineData = dataUrlToGeminiInlineData(url);
+          if (inlineData) out.push({ inline_data: inlineData });
+        }
+      }
+      return out.length ? out : null;
+    }
+
+    function extractJsonFromText(text) {
+      var s = String(text || "").trim();
+      if (!s) throw new Error("empty");
+      try {
+        return JSON.parse(s);
+      } catch (e) {
+        var start = s.indexOf("{");
+        var end = s.lastIndexOf("}");
+        if (start !== -1 && end !== -1 && end > start) {
+          return JSON.parse(s.slice(start, end + 1));
+        }
+        throw e;
+      }
+    }
+
     /**
-     * @param {string|null|undefined} visionAppend - OpenAI user.content에 이어 붙일 파트 배열 (text+image_url)
+     * @param {string|null|undefined} visionAppend - OpenAI 형식 파트 배열(text+image_url). Gemini 호출 시 자동 변환.
      */
-    function runOpenAiJsonApi(htmlCode, systemContent, userPrefix, userSuffix, visionAppend) {
+    function runAiJsonApi(htmlCode, systemContent, userPrefix, userSuffix, visionAppend) {
       userSuffix = userSuffix || "";
-      var key = (openaiKeyEl && String(openaiKeyEl.value || "").trim()) || cachedOpenaiKey;
-      if (!key) return Promise.reject(new Error("OpenAI API 키가 필요합니다."));
+      var provider = getAiProvider();
+      var model = getAiModel();
+      var key = getApiKeyInputValue() || getCachedApiKey(provider);
+      if (!key) return Promise.reject(new Error((provider === "gemini" ? "Gemini" : "OpenAI") + " API 키가 필요합니다."));
+      setCachedApiKey(provider, key);
+
       var snippet =
         htmlCode.length > 120000 ? htmlCode.slice(0, 120000) + "\n/* truncated */" : htmlCode;
       var textBody = userPrefix + snippet + userSuffix;
+
+      if (provider === "gemini") {
+        var geminiParts = [{ text: systemContent + "\n\n" + textBody }];
+        var extraParts = convertVisionAppendForGemini(visionAppend);
+        if (extraParts && extraParts.length) geminiParts = geminiParts.concat(extraParts);
+        return fetch(
+          "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(key),
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ role: "user", parts: geminiParts }],
+              generationConfig: {
+                temperature: 0,
+                maxOutputTokens: 8192,
+                responseMimeType: "application/json"
+              }
+            })
+          }
+        )
+          .then(function (res) {
+            return res.json().then(function (data) {
+              return { res: res, data: data };
+            });
+          })
+          .then(function (_ref) {
+            var res = _ref.res, data = _ref.data;
+            if (!res.ok) throw new Error((data.error && data.error.message) || res.statusText);
+            var text = "";
+            var cand = data.candidates && data.candidates[0];
+            var parts = cand && cand.content && cand.content.parts ? cand.content.parts : [];
+            for (var i = 0; i < parts.length; i++) {
+              if (parts[i] && parts[i].text) text += String(parts[i].text);
+            }
+            return extractJsonFromText(text);
+          });
+      }
+
       var userContent =
         visionAppend && visionAppend.length
           ? [{ type: "text", text: textBody }].concat(visionAppend)
@@ -2877,7 +3088,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
         body: JSON.stringify({
-          model: getAiModel(),
+          model: model,
           messages: [
             { role: "system", content: systemContent },
             { role: "user", content: userContent }
@@ -2897,17 +3108,16 @@
           if (!res.ok) throw new Error((data.error && data.error.message) || res.statusText);
           var text =
             data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-          if (!text) throw new Error("empty");
-          return JSON.parse(String(text).trim());
+          return extractJsonFromText(text);
         });
     }
 
-    function runOpenAiAnalysisApi(htmlCode, visionAppend) {
+    function runAiAnalysisApi(htmlCode, visionAppend) {
       var sys = expandApPlaceholders(AP_AI_ANALYSIS_SYSTEM_PROMPT_TEMPLATE, htmlCode);
       if (visionAppend && visionAppend.length) {
         sys += AP_AI_ANALYSIS_VISION_SYSTEM_APPEND;
       }
-      return runOpenAiJsonApi(
+      return runAiJsonApi(
         htmlCode,
         sys,
         AP_AI_ANALYSIS_USER_PROMPT_PREFIX,
@@ -2916,11 +3126,11 @@
       );
     }
 
-    function runOpenAiApplyApi(htmlCode, auditForHeading) {
+    function runAiApplyApi(htmlCode, auditForHeading) {
       var headingPayload = buildApplyAuditHeadingPayload(auditForHeading);
       var userSuffix =
         headingPayload && AP_AI_APPLY_USER_HEADING_AUDIT_SUFFIX_PREFIX + headingPayload;
-      return runOpenAiJsonApi(
+      return runAiJsonApi(
         htmlCode,
         buildApApplySystemPrompt(htmlCode, { auditHeadingContext: !!headingPayload }),
         AP_AI_APPLY_USER_PROMPT_PREFIX,
@@ -3220,12 +3430,13 @@
         return n >= 2 ? " ap-audit-result-grid--cols2" : "";
       }
 
-      function simpleList(title, arr) {
+      function simpleList(title, arr, wrapMargin) {
         arr = Array.isArray(arr) ? arr : [];
         if (!arr.length) return "";
+        var wrap = wrapMargin != null ? wrapMargin : "margin:0 0 12px 0;";
         var gridCls = "ap-audit-result-grid" + auditResultGridClass(arr.length);
         return (
-          '<div style="margin:0 0 12px 0;">' +
+          '<div style="' + wrap + '">' +
           '<strong style="display:block;margin-bottom:6px;color:#1565c0;">' + esc(title) + '</strong>' +
           '<ul class="' + gridCls + '" style="list-style:none;margin:0;padding:0;">' +
           arr.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") +
@@ -3261,13 +3472,20 @@
         );
       }
 
-      function summaryBlock(summary) {
+      function summaryBlock(summary, applyNotes) {
         summary = summary || {};
-        if (!summary.oneLine && summary.score == null && !summary.overall) return "";
+        applyNotes = Array.isArray(applyNotes) ? applyNotes.filter(Boolean) : [];
+        if (!summary.oneLine && summary.score == null && !summary.overall && !applyNotes.length) return "";
         var overall = String(summary.overall || "warn");
         var badgeStyle = "background:#fff7e6;color:#b7791f;border:1px solid #f6d28b;";
         if (overall === "pass") badgeStyle = "background:#edfdf3;color:#1c6b3b;border:1px solid #b7e4c7;";
         else if (overall === "fail") badgeStyle = "background:#fde8e8;color:#c53030;border:1px solid #feb2b2;";
+        var memoBlock =
+          applyNotes.length === 0
+            ? ""
+            : '<div style="margin-top:10px;padding-top:10px;border-top:1px solid #e8edf2;">' +
+              simpleList("반영 메모", applyNotes, "margin:0;") +
+              "</div>";
         return (
           '<div class="ap-diff-block" style="background:#fff;">' +
           "<strong>종합 결과</strong>" +
@@ -3276,6 +3494,7 @@
           (summary.score != null ? '<span style="font-size:11px;color:#334;">score: <b>' + esc(summary.score) + "</b></span>" : "") +
           "</div>" +
           (summary.oneLine ? '<div style="font-size:11px;line-height:1.5;color:#223;">' + esc(summary.oneLine) + "</div>" : "") +
+          memoBlock +
           "</div>"
         );
       }
@@ -3546,13 +3765,12 @@
             issueList("시멘틱 마크업 이슈", semantics.issues) +
             simpleList("시멘틱 마크업 제안", semantics.suggestions) +
             issueList("Heading 구조 이슈", headingAudit.issues)
-          : "") +
-        simpleList("반영 메모", Array.isArray(obj.applyNotes) ? obj.applyNotes : []);
+          : "");
 
       return (
         clientWarnBlock +
         visionDiagBlock +
-        summaryBlock(summary) +
+        summaryBlock(summary, obj.applyNotes) +
         applyDiff +
         seoExtractabilityBlock(seoExtractabilityVal) +
         seoContentRolesTable(seoContentRolesRows) +
@@ -3572,7 +3790,7 @@
     }
 
     function runAiAudit() {
-      if (!ensureOpenAiKeyExists()) return;
+      if (!ensureApiKeyExists()) return;
       if (!ensureCodeExists()) return;
       var code = getCodeValue();
       var codeForAudit = extractCmsPartForAudit(code);
@@ -3619,7 +3837,7 @@
           } else if (useVision && (!visionAppend || nThumb === 0)) {
             setAiStatus("검수 리포트 생성 중(썸네일 없음 또는 일부만 · 상세는 리포트 알림)…");
           }
-          return runOpenAiAnalysisApi(codeForAudit, visionAppend).then(function (obj) {
+          return runAiAnalysisApi(codeForAudit, visionAppend).then(function (obj) {
             obj._apClientWarnings = preWarnings.slice();
             obj._apVisionDiagnostics = pack && pack.diagnostics ? pack.diagnostics : null;
             normalizeImgAltAudit(codeForAudit, obj);
@@ -3655,7 +3873,7 @@
     var btnApplyAlt = $("#btnApplyAltProposals");
     if (btnApplyAlt) {
       btnApplyAlt.onclick = function () {
-        if (!ensureOpenAiKeyExists()) return;
+        if (!ensureApiKeyExists()) return;
         if (!ensureCodeExists()) return;
         var code = getCodeValue();
         var codeForApplyApi = extractCmsPartForAudit(code);
@@ -3665,7 +3883,7 @@
         setAiButtonsBusy(true);
         setAiStatus("반영 중 · 헤딩 패치 · alt (직전 분석과 동일 규칙)…");
         var auditSnap = window.__apLastAnalysisReport;
-        runOpenAiApplyApi(codeForApplyApi, auditSnap)
+        runAiApplyApi(codeForApplyApi, auditSnap)
           .then(function (obj) {
             var code0 = code;
             if (!Array.isArray(obj.altProposals)) obj.altProposals = [];

@@ -6,6 +6,10 @@
     "ui": "ui.html",
     "editorType": ["figma"],
     "networkAccess": {
-        "allowedDomains": ["https://api.openai.com", "https://cdnjs.cloudflare.com"]
+      "allowedDomains": [
+        "https://api.openai.com",
+        "https://generativelanguage.googleapis.com",
+        "https://cdnjs.cloudflare.com"
+      ]
     }
-}
+  }

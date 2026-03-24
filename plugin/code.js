@@ -4880,4 +4880,29 @@ figma.ui.onmessage = function (msg) {
             })
         return
     }
+
+    if (msg.type === "LOAD_GEMINI_KEY") {
+        figma.clientStorage
+            .getAsync("gemini_key")
+            .then(function (v) {
+                figma.ui.postMessage({type: "GEMINI_KEY_LOADED", key: v != null ? String(v) : ""})
+            })
+            .catch(function () {
+                figma.ui.postMessage({type: "GEMINI_KEY_LOADED", key: ""})
+            })
+        return
+    }
+
+    if (msg.type === "SAVE_GEMINI_KEY") {
+        var geminiKeyToSave = msg.key != null ? String(msg.key) : ""
+        figma.clientStorage
+            .setAsync("gemini_key", geminiKeyToSave)
+            .then(function () {
+                figma.ui.postMessage({type: "GEMINI_KEY_SAVED"})
+            })
+            .catch(function (e) {
+                figma.ui.postMessage({type: "GEMINI_KEY_ERROR", message: String(e)})
+            })
+        return
+    }
 }
