@@ -94,6 +94,212 @@ function getSlideItems(sectionNode) {
     if (isSlideNode(sectionNode)) return {items: children, parent: sectionNode}
     return null
 }
+/** Swiper에 올라가는 슬라이드 아이템 노드 목록 (PC·MO 동일 순서) */
+function collectSwiperSlideItemNodes(sectionNode, bgChildId) {
+    var slideData = getSlideItems(sectionNode)
+    if (!slideData) return []
+    var out = []
+    for (var i = 0; i < (slideData.items || []).length; i++) {
+        var it = slideData.items[i]
+        if (!it) continue
+        if (bgChildId && it.id === bgChildId) continue
+        if (!isVisible(it)) continue
+        out.push(it)
+    }
+    return out
+}
+/** 슬라이드 아이템 높이 중 최댓값(px, r2). 없으면 0 */
+function maxSwiperSlideItemHeightPx(sectionNode, bgChildId) {
+    var nodes = collectSwiperSlideItemNodes(sectionNode, bgChildId)
+    var maxH = 0
+    for (var i = 0; i < nodes.length; i++) {
+        var b = getAbs(nodes[i])
+        if (b && b.h != null) maxH = Math.max(maxH, b.h)
+    }
+    return maxH
+}
+/**
+ * @media용: PC에 slide 구조가 있으나 MO 루트에 `slide` 이름이 없을 때(구조만 대응)에도
+ * 보이는 자식 인덱스로 짝지어 슬라이드 아이템 박스 높이 최댓값을 구함.
+ */
+function maxSwiperSlideItemHeightPxMo(dSec, mSec, bgChildId) {
+    if (!getSlideItems(dSec) || !mSec) return 0
+    if (getSlideItems(mSec)) return maxSwiperSlideItemHeightPx(mSec, bgChildId)
+    var dData = getSlideItems(dSec)
+    var dItems = collectSwiperSlideItemNodes(dSec, bgChildId)
+    if (!dItems.length) return 0
+    var dSecKids = (dSec.children || []).filter(function (c) {
+        return c && isVisible(c)
+    })
+    var mSecKids = (mSec.children || []).filter(function (c) {
+        return c && isVisible(c)
+    })
+    var maxH = 0
+    if (dData.parent && dData.parent !== dSec) {
+        var pidx = -1
+        for (var i = 0; i < dSecKids.length; i++) {
+            if (dSecKids[i].id === dData.parent.id) {
+                pidx = i
+                break
+            }
+        }
+        if (pidx >= 0 && pidx < mSecKids.length) {
+            var mParent = mSecKids[pidx]
+            var mCh = (mParent.children || []).filter(function (c) {
+                return c && isVisible(c)
+            })
+            for (var j = 0; j < dItems.length && j < mCh.length; j++) {
+                var b = getAbs(mCh[j])
+                if (b && b.h != null) maxH = Math.max(maxH, b.h)
+            }
+        }
+    } else {
+        for (var k = 0; k < dItems.length; k++) {
+            var dIt = dItems[k]
+            var found = -1
+            for (var i2 = 0; i2 < dSecKids.length; i2++) {
+                if (dSecKids[i2].id === dIt.id) {
+                    found = i2
+                    break
+                }
+            }
+            if (found >= 0 && found < mSecKids.length) {
+                var b2 = getAbs(mSecKids[found])
+                if (b2 && b2.h != null) maxH = Math.max(maxH, b2.h)
+            }
+        }
+    }
+    return maxH
+}
+
+/** 숫자 범위 제한 */
+function clamp(n, min, max) {
+    n = Number(n)
+    if (!isFinite(n)) n = min
+    return Math.min(max, Math.max(min, n))
+}
+
+/** 슬라이드 부모의 가로폭 */
+function getSlideViewportWidth(sectionNode, bgChildId) {
+    var slideData = getSlideItems(sectionNode)
+    if (!slideData) return 0
+
+    var target = slideData.parent || sectionNode
+    var box = getAbs(target)
+    if (!box || box.w == null) return 0
+
+    // 섹션 전체가 slide 부모인 경우, 실제 슬라이드 아이템들 범위 기준으로 한번 더 보정
+    var items = collectSwiperSlideItemNodes(sectionNode, bgChildId)
+    if (!items.length) return r2(box.w)
+
+    var minX = null
+    var maxX = null
+    for (var i = 0; i < items.length; i++) {
+        var b = getAbs(items[i])
+        if (!b || b.x == null || b.w == null) continue
+        if (minX == null || b.x < minX) minX = b.x
+        if (maxX == null || (b.x + b.w) > maxX) maxX = b.x + b.w
+    }
+
+    if (minX != null && maxX != null) {
+        var itemsSpan = r2(maxX - minX)
+        if (itemsSpan > 0) return Math.min(r2(box.w), itemsSpan)
+    }
+
+    return r2(box.w)
+}
+
+/** 슬라이드 pitch(= item width + gap) 추정 */
+function getSlideItemPitch(items) {
+    if (!items || !items.length) return 0
+    if (items.length === 1) {
+        var onlyBox = getAbs(items[0])
+        return onlyBox && onlyBox.w != null ? r2(onlyBox.w) : 0
+    }
+
+    var pairs = []
+    for (var i = 0; i < items.length - 1; i++) {
+        var a = getAbs(items[i])
+        var b = getAbs(items[i + 1])
+        if (!a || !b || a.x == null || b.x == null) continue
+        var dx = r2(b.x - a.x)
+        if (dx > 0) pairs.push(dx)
+    }
+
+    if (pairs.length) {
+        pairs.sort(function (x, y) {
+            return x - y
+        })
+        return r2(pairs[Math.floor(pairs.length / 2)])
+    }
+
+    var firstBox = getAbs(items[0])
+    return firstBox && firstBox.w != null ? r2(firstBox.w) : 0
+}
+
+/** slidesPerView 계산 */
+function computeSlidesPerView(sectionNode, bgChildId, fallbackValue) {
+    var items = collectSwiperSlideItemNodes(sectionNode, bgChildId)
+    if (!items.length) return fallbackValue != null ? fallbackValue : 1
+
+    var viewportW = getSlideViewportWidth(sectionNode, bgChildId)
+    var pitch = getSlideItemPitch(items)
+    if (!(viewportW > 0) || !(pitch > 0)) return fallbackValue != null ? fallbackValue : 1
+
+    var raw = viewportW / pitch
+
+    // 너무 이상한 값 방지
+    raw = clamp(raw, 1, items.length)
+
+    // 정수에 가까우면 정수로, 아니면 소수 2자리
+    var rounded = Math.round(raw)
+    if (Math.abs(raw - rounded) < 0.15) return rounded
+
+    return r2(raw)
+}
+
+/** PC 섹션 기준으로 MO 섹션 매칭 후 slidesPerView 계산 */
+function computeSlidesPerViewMo(dSec, mSec, bgChildId, fallbackValue) {
+    if (!dSec) return fallbackValue != null ? fallbackValue : 1
+    if (mSec && getSlideItems(mSec)) {
+        return computeSlidesPerView(mSec, bgChildId, fallbackValue)
+    }
+
+    // MO에 slide 이름이 없더라도 구조만 대응되는 경우 index 기반으로 추정
+    var dItems = collectSwiperSlideItemNodes(dSec, bgChildId)
+    if (!dItems.length || !mSec) return fallbackValue != null ? fallbackValue : computeSlidesPerView(dSec, bgChildId, 1)
+
+    var mKids = (mSec.children || []).filter(function (c) {
+        return c && isVisible(c)
+    })
+
+    if (!mKids.length) return fallbackValue != null ? fallbackValue : computeSlidesPerView(dSec, bgChildId, 1)
+
+    var first = getAbs(mKids[0])
+    var second = mKids.length > 1 ? getAbs(mKids[1]) : null
+    var viewportW = getAbs(mSec)
+    if (!viewportW || viewportW.w == null) {
+        return fallbackValue != null ? fallbackValue : computeSlidesPerView(dSec, bgChildId, 1)
+    }
+
+    var pitch = 0
+    if (first && second && first.x != null && second.x != null) {
+        pitch = r2(second.x - first.x)
+    } else if (first && first.w != null) {
+        pitch = r2(first.w)
+    }
+
+    if (!(pitch > 0)) return fallbackValue != null ? fallbackValue : 1
+
+    var raw = viewportW.w / pitch
+    raw = clamp(raw, 1, mKids.length || dItems.length || 1)
+
+    var rounded = Math.round(raw)
+    if (Math.abs(raw - rounded) < 0.15) return rounded
+
+    return r2(raw)
+}
+
 /** LINE 노드 또는 레이어명 "line"인 벡터 → ap-line 처리 */
 function isLineLikeNode(node) {
     if (!node) return false
@@ -196,6 +402,138 @@ function textToHtmlWithBreaks(s) {
     var t = String(s).replace(/\u2028/g, "\n").replace(/\u2029/g, "\n")
     return t.split(/\r?\n/).map(escapeHtml).join("<br>")
 }
+/** PC/MO 반응형 줄바꿈: LS/PS·CR 정규화 (본문 flat 비교용) */
+function normalizeTextNewlinesForResponsive(s) {
+    if (s == null) return ""
+    return String(s).replace(/\u2028/g, "\n").replace(/\u2029/g, "\n").replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+}
+function textFlatForResponsiveCompare(s) {
+    return normalizeTextNewlinesForResponsive(s).replace(/\n/g, "")
+}
+function newlineGapsForResponsive(norm) {
+    var gaps = []
+    var flatParts = []
+    var run = 0
+    for (var i = 0; i < norm.length; i++) {
+        var ch = norm.charAt(i)
+        if (ch === "\n") run++
+        else {
+            gaps.push(run)
+            run = 0
+            flatParts.push(ch)
+        }
+    }
+    gaps.push(run)
+    return { flat: flatParts.join(""), gaps: gaps }
+}
+function appendResponsiveBrSlotHtml(pcRun, moRun) {
+    var mx = Math.max(pcRun, moRun)
+    var buf = ""
+    for (var slot = 1; slot <= mx; slot++) {
+        var inPc = slot <= pcRun
+        var inMo = slot <= moRun
+        if (inPc && inMo) buf += "<br>"
+        else if (inPc) buf += '<br class="pc-only">'
+        else buf += '<br class="mo-only">'
+    }
+    return buf
+}
+/**
+ * PC·MO 문자열이 개행(횟수)만 다를 때 inner HTML. 가시 문자열이 다르면 null → 호출부에서 PC만 textToHtmlWithBreaks.
+ */
+function buildResponsiveBrInnerFromPcMoChars(pcText, moText) {
+    var pcN = normalizeTextNewlinesForResponsive(pcText)
+    var moN = normalizeTextNewlinesForResponsive(moText)
+    if (textFlatForResponsiveCompare(pcN).toLowerCase() !== textFlatForResponsiveCompare(moN).toLowerCase()) return null
+    var pcG = newlineGapsForResponsive(pcN)
+    var moG = newlineGapsForResponsive(moN)
+    var flat = pcG.flat
+    var out = ""
+    for (var gi = 0; gi <= flat.length; gi++) {
+        var k = pcG.gaps[gi] || 0
+        var j = moG.gaps[gi] || 0
+        out += appendResponsiveBrSlotHtml(k, j)
+        if (gi < flat.length) out += escapeHtml(flat.charAt(gi))
+    }
+    return out
+}
+/**
+ * 하이브리드(PC+MO 루트 선택) 시: PC 코드 생성 직전에 호출.
+ * 섹션·가시 자식 1:1 walk + 레이어 이름이 있으면 MO 문자열 우선(이름 대소문자 무시 보조).
+ * 데스크톱 TEXT 노드 id → 반응형 줄바꿈 inner HTML.
+ */
+function textSummaryAllowsResponsiveBrOverride(ts) {
+    if (!ts) return true
+    var parts = ts.parts
+    if (!parts || parts.length === 0) return true
+    if (parts.length !== 1) return false
+    var text = ts.text || ""
+    var tlen = text.length
+    if (tlen === 0) return true
+    var p = parts[0]
+    var from = Math.max(0, Math.min(tlen, Number(p.start) || 0))
+    var to = Math.max(0, Math.min(tlen, Number(p.end) || 0))
+    return from <= 0 && to >= tlen
+}
+function moTextNodeFromNameMap(byNameMo, layerName) {
+    var key = String(layerName || "").trim()
+    if (!key || !byNameMo) return null
+    if (byNameMo[key]) return byNameMo[key]
+    var low = key.toLowerCase()
+    for (var k in byNameMo) {
+        if (Object.prototype.hasOwnProperty.call(byNameMo, k) && String(k).toLowerCase() === low) return byNameMo[k]
+    }
+    return null
+}
+function buildResponsiveTextInnerByNodeIdMap(desktopRoot, mobileRoot) {
+    var map = {}
+    if (!isContainer(desktopRoot) || !isContainer(mobileRoot)) return map
+    var byNameMo = {}
+    try {
+        byNameMo = collectTextNodesByName(mobileRoot)
+    } catch (e) {
+        byNameMo = {}
+    }
+    function walkPair(dNode, mNode) {
+        var dKids = (dNode.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        var mKids = (mNode.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        for (var i = 0; i < dKids.length && i < mKids.length; i++) {
+            var d = dKids[i]
+            var m = mKids[i]
+            if (d.type !== m.type) continue
+            if (!d.id) {
+                if (d.type === "FRAME" && isContainer(d)) walkPair(d, m)
+                continue
+            }
+            if (d.type === "TEXT" && m.type === "TEXT") {
+                var pcStr = d.characters != null ? String(d.characters) : ""
+                var moStr = m.characters != null ? String(m.characters) : ""
+                var key = String(d.name || "").trim()
+                var mnByName = moTextNodeFromNameMap(byNameMo, key)
+                if (mnByName) {
+                    moStr = mnByName.characters != null ? String(mnByName.characters) : ""
+                }
+                var inner = buildResponsiveBrInnerFromPcMoChars(pcStr, moStr)
+                if (inner != null) map[String(d.id)] = inner
+            }
+            if (d.type === "FRAME" && isContainer(d)) walkPair(d, m)
+        }
+    }
+    var dSecs = getSectionNodes(desktopRoot)
+    var mSecs = getSectionNodes(mobileRoot)
+    for (var s = 0; s < dSecs.length; s++) {
+        if (s >= mSecs.length) break
+        var dSec = dSecs[s]
+        var mSec = mSecs[s]
+        if (!dSec || !mSec || dSec.type !== mSec.type) continue
+        walkPair(dSec, mSec)
+    }
+    return map
+}
 /** mixed 텍스트: parts 있으면 ap-text__part span으로 출력 (--ap-fs, --ap-fw, --ap-clr, --ap-ls 로 부모 변수 오버라이드). 모든 part가 동일한 값이면 부모 style로만 출력 */
 function buildTextPartInnerHtml(ts) {
     if (!ts) return ""
@@ -252,7 +590,7 @@ function buildTextPartInnerHtml(ts) {
         if (partLs[i] != null && partLs[i] !== commonLs) vars.push(partLs[i])
         var leadingBr = ""
         if (vars.length > 0) {
-            var brMatch = escaped.match(/^(\s*<br\s*\/?>\s*)+/i)
+            var brMatch = escaped.match(/^(\s*<br[^>]*>\s*)+/i)
             if (brMatch) {
                 leadingBr = brMatch[0]
                 escaped = escaped.slice(brMatch[0].length)
@@ -1254,14 +1592,6 @@ function hasTextInSubtree(node) {
 function nodeSel(id) {
     return id ? "." + nodeUniqueClass(String(id)) : ".ap-missing"
 }
-function textSel(id) { return nodeSel(id) }
-function frameSel(id) { return nodeSel(id) }
-function imageSel(id) { return nodeSel(id) }
-function imageImgSel(id) { return nodeSel(id) + " > img" }
-function videoSel(id) { return nodeSel(id) }
-function lineSel(id) { return nodeSel(id) }
-function ellipseSel(id) { return nodeSel(id) }
-function layerSel(id) { return nodeSel(id) }
 
 /** 리프·자식 노드 지연 스타일용 inner selector */
 function getLeafSelectorForNode(ch, opts) {
@@ -3082,32 +3412,12 @@ function resolveDesktopMobile(sel) {
     return {desktopRoot: b, mobileRoot: a, breakpoint: r2(wa) || 750}
 }
 
-/** 선택한 ROOT 프레임 전체 = HTML `<section>` 1개. 직계 자식마다 섹션을 나누면 배경 전용 레이어가 빈 ap-section--01, 본문이 --02로 갈라지는 등 루트 레이아웃이 깨짐. (여러 장별 HTML 섹션이 필요하면 파일/페이지를 나눠 ROOT를 각각 선택) */
-/** 선택 ROOT의 보이는 직계 자식 각각 = HTML `<section>` 하나(ap-section--01..). (한 장만 있으면 섹션 1개 — 직계 자식이 곧 섹션 노드이지, 선택 프레임 전체를 한 블록으로 합치지 않음) */
+/** 선택 ROOT의 보이는 직계 자식 각각 = `<section>`(ap-section--01..). 직계 자식마다 섹션을 쪼개면 배경-only·본문 분리 등 루트 레이아웃이 깨질 수 있음. */
 function getSectionNodes(root) {
     if (!root || !isContainer(root)) return []
     return (root.children || []).filter(function (c) {
         return c && isVisible(c)
     })
-}
-
-/** PC/MO 루트가 동일한 레이어 순서·구조인지 (visible 자식 기준, 타입·순서만 비교) */
-function isSameLayerStructure(desktopRoot, mobileRoot) {
-    if (!desktopRoot || !mobileRoot) return false
-    var dKids = (desktopRoot.children || []).filter(function (c) {
-        return c && isVisible(c)
-    })
-    var mKids = (mobileRoot.children || []).filter(function (c) {
-        return c && isVisible(c)
-    })
-    if (dKids.length !== mKids.length) return false
-    for (var i = 0; i < dKids.length; i++) {
-        if (dKids[i].type !== mKids[i].type) return false
-        if (isContainer(dKids[i]) && isContainer(mKids[i])) {
-            if (!isSameLayerStructure(dKids[i], mKids[i])) return false
-        }
-    }
-    return true
 }
 
 /** PC HTML 기준 MO 미디어쿼리 오버라이드 (visible 자식 1:1 매칭, diff만 출력) */
@@ -3129,6 +3439,8 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
     lines.push("@media (max-width:" + bp + "px){")
     lines.push("  .ap-post__inner{ --ap-width:" + bp + "; }")
     lines.push("  .ap-video{ width:100%; height:auto; }")
+    lines.push("  .pc-only{ display:none; }")
+    lines.push("  .mo-only{ display:block; }")
 
     if (!isContainer(desktopRoot) || !isContainer(mobileRoot)) {
         lines.push("}")
@@ -3202,6 +3514,10 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                         if (textDecl) declParts.push(textDecl)
                         if (textOverrideDone && d.id != null) textOverrideDone[String(d.id)] = true
                     }
+                    if (isAbsoluteLike(m, mNode)) {
+                        var adTxt = buildAbsDeclDiff(d, dNode, m, mNode)
+                        if (adTxt) declParts.push(adTxt)
+                    }
                 }
             } else {
                 var leafSelRaw = getLeafSelectorForNode(d, moOpts)
@@ -3257,10 +3573,17 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         if (!mSec || dSec.type !== mSec.type) continue
         var secClass = sectionClassPrefix(s + 1)
         var mSecBox = getAbs(mSec)
-        if (getSlideItems(mSec)) {
-            lines.push("  .ap-section--" + secClass + "{ min-height:auto; }")
-        }
-        if (mSecBox && mSecBox.h != null) {
+        // PC 기준 슬라이드 섹션/HTML과 동일 인덱스: MO에선 슬라이드 아이템 높이 최대값으로 --ap-section-h (PC generate와 동일 규칙)
+        if (getSlideItems(dSec)) {
+            var maxMoSlideH = maxSwiperSlideItemHeightPxMo(dSec, mSec, null)
+            if (maxMoSlideH > 0) {
+                lines.push("  .ap-section--" + secClass + "{ --ap-section-h:" + r2(maxMoSlideH) + "; }")
+            } else if (mSecBox && mSecBox.h != null) {
+                lines.push("  .ap-section--" + secClass + "{ --ap-section-h:" + r2(mSecBox.h) + "; }")
+            } else {
+                lines.push("  .ap-section--" + secClass + "{ min-height:auto; }")
+            }
+        } else if (mSecBox && mSecBox.h != null) {
             lines.push("  .ap-section--" + secClass + "{ --ap-section-h:" + r2(mSecBox.h) + "; }")
         }
         if (isFlex(mSec)) {
@@ -3327,7 +3650,17 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                             if (declTrN) lines.push("  .ap-section--" + secCls + " " + deskTxtSel + "{ " + declTrN + " }")
                         } else {
                             var textDecl = buildTextVarsDeclDiff(tsD, tsM)
-                            if (textDecl) lines.push("  .ap-section--" + secCls + " " + deskTxtSel + "{ " + textDecl + " }")
+                            var nameTxtDecls = []
+                            if (textDecl) nameTxtDecls.push(textDecl)
+                            var dParN = dNode.parent
+                            var mParN = mText.parent
+                            if (dParN && mParN && isAbsoluteLike(mText, mParN)) {
+                                var adName = buildAbsDeclDiff(dNode, dParN, mText, mParN)
+                                if (adName) nameTxtDecls.push(adName)
+                            }
+                            if (nameTxtDecls.length) {
+                                lines.push("  .ap-section--" + secCls + " " + deskTxtSel + "{ " + nameTxtDecls.join(";") + " }")
+                            }
                         }
                     }
                 }
@@ -3519,6 +3852,9 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         imageList: [],
         imgCountBySec: {},
     }
+    if (options.mobileRoot && options.phase === "desktop") {
+        cache.responsiveTextInnerByNodeId = buildResponsiveTextInnerByNodeIdMap(root, options.mobileRoot)
+    }
 
     var rootBox = getAbs(root)
     var rootSummary = ["", "  ─── LAYER INSPECT ───", "  ROOT    " + oneLineBase(root)]
@@ -3700,7 +4036,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         .then(function () {
             var dataTree = {rootSummary: rootSummary, sections: sections, legend: legend}
             var text = flattenTree(dataTree)
-            return buildCodeAsync(root, cache, sectionNodes, options.geoStructure || null).then(function (result) {
+            return buildCodeAsync(root, cache, sectionNodes, options.geoStructure || null, options.mobileRoot || null).then(function (result) {
                 var code = result && result.code != null ? result.code : typeof result === "string" ? result : ""
                 var exportedNodeIds = result && result.exportedNodeIds ? result.exportedNodeIds : {}
                 var ownImageNodeIds = result && result.ownImageNodeIds ? result.ownImageNodeIds : {}
@@ -3719,7 +4055,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
 
 // ----- Code Builder (node-id 기반 HTML/CSS 생성) -----
 /** 루트 노드와 캐시로 전체 HTML/CSS 문자열 생성 (섹션별 스타일·article 본문) */
-function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
+function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot) {
     var codeLines = []
     var deferredStyles = []
     var exportedNodeIds = {}
@@ -3796,6 +4132,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
     codeLines.push("  color:var(--ap-clr);")
     codeLines.push("}")
     codeLines.push("")
+    codeLines.push(".pc-only{ display:block; }")
+    codeLines.push(".mo-only{ display:none; }")
+    codeLines.push("")
 
     // image: 인라인은 --ap-w로 크기, absolute는 wrapper 크기에 맞춤(중복 제거)
     codeLines.push(".ap-image img {")
@@ -3869,6 +4208,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
     function buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth) {
         var partResult = buildTextPartInnerHtml(ts)
         var innerHtml = typeof partResult === "string" ? partResult : partResult.inner
+        var rid = node.id != null ? String(node.id) : ""
+        var resp
+        if (rid && cache.responsiveTextInnerByNodeId && textSummaryAllowsResponsiveBrOverride(ts)) {
+            resp = cache.responsiveTextInnerByNodeId[rid]
+        }
+        if (resp !== undefined && resp !== null) innerHtml = resp
         var tag = textNodeTag(node, textCls, dataIdAttr, depth)
         var html = indent(depth) + tag.open + innerHtml + tag.close
         return isBtnNode(node) ? html : wrapIfBtn(node, html, depth)
@@ -4372,13 +4717,16 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
             var sectionRenderOpts = {
                 includeHidden: true,
                 sectionSemantics: sectionSemantics,
+                mobileRoot: mobileRoot || null,
             }
             var sectionDeclParts = []
 
-            // 섹션 높이: 슬라이드 섹션은 min-height auto, 그 외는 --ap-section-h로 최소 높이 유지
+            // 섹션 높이: 슬라이드 섹션은 슬라이드 아이템 높이 최댓값 → --ap-section-h, 그 외는 섹션 박스 높이
             var box = getAbs(sectionNode)
             if (getSlideItems(sectionNode)) {
-                sectionDeclParts.push("min-height:auto")
+                var maxPcSlideH = maxSwiperSlideItemHeightPx(sectionNode, bg.bgChildId)
+                if (maxPcSlideH > 0) sectionDeclParts.push("--ap-section-h:" + r2(maxPcSlideH))
+                else sectionDeclParts.push("min-height:auto")
             } else if (box && box.h != null) {
                 sectionDeclParts.push("--ap-section-h:" + box.h)
             }
@@ -4409,19 +4757,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
 
             var slideData = getSlideItems(sectionNode)
             var slideParent = sectionNode
-            var slideItems = []
-            if (slideData) {
-                slideParent = slideData.parent || sectionNode
-                for (var si = 0; si < (slideData.items || []).length; si++) {
-                    var it = slideData.items[si]
-                    if (!it) continue
-                    // slide 아이템 렌더에서도 bg 승격된 노드는 제외
-                    if (bg.bgChildId && it.id === bg.bgChildId) continue
-                    // visible은 슬라이드에서는 includeHidden 유지하되, 보통 visible만 쓰는게 안전
-                    if (!isVisible(it)) continue
-                    slideItems.push(it)
-                }
-            }
+            var slideItems = slideData ? collectSwiperSlideItemNodes(sectionNode, bg.bgChildId) : []
+            if (slideData) slideParent = slideData.parent || sectionNode
 
             function isSlideContainerNodeInSection(child) {
                 if (!slideData || !child) return false
@@ -4511,9 +4848,23 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
 
                 hasSlideSection = true
 
-                var slideCount = slideItems.length;
+                var slideCount = slideItems.length
+                var pcSlidesPerView = computeSlidesPerView(sectionNode, bg.bgChildId, 1)
+                var moSlidesPerView = pcSlidesPerView
 
-                contentLines.push('      <div class="swiper">')
+                if (sectionRenderOpts && sectionRenderOpts.mobileRoot) {
+                    var mobileSections = getSectionNodes(sectionRenderOpts.mobileRoot)
+                    var mobileSectionNode = mobileSections[secNo - 1] || null
+                    moSlidesPerView = computeSlidesPerViewMo(sectionNode, mobileSectionNode, bg.bgChildId, pcSlidesPerView)
+                }
+
+                contentLines.push(
+                    '      <div class="swiper" data-slide-view="' +
+                        escapeHtml(String(pcSlidesPerView)) +
+                        '" data-slide-view-mo="' +
+                        escapeHtml(String(moSlidesPerView)) +
+                        '">',
+                )
                 contentLines.push('        <div class="swiper-wrapper">')
 
                 function renderSlide(idx) {
@@ -4527,7 +4878,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
                     }
 
                     var ch = slideItems[idx]
-                    contentLines.push('          <div class="swiper-slide" style="position:relative">')
+                    contentLines.push('          <div class="swiper-slide">')
 
                     if (!ch) {
                         contentLines.push("          </div>")
@@ -4576,11 +4927,16 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
         if (hasSlideSection) {
             codeLines.push("")
             codeLines.push(".ap-post .swiper {")
-            codeLines.push("  width:100%; height:100%; min-height:200px;")
+            codeLines.push("  width:100%; min-width:0; flex:1 1 auto; align-self:stretch;")
+            codeLines.push("  height:100%; min-height:200px;")
             codeLines.push("  --swiper-navigation-color:#000;")
             codeLines.push("  --swiper-theme-color:#000;")
             codeLines.push("  --swiper-pagination-bullet-size:8px;")
             codeLines.push("}")
+            codeLines.push(".ap-post .ap-section.ap-flex > .swiper { width:100%; }")
+            codeLines.push(
+                ".ap-post .swiper .swiper-slide { min-height:calc(var(--ap-section-h, 400) / var(--ap-width) * 100cqi); height:auto; box-sizing:border-box; }",
+            )
             codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after { content:none; }")
             codeLines.push(".ap-post .swiper-button-prev,")
             codeLines.push(".ap-post .swiper-button-next {")
@@ -4611,7 +4967,38 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure) {
             var swiperScript =
                 '<script src="' +
                 swiperCdnBase +
-                '/swiper-bundle.min.js"><\/script>\n<script>\ndocument.addEventListener(\'DOMContentLoaded\',function(){document.querySelectorAll(\'.swiper\').forEach(function(el){if(typeof Swiper!==\'undefined\')new Swiper(el,{pagination:{el:el.querySelector(\'.swiper-pagination\')},navigation:{nextEl:el.querySelector(\'.swiper-button-next\'),prevEl:el.querySelector(\'.swiper-button-prev\')}})});});\n<\/script>'
+                '/swiper-bundle.min.js"><\/script>\n<script>\n' +
+                'document.addEventListener("DOMContentLoaded", function () {\n' +
+                '  document.querySelectorAll(".swiper").forEach(function (el) {\n' +
+                '    if (typeof Swiper === "undefined") return;\n' +
+                '\n' +
+                '    var pcView = parseFloat(el.getAttribute("data-slide-view") || "1");\n' +
+                '    var moView = parseFloat(el.getAttribute("data-slide-view-mo") || "1");\n' +
+                '\n' +
+                '    if (!isFinite(pcView) || pcView <= 0) pcView = 1;\n' +
+                '    if (!isFinite(moView) || moView <= 0) moView = 1;\n' +
+                '\n' +
+                '    new Swiper(el, {\n' +
+                '      slidesPerView: moView,\n' +
+                '      spaceBetween: 0,\n' +
+                '      watchOverflow: false,\n' +
+                '      pagination: {\n' +
+                '        el: el.querySelector(".swiper-pagination"),\n' +
+                '        clickable: true\n' +
+                '      },\n' +
+                '      navigation: {\n' +
+                '        nextEl: el.querySelector(".swiper-button-next"),\n' +
+                '        prevEl: el.querySelector(".swiper-button-prev")\n' +
+                '      },\n' +
+                '      breakpoints: {\n' +
+                '        768: {\n' +
+                '          slidesPerView: pcView\n' +
+                '        }\n' +
+                '      }\n' +
+                '    });\n' +
+                '  });\n' +
+                '});\n' +
+                '<\/script>'
             code = swiperCss + "\n" + code + "\n" + swiperScript
         }
 
@@ -4706,6 +5093,7 @@ figma.ui.onmessage = function (msg) {
             phase: "desktop",
             geoStructure: msg.geoStructure || null,
             fontHtmlFilterActive: fontHtmlFilterActiveMo,
+            mobileRoot: rootMobile,
         })
             .then(function (payload) {
                 return loadFontsForMobileTreeAsync(rootMobile).then(function () {
@@ -4811,8 +5199,10 @@ figma.ui.onmessage = function (msg) {
             figma.ui.postMessage({type: "LOADING", value: false})
         }
 
-        // 1) PC dump
-        dumpTreeAsync(rootDesktop, projectName2, allowedFonts2, {phase: "desktop", fontHtmlFilterActive: fontHtmlFilterActiveZip})
+        // 1) PC dump (MO 루트 있으면 PC 코드 생성 시점에 MO characters와 줄바꿈 비교)
+        var zipDeskOpts = {phase: "desktop", fontHtmlFilterActive: fontHtmlFilterActiveZip}
+        if (hasMobile && rootMobile) zipDeskOpts.mobileRoot = rootMobile
+        dumpTreeAsync(rootDesktop, projectName2, allowedFonts2, zipDeskOpts)
             .then(function (payload) {
                 var code = payload.code || ""
                 var images = payload.images || []
