@@ -228,24 +228,7 @@ function getSlideItemPitch(items) {
     return firstBox && firstBox.w != null ? r2(firstBox.w) : 0
 }
 
-/** 연속 카드 좌표 간 pitch − 카드 너비(중앙값) → Swiper spaceBetween(px) 추정 */
-function getSlideItemGapPx(items, pitch) {
-    if (!items || items.length < 2 || !(pitch > 0)) return 0
-    var widths = []
-    for (var i = 0; i < items.length; i++) {
-        var b = getAbs(items[i])
-        if (b && b.w != null && b.w > 0) widths.push(r2(b.w))
-    }
-    if (widths.length < 2) return 0
-    widths.sort(function (a, b) {
-        return a - b
-    })
-    var wMed = widths[Math.floor(widths.length / 2)]
-    var gap = pitch - wMed
-    return gap > 0 ? r2(gap) : 0
-}
-
-/** MO 섹션에서 슬라이드 아이템 노드 나열(computeSlidesPerViewMo·간격과 동일 규칙) */
+/** MO 섹션에서 슬라이드 아이템 노드 나열(computeSlidesPerViewMo와 동일 규칙) */
 function collectMoSlideItemNodes(dSec, mSec, bgChildId) {
     if (!dSec || !mSec) return []
     if (getSlideItems(mSec)) return collectSwiperSlideItemNodes(mSec, bgChildId)
@@ -391,8 +374,6 @@ function resolveSlideMeta(dSec, mSec, bgChildId, opts) {
         maxSlideHeightPc: 0,
         maxSlideHeightMo: 0,
         itemsSource: "pc",
-        pcSlideSpaceBetween: 0,
-        moSlideSpaceBetween: 0,
     }
     if (!dSec || !getSlideItems(dSec)) return empty
 
@@ -401,23 +382,12 @@ function resolveSlideMeta(dSec, mSec, bgChildId, opts) {
     var maxSlideHeightPc = maxSwiperSlideItemHeightPx(dSec, bgChildId)
     var maxSlideHeightMo = maxSlideHeightPc
 
-    var dItemsMeta = collectSwiperSlideItemNodes(dSec, bgChildId)
-    var dPitchMeta = getSlideItemPitch(dItemsMeta)
-    var pcSlideSpaceBetween = getSlideItemGapPx(dItemsMeta, dPitchMeta)
-    var moSlideSpaceBetween = pcSlideSpaceBetween
-
     if (mobileRoot && secNo != null) {
         var mobileSections = getSectionNodes(mobileRoot)
         var mobileSectionNode = mSec != null ? mSec : mobileSections[secNo - 1] || null
         moSlidesPerView = computeSlidesPerViewMo(dSec, mobileSectionNode, bgChildId, pcSlidesPerView)
         var moH = maxSwiperSlideItemHeightPxMo(dSec, mobileSectionNode, bgChildId)
         maxSlideHeightMo = moH > 0 ? moH : maxSlideHeightPc
-        var moItemsGap = collectMoSlideItemNodes(dSec, mobileSectionNode, bgChildId)
-        if (moItemsGap.length >= 2) {
-            var mPitchG = getSlideItemPitch(moItemsGap)
-            var gMo = getSlideItemGapPx(moItemsGap, mPitchG)
-            if (gMo > 0) moSlideSpaceBetween = gMo
-        }
     }
 
     return {
@@ -426,8 +396,6 @@ function resolveSlideMeta(dSec, mSec, bgChildId, opts) {
         maxSlideHeightPc: maxSlideHeightPc,
         maxSlideHeightMo: maxSlideHeightMo,
         itemsSource: "pc",
-        pcSlideSpaceBetween: pcSlideSpaceBetween,
-        moSlideSpaceBetween: moSlideSpaceBetween,
     }
 }
 
@@ -3579,30 +3547,6 @@ function computeSectionContentSpanHeight(sectionNode, bgChildId) {
     return r2(Math.max(0, maxY - minY))
 }
 
-/** Swiper pagination·navigation 레이아웃 대비 추가 세로 여유(px) */
-function computeSwiperControlsExtraPx() {
-    return r2(8 + 12 + 24)
-}
-
-/**
- * 슬라이드 섹션: max(자식 span, 슬라이드 아이템 최대 높이 + 컨트롤 여유). slidesPerView는 세로에 사용하지 않음.
- * 비슬라이드 섹션은 섹션 박스 높이(기존과 동일).
- */
-function computeFinalSectionHeight(sectionNode, bgChildId, slideMeta) {
-    if (!sectionNode) return 0
-    if (!getSlideItems(sectionNode)) {
-        var boxOnly = getAbs(sectionNode)
-        return boxOnly && boxOnly.h != null ? boxOnly.h : 0
-    }
-    var spanH = computeSectionContentSpanHeight(sectionNode, bgChildId)
-    var maxItem =
-        slideMeta && slideMeta.maxSlideHeightPc != null
-            ? slideMeta.maxSlideHeightPc
-            : maxSwiperSlideItemHeightPx(sectionNode, bgChildId)
-    var slideNeed = r2(maxItem + computeSwiperControlsExtraPx())
-    return r2(Math.max(spanH, slideNeed))
-}
-
 /** PC HTML 기준 MO 미디어쿼리 오버라이드 (visible 자식 1:1 매칭, diff만 출력) */
 function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
     options = options || {}
@@ -3756,17 +3700,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         if (!mSec || dSec.type !== mSec.type) continue
         var secClass = sectionClassPrefix(s + 1)
         var mSecBox = getAbs(mSec)
-        // PC 기준 슬라이드 섹션/HTML과 동일 인덱스: MO에선 슬라이드 아이템 높이 최대값으로 --ap-section-h (PC generate와 동일 규칙)
-        if (getSlideItems(dSec)) {
-            var maxMoSlideH = maxSwiperSlideItemHeightPxMo(dSec, mSec, null)
-            if (maxMoSlideH > 0) {
-                lines.push("  .ap-section--" + secClass + "{ --ap-section-h:" + r2(maxMoSlideH) + "; }")
-            } else if (mSecBox && mSecBox.h != null) {
-                lines.push("  .ap-section--" + secClass + "{ --ap-section-h:" + r2(mSecBox.h) + "; }")
-            } else {
-                lines.push("  .ap-section--" + secClass + "{ min-height:auto; }")
-            }
-        } else if (mSecBox && mSecBox.h != null) {
+        if (!getSlideItems(dSec) && mSecBox && mSecBox.h != null) {
             lines.push("  .ap-section--" + secClass + "{ --ap-section-h:" + r2(mSecBox.h) + "; }")
         }
         if (isFlex(mSec)) {
@@ -4919,9 +4853,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     mobileRoot: mobileRoot || null,
                     secNo: secNo,
                 })
-                var finalSecH = computeFinalSectionHeight(sectionNode, bg.bgChildId, slideSectionMeta)
-                if (finalSecH > 0) sectionDeclParts.push("--ap-section-h:" + r2(finalSecH))
-                else sectionDeclParts.push("min-height:auto")
+                sectionDeclParts.push("height:auto;min-height:auto")
             } else if (box && box.h != null) {
                 sectionDeclParts.push("--ap-section-h:" + box.h)
             }
@@ -5058,18 +4990,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     })
                 var pcSlidesPerView = swiperMeta.pcSlidesPerView
                 var moSlidesPerView = swiperMeta.moSlidesPerView
-                var pcSlideSpace = Math.round(Number(swiperMeta.pcSlideSpaceBetween) || 0)
-                var moSlideSpace = Math.round(Number(swiperMeta.moSlideSpaceBetween) || 0)
 
                 contentLines.push(
                     '      <div class="swiper" data-slide-view="' +
                         escapeHtml(String(pcSlidesPerView)) +
                         '" data-slide-view-mo="' +
                         escapeHtml(String(moSlidesPerView)) +
-                        '" data-slide-space-pc="' +
-                        escapeHtml(String(pcSlideSpace)) +
-                        '" data-slide-space-mo="' +
-                        escapeHtml(String(moSlideSpace)) +
                         '">',
                 )
                 contentLines.push('        <div class="swiper-wrapper">')
@@ -5134,22 +5060,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         if (hasSlideSection) {
             codeLines.push("")
             codeLines.push("/* 슬라이드: 다음 장 피크·카드 폭이 슬라이드 셀보다 클 때 섹션/셀 overflow로 잘리지 않게 */")
-            codeLines.push(".ap-section--swiper { overflow: visible; }")
+            codeLines.push(".ap-section--swiper { overflow: visible; height: auto; min-height: auto; }")
             codeLines.push(".ap-post .swiper {")
-            codeLines.push("  width:100%; min-width:0; flex:1 1 auto; align-self:stretch;")
-            codeLines.push("  height:100%; min-height:200px;")
+            codeLines.push("  width:100%; ")
             codeLines.push("  --swiper-navigation-color:#000;")
             codeLines.push("  --swiper-theme-color:#000;")
             codeLines.push("  --swiper-pagination-bullet-size:8px;")
             codeLines.push("}")
-            codeLines.push(".ap-post .ap-section.ap-flex > .swiper { width:100%; }")
-            codeLines.push(
-                ".ap-post .swiper .swiper-slide { overflow: visible; min-height:calc(var(--ap-section-h, 400) / var(--ap-width) * 100cqi); height:auto; box-sizing:border-box; }",
-            )
-            codeLines.push(".ap-post .swiper .swiper-slide .ap-image { overflow: visible; max-width: none; }")
-            codeLines.push(
-                ".ap-post .swiper .swiper-slide .ap-image img { max-width: 100%; width: auto; height: auto; display: block; }",
-            )
             codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after { content:none; }")
             codeLines.push(".ap-post .swiper-button-prev,")
             codeLines.push(".ap-post .swiper-button-next {")
@@ -5187,17 +5104,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 '\n' +
                 '    var pcView = parseFloat(el.getAttribute("data-slide-view") || "1");\n' +
                 '    var moView = parseFloat(el.getAttribute("data-slide-view-mo") || "1");\n' +
-                '    var pcSpace = parseFloat(el.getAttribute("data-slide-space-pc") || "0");\n' +
-                '    var moSpace = parseFloat(el.getAttribute("data-slide-space-mo") || "0");\n' +
                 '\n' +
                 '    if (!isFinite(pcView) || pcView <= 0) pcView = 1;\n' +
                 '    if (!isFinite(moView) || moView <= 0) moView = 1;\n' +
-                '    if (!isFinite(pcSpace) || pcSpace < 0) pcSpace = 0;\n' +
-                '    if (!isFinite(moSpace) || moSpace < 0) moSpace = 0;\n' +
                 '\n' +
                 '    new Swiper(el, {\n' +
                 '      slidesPerView: moView,\n' +
-                '      spaceBetween: moSpace,\n' +
                 '      watchOverflow: true,\n' +
                 '      pagination: {\n' +
                 '        el: el.querySelector(".swiper-pagination"),\n' +
@@ -5209,8 +5121,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 '      },\n' +
                 '      breakpoints: {\n' +
                 '        768: {\n' +
-                '          slidesPerView: pcView,\n' +
-                '          spaceBetween: pcSpace\n' +
+                '          slidesPerView: pcView\n' +
                 '        }\n' +
                 '      }\n' +
                 '    });\n' +
