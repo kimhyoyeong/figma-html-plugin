@@ -421,9 +421,10 @@
     }
 
     .ap-diff-row {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
       padding: 10px 12px;
       background: #fff;
       border: 1px solid #e8edf3;
@@ -789,6 +790,10 @@
 
     #aiAuditReport.is-visible {
       display: block;
+    }
+
+    #aiAuditReport.ap-apply-mode {
+      border-left: 3px solid #0d9488;
     }
 
     #aiAuditReport .ap-alt-audit-section {
@@ -1263,6 +1268,10 @@
 
     var AP_VISION_MAX_IMAGES = 40;
     var AP_UI_SHOW_VISION_DIAGNOSTICS = false; // 검수 리포트 「Alt·비전 진단」
+    /** false: SEO/접근성/시멘틱 이슈·제안 숨김(종합·엔티티·역할·헤딩 후보·Alt 우선) */
+    var AP_AUDIT_SHOW_DETAIL_SECTIONS = false;
+    /** false: Heading outline 숨김(후보 판정과 겹침 방지) */
+    var AP_AUDIT_SHOW_HEADING_OUTLINE = false;
     var AP_VISION_LONG_EDGE_DEFAULT = 640;
     /** @type {"low"|"high"|"auto"} */
     var AP_VISION_API_DETAIL = "high"; // alt·미세 텍스트: high 권장 · low 절감
@@ -2240,10 +2249,88 @@
       var m = String(msg || "");
       st.textContent = m;
       var busy =
-        (m.indexOf("중") !== -1 || m.indexOf("실행 중") !== -1) &&
+        (m.indexOf("중") !== -1 || m.indexOf("실행 중") !== -1 || m.indexOf("생성 중") !== -1) &&
         m.indexOf("실패") === -1 &&
         m.indexOf("완료") === -1;
       st.classList.toggle("is-analyzing", busy);
+    }
+
+    /** 분석/반영 중 둘 다 잠금(한쪽만 로딩처럼 보이지 않게) */
+    function setAiButtonsBusy(busy) {
+      var a = $("#btnAiAudit");
+      var b = $("#btnApplyAltProposals");
+      if (a) a.disabled = !!busy;
+      if (b) b.disabled = !!busy;
+    }
+
+    /** 분석 리포트 score를 0~10 눈금으로 맞춤(모델이 70 등으로 줄 때 대비). 반영 가산은 이 값 기준. */
+    function scoreToTenScale(raw) {
+      if (raw == null || raw === "") return null;
+      var n = Number(raw);
+      if (!isFinite(n)) return null;
+      if (n >= 0 && n <= 10) return n;
+      if (n > 10 && n <= 100) return n / 10;
+      if (n > 100) return 10;
+      return 0;
+    }
+
+    function roundScoreTen(n) {
+      return Math.round(Number(n) * 10) / 10;
+    }
+
+    /**
+     * 반영 직후 패널용 종합 결과: 직전 분석(summary.score)을 기준으로, 반영 건수만큼 score 가산(상한 10).
+     */
+    function buildPostApplySummary(prevSummary, didAlt, didHeading, altRowCount, headingRowCount) {
+      prevSummary = prevSummary || {};
+      var aN = altRowCount | 0;
+      var hN = headingRowCount | 0;
+      var parts = [];
+      if (didHeading) {
+        if (hN) parts.push("헤딩 " + hN + "건");
+        else parts.push("헤딩 반영");
+      }
+      if (didAlt && aN) parts.push("alt " + aN + "건");
+      var had = parts.length > 0;
+      var baseTen = scoreToTenScale(prevSummary.score);
+      var nextScore = prevSummary.score;
+      if (baseTen != null) {
+        if (had) {
+          var bump = Math.min(2, 0.2 * aN + 0.25 * hN);
+          if (didHeading && !hN) bump += 0.15;
+          nextScore = roundScoreTen(Math.min(10, baseTen + bump));
+        } else {
+          nextScore = roundScoreTen(baseTen);
+        }
+      }
+      return {
+        overall: had ? "pass" : String(prevSummary.overall || "warn"),
+        score: nextScore,
+        oneLine: had ? "반영 적용 · " + parts.join(" · ") : "반영 완료 · 코드에 반영된 변경 없음"
+      };
+    }
+
+    /**
+     * 반영 API 응답만으로는 검수 본문(summary·alts 등)이 비어 패널이 달라 보임 → 직전 분석 스냅샷과 합침.
+     */
+    function buildApplyAuditReportForPanel(auditSnap, applyObj, extras) {
+      extras = extras || {};
+      var o = Object.assign({}, applyObj || {}, extras);
+      if (auditSnap) {
+        o.summary = auditSnap.summary;
+        o.seo = auditSnap.seo;
+        o.a11y = auditSnap.a11y;
+        o.semantics = auditSnap.semantics;
+        o.alts = auditSnap.alts;
+        o.headingAudit = auditSnap.headingAudit;
+        o.altProposals = auditSnap.altProposals;
+        o._apClientWarnings = auditSnap._apClientWarnings;
+        o._apVisionDiagnostics = auditSnap._apVisionDiagnostics;
+        if (auditSnap.geo) o.geo = auditSnap.geo;
+        o._apApplyMode = true;
+      }
+      if (applyObj && applyObj.applyNotes != null) o.applyNotes = applyObj.applyNotes;
+      return o;
     }
 
     /** PC/MO 재분석 시 이전 OpenAI 검수·반영 스냅샷 제거(구 코드와 불일치 방지) */
@@ -2256,6 +2343,7 @@
       if (rep) {
         rep.innerHTML = "";
         rep.classList.remove("is-visible");
+        rep.classList.remove("ap-apply-mode");
       }
       setAiStatus("");
     }
@@ -3240,6 +3328,13 @@
       function altAuditBlock(alts) {
         alts = Array.isArray(alts) ? alts : [];
         if (!alts.length) return "";
+        function srcHintForDisplay(it) {
+          var h = it.srcHint != null ? String(it.srcHint).trim() : "";
+          if (!h) return "";
+          if (/^img\s*\[\s*\d+\s*\]$/i.test(h)) return "";
+          if (h === "img[" + it.index + "]" || h === "img[" + String(it.index) + "]") return "";
+          return h;
+        }
         var gridCols = auditResultGridClass(alts.length);
         return (
           '<div class="ap-alt-audit-section">' +
@@ -3250,12 +3345,13 @@
             if (it.decision === "fix") decisionStyle = "background:#fff7e6;color:#b7791f;border:1px solid #f6d28b;";
             else if (it.decision === "empty") decisionStyle = "background:#edfdf3;color:#1c6b3b;border:1px solid #b7e4c7;";
             else if (it.decision === "ambiguous") decisionStyle = "background:#fde8e8;color:#c53030;border:1px solid #feb2b2;";
+            var hint = srcHintForDisplay(it);
             return (
               '<div class="ap-alt-audit-card">' +
               '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">' +
               '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;background:#f6f8fb;color:#334;border:1px solid #e2e8f0;">img[' + esc(it.index) + "]</span>" +
               '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;' + decisionStyle + '">' + esc(it.decision || "") + "</span>" +
-              (it.srcHint ? '<code style="font-size:10px;background:#f6f8fb;padding:1px 6px;border-radius:4px;border:1px solid #e2e8f0;">' + esc(it.srcHint) + "</code>" : "") +
+              (hint ? '<code style="font-size:10px;background:#f6f8fb;padding:1px 6px;border-radius:4px;border:1px solid #e2e8f0;">' + esc(hint) + "</code>" : "") +
               "</div>" +
               '<div style="margin-bottom:4px;"><b>현재 alt</b> · ' + esc(it.currentAlt || "(없음)") + "</div>" +
               (it.reason ? '<div style="margin-bottom:4px;"><b>판정 이유</b> · ' + esc(it.reason) + "</div>" : "") +
@@ -3273,7 +3369,7 @@
         var candidates = Array.isArray(headingAudit.candidates) ? headingAudit.candidates : [];
         var out = "";
 
-        if (outline.length) {
+        if (AP_AUDIT_SHOW_HEADING_OUTLINE && outline.length) {
           var og = "ap-audit-result-grid" + auditResultGridClass(outline.length);
           out += (
             '<div style="margin:0 0 12px 0;">' +
@@ -3297,6 +3393,7 @@
               var decisionStyle = "background:#eef2f7;color:#445;border:1px solid #d7dee7;";
               if (it.decision === "title") decisionStyle = "background:#edfdf3;color:#1c6b3b;border:1px solid #b7e4c7;";
               else if (it.decision === "subtitle") decisionStyle = "background:#fff7e6;color:#b7791f;border:1px solid #f6d28b;";
+              else if (it.decision === "not-heading") decisionStyle = "background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;";
               else if (it.decision === "ambiguous") decisionStyle = "background:#fde8e8;color:#c53030;border:1px solid #feb2b2;";
               return (
                 '<div style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">' +
@@ -3362,8 +3459,8 @@
       var semantics = obj.semantics || {};
       var headingAudit = obj.headingAudit || {};
       var applyDiff =
-        diffBlock("Alt 반영", obj._apAltChangeRows) +
-        diffBlock("헤딩 반영", obj._apHeadingChangeRows);
+        diffBlock("헤딩 반영", obj._apHeadingChangeRows) +
+        diffBlock("Alt 반영", obj._apAltChangeRows);
 
       var cliWarns = Array.isArray(obj._apClientWarnings) ? obj._apClientWarnings.filter(Boolean) : [];
       var clientWarnBlock =
@@ -3440,23 +3537,28 @@
           "</div>";
       }
 
+      var detailSections =
+        (AP_AUDIT_SHOW_DETAIL_SECTIONS
+          ? issueList("SEO 이슈", seoIssues) +
+            simpleList("SEO 제안", seoSuggestions) +
+            issueList("접근성 이슈", a11y.issues) +
+            simpleList("접근성 제안", a11y.suggestions) +
+            issueList("시멘틱 마크업 이슈", semantics.issues) +
+            simpleList("시멘틱 마크업 제안", semantics.suggestions) +
+            issueList("Heading 구조 이슈", headingAudit.issues)
+          : "") +
+        simpleList("반영 메모", Array.isArray(obj.applyNotes) ? obj.applyNotes : []);
+
       return (
         clientWarnBlock +
         visionDiagBlock +
         summaryBlock(summary) +
         applyDiff +
-        issueList("SEO 이슈", seoIssues) +
-        simpleList("SEO 제안", seoSuggestions) +
-        seoContentRolesTable(seoContentRolesRows) +
         seoExtractabilityBlock(seoExtractabilityVal) +
-        issueList("접근성 이슈", a11y.issues) +
-        simpleList("접근성 제안", a11y.suggestions) +
-        issueList("시멘틱 마크업 이슈", semantics.issues) +
-        simpleList("시멘틱 마크업 제안", semantics.suggestions) +
-        altAuditBlock(obj.alts) +
+        seoContentRolesTable(seoContentRolesRows) +
         headingAuditBlock(headingAudit) +
-        issueList("Heading 구조 이슈", headingAudit.issues) +
-        simpleList("반영 메모", Array.isArray(obj.applyNotes) ? obj.applyNotes : [])
+        altAuditBlock(obj.alts) +
+        detailSections
       );
     }
 
@@ -3466,6 +3568,7 @@
       var inner = buildAuditReportInnerHtml(obj);
       el.innerHTML = inner;
       el.classList.toggle("is-visible", !!inner.trim());
+      el.classList.toggle("ap-apply-mode", !!(obj && obj._apApplyMode));
     }
 
     function runAiAudit() {
@@ -3474,8 +3577,7 @@
       var code = getCodeValue();
       var codeForAudit = extractCmsPartForAudit(code);
       var nImgInFragment = countImgs(codeForAudit);
-      var btn = $("#btnAiAudit");
-      if (btn) btn.disabled = true;
+      setAiButtonsBusy(true);
       setAiStatus("검수 리포트 생성 중…");
 
       var useVision = true;
@@ -3543,7 +3645,7 @@
           setAiStatus("검수 실패: " + (e && e.message ? e.message : String(e)));
         })
         .then(function () {
-          if (btn) btn.disabled = false;
+          setAiButtonsBusy(false);
         });
     }
 
@@ -3560,10 +3662,10 @@
         if (!String(codeForApplyApi).trim()) codeForApplyApi = code;
         var n = countImgs(code);
         var nApi = countImgs(codeForApplyApi);
-        var btn = this;
-        btn.disabled = true;
-        setAiStatus("반영: AI 실행 중 (헤딩 패치 · 분석과 동일 alt)…");
-        runOpenAiApplyApi(codeForApplyApi, window.__apLastAnalysisReport)
+        setAiButtonsBusy(true);
+        setAiStatus("반영 중 · 헤딩 패치 · alt (직전 분석과 동일 규칙)…");
+        var auditSnap = window.__apLastAnalysisReport;
+        runOpenAiApplyApi(codeForApplyApi, auditSnap)
           .then(function (obj) {
             var code0 = code;
             if (!Array.isArray(obj.altProposals)) obj.altProposals = [];
@@ -3606,10 +3708,19 @@
               }
             }
 
-            var reportObj = Object.assign({}, obj, {
+            var reportObj = buildApplyAuditReportForPanel(auditSnap, obj, {
               _apAltChangeRows: didAlt ? buildAltChangeRowsForPanel(code0, pApply) : [],
               _apHeadingChangeRows: buildHeadingChangeRowsForPanel(patches)
             });
+            var ar = reportObj._apAltChangeRows || [];
+            var hr = reportObj._apHeadingChangeRows || [];
+            reportObj.summary = buildPostApplySummary(
+              auditSnap && auditSnap.summary,
+              didAlt,
+              didHeading,
+              ar.length,
+              hr.length
+            );
 
             window.__apLastAuditReport = reportObj;
             window.__apLastAuditAltProposals = Array.isArray(obj.altProposals) ? obj.altProposals : null;
@@ -3621,20 +3732,20 @@
             setCodeValue(code);
 
             var parts = [];
-            if (didAlt) parts.push("alt " + reportObj._apAltChangeRows.length + "건");
             if (didHeading && reportObj._apHeadingChangeRows.length) parts.push("헤딩 " + reportObj._apHeadingChangeRows.length + "건");
+            if (didAlt) parts.push("alt " + reportObj._apAltChangeRows.length + "건");
 
-            setAiStatus(
+            var oneLine =
               parts.length
-                ? "반영 완료 (" + parts.join(", ") + ") · 상세는 패널"
-                : "반영 완료 (변경 없음 또는 스킵) · 패널 확인"
-            );
+                ? parts.join(" · ")
+                : "변경 없음 또는 스킵";
+            setAiStatus("반영 완료 · " + oneLine);
           })
           .catch(function (e) {
             setAiStatus("반영 실패: " + (e && e.message ? e.message : String(e)));
           })
           .then(function () {
-            btn.disabled = false;
+            setAiButtonsBusy(false);
           });
       };
     }
