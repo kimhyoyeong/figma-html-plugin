@@ -112,69 +112,6 @@ function collectSwiperSlideItemNodes(sectionNode, bgChildId) {
     }
     return out
 }
-/** 슬라이드 아이템 높이 중 최댓값(px, r2). 없으면 0 */
-function maxSwiperSlideItemHeightPx(sectionNode, bgChildId) {
-    var nodes = collectSwiperSlideItemNodes(sectionNode, bgChildId)
-    var maxH = 0
-    for (var i = 0; i < nodes.length; i++) {
-        var b = getAbs(nodes[i])
-        if (b && b.h != null) maxH = Math.max(maxH, b.h)
-    }
-    return maxH
-}
-/**
- * @media용: PC에 slide 구조가 있으나 MO 루트에 `slide` 이름이 없을 때(구조만 대응)에도
- * 보이는 자식 인덱스로 짝지어 슬라이드 아이템 박스 높이 최댓값을 구함.
- */
-function maxSwiperSlideItemHeightPxMo(dSec, mSec, bgChildId) {
-    if (!getSlideItems(dSec) || !mSec) return 0
-    if (getSlideItems(mSec)) return maxSwiperSlideItemHeightPx(mSec, bgChildId)
-    var dData = getSlideItems(dSec)
-    var dItems = collectSwiperSlideItemNodes(dSec, bgChildId)
-    if (!dItems.length) return 0
-    var dSecKids = (dSec.children || []).filter(function (c) {
-        return c && isVisible(c)
-    })
-    var mSecKids = (mSec.children || []).filter(function (c) {
-        return c && isVisible(c)
-    })
-    var maxH = 0
-    if (dData.parent && dData.parent !== dSec) {
-        var pidx = -1
-        for (var i = 0; i < dSecKids.length; i++) {
-            if (dSecKids[i].id === dData.parent.id) {
-                pidx = i
-                break
-            }
-        }
-        if (pidx >= 0 && pidx < mSecKids.length) {
-            var mParent = mSecKids[pidx]
-            var mCh = (mParent.children || []).filter(function (c) {
-                return c && isVisible(c)
-            })
-            for (var j = 0; j < dItems.length && j < mCh.length; j++) {
-                var b = getAbs(mCh[j])
-                if (b && b.h != null) maxH = Math.max(maxH, b.h)
-            }
-        }
-    } else {
-        for (var k = 0; k < dItems.length; k++) {
-            var dIt = dItems[k]
-            var found = -1
-            for (var i2 = 0; i2 < dSecKids.length; i2++) {
-                if (dSecKids[i2].id === dIt.id) {
-                    found = i2
-                    break
-                }
-            }
-            if (found >= 0 && found < mSecKids.length) {
-                var b2 = getAbs(mSecKids[found])
-                if (b2 && b2.h != null) maxH = Math.max(maxH, b2.h)
-            }
-        }
-    }
-    return maxH
-}
 
 /** 숫자 범위 제한 */
 function clamp(n, min, max) {
@@ -362,7 +299,7 @@ function computeSlidesPerViewMo(dSec, mSec, bgChildId, fallbackValue) {
 
 /**
  * PC 기준 슬라이드 메타 일원화. 콘텐츠/아이템 스택은 항상 PC(source).
- * mobileRoot 있을 때만 MO slidesPerView·MO 최대 슬라이드 높이 추정(매치 실패 시 index 기반 등 기존 보조 로직).
+ * mobileRoot 있을 때만 MO slidesPerView 추정.
  */
 function resolveSlideMeta(dSec, mSec, bgChildId, opts) {
     opts = opts || {}
@@ -371,31 +308,21 @@ function resolveSlideMeta(dSec, mSec, bgChildId, opts) {
     var empty = {
         pcSlidesPerView: 1,
         moSlidesPerView: 1,
-        maxSlideHeightPc: 0,
-        maxSlideHeightMo: 0,
-        itemsSource: "pc",
     }
     if (!dSec || !getSlideItems(dSec)) return empty
 
     var pcSlidesPerView = computeSlidesPerView(dSec, bgChildId, 1)
     var moSlidesPerView = pcSlidesPerView
-    var maxSlideHeightPc = maxSwiperSlideItemHeightPx(dSec, bgChildId)
-    var maxSlideHeightMo = maxSlideHeightPc
 
     if (mobileRoot && secNo != null) {
         var mobileSections = getSectionNodes(mobileRoot)
         var mobileSectionNode = mSec != null ? mSec : mobileSections[secNo - 1] || null
         moSlidesPerView = computeSlidesPerViewMo(dSec, mobileSectionNode, bgChildId, pcSlidesPerView)
-        var moH = maxSwiperSlideItemHeightPxMo(dSec, mobileSectionNode, bgChildId)
-        maxSlideHeightMo = moH > 0 ? moH : maxSlideHeightPc
     }
 
     return {
         pcSlidesPerView: pcSlidesPerView,
         moSlidesPerView: moSlidesPerView,
-        maxSlideHeightPc: maxSlideHeightPc,
-        maxSlideHeightMo: maxSlideHeightMo,
-        itemsSource: "pc",
     }
 }
 
@@ -3523,30 +3450,7 @@ function getSectionNodes(root) {
     })
 }
 
-// ----- 6. Section Utils (섹션 높이 span·최종 높이; 배경은 buildSectionBackgroundAsync) -----
-/** 섹션 직계 보이는 자식(배경 승격 child 제외) absoluteBoundingBox 기준 세로 span(px) */
-function computeSectionContentSpanHeight(sectionNode, bgChildId) {
-    if (!sectionNode) return 0
-    var secBox = getAbs(sectionNode)
-    if (!secBox || secBox.y == null) return 0
-    var kids = sectionNode.children || []
-    var minY = null
-    var maxY = null
-    for (var i = 0; i < kids.length; i++) {
-        var ch = kids[i]
-        if (!ch || !isVisible(ch)) continue
-        if (bgChildId && ch.id === bgChildId) continue
-        var b = getAbs(ch)
-        if (!b || b.y == null || b.h == null) continue
-        var top = r2(b.y - secBox.y)
-        var bot = r2(b.y - secBox.y + b.h)
-        if (minY == null || top < minY) minY = top
-        if (maxY == null || bot > maxY) maxY = bot
-    }
-    if (minY == null || maxY == null) return 0
-    return r2(Math.max(0, maxY - minY))
-}
-
+// ----- 6. Section Utils (배경은 buildSectionBackgroundAsync) -----
 /** PC HTML 기준 MO 미디어쿼리 오버라이드 (visible 자식 1:1 매칭, diff만 출력) */
 function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
     options = options || {}
