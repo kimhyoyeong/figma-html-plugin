@@ -1,4 +1,6 @@
-// Figma → HTML/CMS export. 큰 구역은 // ----- 섹션 주석으로 구분.
+// Figma → HTML/CMS export.
+// 파일 구역: 1.UI Router · 2.Core · 3.Text · 4.Layout · 5.Style/Shape · 6.Section · 7.Slide · 8.Image Export · 9.HTML/Code Builder
+// (실제 나열 순서는 함수 의존성에 따름 — 주석 헤더로 구역 식별)
 figma.showUI(__html__, {width: 900, height: 900})
 
 // ui 검수: 비전 기본 ON. 이미지 바이너리는 PC/MO 분석 후 RESULT_IMAGES_* 로만 UI 전달(ZIP만으로 코드만 붙은 경우 미전달).
@@ -11,7 +13,7 @@ setTimeout(function () {
     } catch (e) {}
 }, 0)
 
-// ----- Utils (포맷, escape, 노드 판별) -----
+// ----- 공통·포맷 (r2, 클래스, BEM) + Core 일부(레이어명 판별은 아래 isNodeName~) -----
 /** 숫자를 소수 둘째 자리까지 반올림 */
 function r2(v) {
     return Math.round(v * 100) / 100
@@ -76,6 +78,8 @@ function isVideoNode(node) {
 function isSlideNode(node) {
     return isNodeName(node, "slide")
 }
+
+// ----- 7. Slide Utils (캐러셀 meta, pitch, slidesPerView) -----
 /** 섹션에서 swiper-slide 대상 노드들 반환. null이면 슬라이드 모드 아님.
  * - 섹션 자식 중 slide 1개(그룹) → 그 그룹의 자식들이 각각 swiper-slide
  * - 섹션 자식 중 slide 여러 개 → 각각 swiper-slide
@@ -179,7 +183,7 @@ function clamp(n, min, max) {
     return Math.min(max, Math.max(min, n))
 }
 
-/** 슬라이드 부모의 가로폭 */
+/** 슬라이드 부모의 가로폭(HTML에서 .swiper는 ap-section 폭을 쓰므로 섹션보다 넓게 잡힌 slide 그룹은 섹션 폭으로 자름) */
 function getSlideViewportWidth(sectionNode, bgChildId) {
     var slideData = getSlideItems(sectionNode)
     if (!slideData) return 0
@@ -188,25 +192,12 @@ function getSlideViewportWidth(sectionNode, bgChildId) {
     var box = getAbs(target)
     if (!box || box.w == null) return 0
 
-    // 섹션 전체가 slide 부모인 경우, 실제 슬라이드 아이템들 범위 기준으로 한번 더 보정
-    var items = collectSwiperSlideItemNodes(sectionNode, bgChildId)
-    if (!items.length) return r2(box.w)
-
-    var minX = null
-    var maxX = null
-    for (var i = 0; i < items.length; i++) {
-        var b = getAbs(items[i])
-        if (!b || b.x == null || b.w == null) continue
-        if (minX == null || b.x < minX) minX = b.x
-        if (maxX == null || (b.x + b.w) > maxX) maxX = b.x + b.w
+    var w = r2(box.w)
+    var secBox = getAbs(sectionNode)
+    if (secBox && secBox.w != null && secBox.w > 0) {
+        w = Math.min(w, r2(secBox.w))
     }
-
-    if (minX != null && maxX != null) {
-        var itemsSpan = r2(maxX - minX)
-        if (itemsSpan > 0) return Math.min(r2(box.w), itemsSpan)
-    }
-
-    return r2(box.w)
+    return w
 }
 
 /** 슬라이드 pitch(= item width + gap) 추정 */
@@ -237,6 +228,74 @@ function getSlideItemPitch(items) {
     return firstBox && firstBox.w != null ? r2(firstBox.w) : 0
 }
 
+/** 연속 카드 좌표 간 pitch − 카드 너비(중앙값) → Swiper spaceBetween(px) 추정 */
+function getSlideItemGapPx(items, pitch) {
+    if (!items || items.length < 2 || !(pitch > 0)) return 0
+    var widths = []
+    for (var i = 0; i < items.length; i++) {
+        var b = getAbs(items[i])
+        if (b && b.w != null && b.w > 0) widths.push(r2(b.w))
+    }
+    if (widths.length < 2) return 0
+    widths.sort(function (a, b) {
+        return a - b
+    })
+    var wMed = widths[Math.floor(widths.length / 2)]
+    var gap = pitch - wMed
+    return gap > 0 ? r2(gap) : 0
+}
+
+/** MO 섹션에서 슬라이드 아이템 노드 나열(computeSlidesPerViewMo·간격과 동일 규칙) */
+function collectMoSlideItemNodes(dSec, mSec, bgChildId) {
+    if (!dSec || !mSec) return []
+    if (getSlideItems(mSec)) return collectSwiperSlideItemNodes(mSec, bgChildId)
+
+    var dData = getSlideItems(dSec)
+    var dItems = collectSwiperSlideItemNodes(dSec, bgChildId)
+    if (!dItems.length) return []
+
+    var dSecKids = (dSec.children || []).filter(function (c) {
+        return c && isVisible(c)
+    })
+    var mSecKids = (mSec.children || []).filter(function (c) {
+        return c && isVisible(c)
+    })
+    var moItemNodes = []
+    if (dData && dData.parent && dData.parent !== dSec) {
+        var pidx = -1
+        for (var i = 0; i < dSecKids.length; i++) {
+            if (dSecKids[i].id === dData.parent.id) {
+                pidx = i
+                break
+            }
+        }
+        if (pidx >= 0 && pidx < mSecKids.length) {
+            var viewportTarget = mSecKids[pidx]
+            var mCh = (viewportTarget.children || []).filter(function (c) {
+                return c && isVisible(c)
+            })
+            for (var j = 0; j < dItems.length && j < mCh.length; j++) {
+                moItemNodes.push(mCh[j])
+            }
+        }
+    } else {
+        for (var k = 0; k < dItems.length; k++) {
+            var dIt = dItems[k]
+            var found = -1
+            for (var i2 = 0; i2 < dSecKids.length; i2++) {
+                if (dSecKids[i2].id === dIt.id) {
+                    found = i2
+                    break
+                }
+            }
+            if (found >= 0 && found < mSecKids.length) {
+                moItemNodes.push(mSecKids[found])
+            }
+        }
+    }
+    return moItemNodes
+}
+
 /** slidesPerView 계산 */
 function computeSlidesPerView(sectionNode, bgChildId, fallbackValue) {
     var items = collectSwiperSlideItemNodes(sectionNode, bgChildId)
@@ -265,39 +324,111 @@ function computeSlidesPerViewMo(dSec, mSec, bgChildId, fallbackValue) {
         return computeSlidesPerView(mSec, bgChildId, fallbackValue)
     }
 
-    // MO에 slide 이름이 없더라도 구조만 대응되는 경우 index 기반으로 추정
     var dItems = collectSwiperSlideItemNodes(dSec, bgChildId)
     if (!dItems.length || !mSec) return fallbackValue != null ? fallbackValue : computeSlidesPerView(dSec, bgChildId, 1)
 
-    var mKids = (mSec.children || []).filter(function (c) {
-        return c && isVisible(c)
-    })
+    var moItemNodes = collectMoSlideItemNodes(dSec, mSec, bgChildId)
+    var viewportTarget = mSec
+    var dData = getSlideItems(dSec)
+    if (dData && dData.parent && dData.parent !== dSec) {
+        var dSecKidsVt = (dSec.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        var mSecKidsVt = (mSec.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        var pidxVt = -1
+        for (var ivt = 0; ivt < dSecKidsVt.length; ivt++) {
+            if (dSecKidsVt[ivt].id === dData.parent.id) {
+                pidxVt = ivt
+                break
+            }
+        }
+        if (pidxVt >= 0 && pidxVt < mSecKidsVt.length) viewportTarget = mSecKidsVt[pidxVt]
+    }
 
-    if (!mKids.length) return fallbackValue != null ? fallbackValue : computeSlidesPerView(dSec, bgChildId, 1)
-
-    var first = getAbs(mKids[0])
-    var second = mKids.length > 1 ? getAbs(mKids[1]) : null
-    var viewportW = getAbs(mSec)
-    if (!viewportW || viewportW.w == null) {
+    if (!moItemNodes.length) {
         return fallbackValue != null ? fallbackValue : computeSlidesPerView(dSec, bgChildId, 1)
     }
 
-    var pitch = 0
-    if (first && second && first.x != null && second.x != null) {
-        pitch = r2(second.x - first.x)
-    } else if (first && first.w != null) {
-        pitch = r2(first.w)
+    var box = getAbs(viewportTarget)
+    if (!box || box.w == null) {
+        return fallbackValue != null ? fallbackValue : computeSlidesPerView(dSec, bgChildId, 1)
     }
 
-    if (!(pitch > 0)) return fallbackValue != null ? fallbackValue : 1
+    var viewportW = r2(box.w)
+    var mSecBox = getAbs(mSec)
+    if (mSecBox && mSecBox.w != null && mSecBox.w > 0) {
+        viewportW = Math.min(viewportW, r2(mSecBox.w))
+    }
 
-    var raw = viewportW.w / pitch
-    raw = clamp(raw, 1, mKids.length || dItems.length || 1)
+    var pitch = getSlideItemPitch(moItemNodes)
+    if (!(viewportW > 0) || !(pitch > 0)) {
+        return fallbackValue != null ? fallbackValue : 1
+    }
+
+    var raw = viewportW / pitch
+    // 상한은 PC 슬라이드 아이템 개수 기준. mSec 직계 자식 수(예: slide 그룹 1개)를 쓰면 항상 1로 죽는 버그 방지
+    raw = clamp(raw, 1, dItems.length)
 
     var rounded = Math.round(raw)
     if (Math.abs(raw - rounded) < 0.15) return rounded
 
     return r2(raw)
+}
+
+/**
+ * PC 기준 슬라이드 메타 일원화. 콘텐츠/아이템 스택은 항상 PC(source).
+ * mobileRoot 있을 때만 MO slidesPerView·MO 최대 슬라이드 높이 추정(매치 실패 시 index 기반 등 기존 보조 로직).
+ */
+function resolveSlideMeta(dSec, mSec, bgChildId, opts) {
+    opts = opts || {}
+    var mobileRoot = opts.mobileRoot
+    var secNo = opts.secNo
+    var empty = {
+        pcSlidesPerView: 1,
+        moSlidesPerView: 1,
+        maxSlideHeightPc: 0,
+        maxSlideHeightMo: 0,
+        itemsSource: "pc",
+        pcSlideSpaceBetween: 0,
+        moSlideSpaceBetween: 0,
+    }
+    if (!dSec || !getSlideItems(dSec)) return empty
+
+    var pcSlidesPerView = computeSlidesPerView(dSec, bgChildId, 1)
+    var moSlidesPerView = pcSlidesPerView
+    var maxSlideHeightPc = maxSwiperSlideItemHeightPx(dSec, bgChildId)
+    var maxSlideHeightMo = maxSlideHeightPc
+
+    var dItemsMeta = collectSwiperSlideItemNodes(dSec, bgChildId)
+    var dPitchMeta = getSlideItemPitch(dItemsMeta)
+    var pcSlideSpaceBetween = getSlideItemGapPx(dItemsMeta, dPitchMeta)
+    var moSlideSpaceBetween = pcSlideSpaceBetween
+
+    if (mobileRoot && secNo != null) {
+        var mobileSections = getSectionNodes(mobileRoot)
+        var mobileSectionNode = mSec != null ? mSec : mobileSections[secNo - 1] || null
+        moSlidesPerView = computeSlidesPerViewMo(dSec, mobileSectionNode, bgChildId, pcSlidesPerView)
+        var moH = maxSwiperSlideItemHeightPxMo(dSec, mobileSectionNode, bgChildId)
+        maxSlideHeightMo = moH > 0 ? moH : maxSlideHeightPc
+        var moItemsGap = collectMoSlideItemNodes(dSec, mobileSectionNode, bgChildId)
+        if (moItemsGap.length >= 2) {
+            var mPitchG = getSlideItemPitch(moItemsGap)
+            var gMo = getSlideItemGapPx(moItemsGap, mPitchG)
+            if (gMo > 0) moSlideSpaceBetween = gMo
+        }
+    }
+
+    return {
+        pcSlidesPerView: pcSlidesPerView,
+        moSlidesPerView: moSlidesPerView,
+        maxSlideHeightPc: maxSlideHeightPc,
+        maxSlideHeightMo: maxSlideHeightMo,
+        itemsSource: "pc",
+        pcSlideSpaceBetween: pcSlideSpaceBetween,
+        moSlideSpaceBetween: moSlideSpaceBetween,
+    }
 }
 
 /** LINE 노드 또는 레이어명 "line"인 벡터 → ap-line 처리 */
@@ -308,7 +439,7 @@ function isLineLikeNode(node) {
     return false
 }
 
-// ----- HTML/CSS Builder (LINE, ELLIPSE, 텍스트, 레이아웃 변수 등) -----
+// ----- 5. Style/Shape Utils (LINE, ELLIPSE, stroke, radius 등) -----
 /** LINE/line 벡터 → CSS 변수 선언 (deferred style) */
 function buildLineVarsDecl(node) {
     if (!node || !isLineLikeNode(node)) return ""
@@ -390,6 +521,7 @@ function getImageAltText(node) {
     return escapeHtml(name.length > 125 ? name.slice(0, 125) : name)
 }
 
+// ----- 3. Text Utils -----
 /** HTML 이스케이프. U+2028/U+2029 → \\n 정규화 */
 function escapeHtml(s) {
     if (s == null) return ""
@@ -648,6 +780,7 @@ function wrapChunksAsUlOrDiv(depth, cls, frameTag, frameTagOpen, isFrameBtn, chu
     return out.join("\n")
 }
 
+// ----- 2. Core Node Utils (bounds, visibility, flex/abs; 레이어명·slide 판별은 상단) -----
 /** 노드 absoluteBoundingBox → {x,y,w,h} (r2 적용) */
 function getAbs(node) {
     try {
@@ -738,6 +871,7 @@ function containerNeedsRelativeForAbsoluteChildren(node) {
     return false
 }
 
+// ----- 4. Layout Utils (flex vars, abs decl) -----
 /** Auto Layout 설정을 CSS 변수용 객체로 추출. isFlex(node)일 때만 값 채움 */
 function getLayoutVars(node) {
     var out = {direction: "", gap: "", pt: "", pr: "", pb: "", pl: "", justify: "", align: "", wrap: ""}
@@ -1061,7 +1195,7 @@ function buildStrokeDeclDiff(dNode, mNode) {
     return "border:none"
 }
 
-// ----- Asset Export (이미지/리소스 export, 파일명·포맷) -----
+// ----- 8. Image Export Utils (포맷 판정, raster, 경로) -----
 // 바이너리 헤더·PNG/WebP (bytes: Uint8Array)
 function readUint32BE(bytes, offset) {
     return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0
@@ -2117,16 +2251,16 @@ function exportNodeImageAsync(node) {
                     return null
                 })
         }
-        // false = visual bounds(글리프에 가까움). true면 텍스트 프레임 전체가 PNG/CSS에 잡혀 넓은 박스·여백이 됨
-        var textOpts = isText ? {useAbsoluteBounds: false} : undefined
+        // TEXT: useAbsoluteBounds false → 글리프에 가까운 시각적 bounds(좁은 PNG).
+        var exportBoundsOpts = {useAbsoluteBounds: false}
         /** 동일 포맷으로 width → 800 → 제약 없음 순 시도 */
         function tryFormatSequence(fmt) {
-            return doExport(fmt, w, textOpts).then(function (result) {
+            return doExport(fmt, w, exportBoundsOpts).then(function (result) {
                 if (result) return result
-                return doExport(fmt, 800, textOpts)
+                return doExport(fmt, 800, exportBoundsOpts)
             }).then(function (result) {
                 if (result) return result
-                return doExport(fmt, null, textOpts)
+                return doExport(fmt, null, exportBoundsOpts)
             })
         }
         function trySequence(usePng) {
@@ -3256,6 +3390,7 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
         })
 }
 
+// ----- 6. Section Utils: 배경 승격(직계 풀블리드 이미지) -----
 /** 섹션 배경: fill 또는 직계 자식 중 90% 이상 크기 이미지 → --bg-img 승격 (slide 섹션 제외) */
 function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
   var slideData = getSlideItems(sectionNode)
@@ -3418,6 +3553,54 @@ function getSectionNodes(root) {
     return (root.children || []).filter(function (c) {
         return c && isVisible(c)
     })
+}
+
+// ----- 6. Section Utils (섹션 높이 span·최종 높이; 배경은 buildSectionBackgroundAsync) -----
+/** 섹션 직계 보이는 자식(배경 승격 child 제외) absoluteBoundingBox 기준 세로 span(px) */
+function computeSectionContentSpanHeight(sectionNode, bgChildId) {
+    if (!sectionNode) return 0
+    var secBox = getAbs(sectionNode)
+    if (!secBox || secBox.y == null) return 0
+    var kids = sectionNode.children || []
+    var minY = null
+    var maxY = null
+    for (var i = 0; i < kids.length; i++) {
+        var ch = kids[i]
+        if (!ch || !isVisible(ch)) continue
+        if (bgChildId && ch.id === bgChildId) continue
+        var b = getAbs(ch)
+        if (!b || b.y == null || b.h == null) continue
+        var top = r2(b.y - secBox.y)
+        var bot = r2(b.y - secBox.y + b.h)
+        if (minY == null || top < minY) minY = top
+        if (maxY == null || bot > maxY) maxY = bot
+    }
+    if (minY == null || maxY == null) return 0
+    return r2(Math.max(0, maxY - minY))
+}
+
+/** Swiper pagination·navigation 레이아웃 대비 추가 세로 여유(px) */
+function computeSwiperControlsExtraPx() {
+    return r2(8 + 12 + 24)
+}
+
+/**
+ * 슬라이드 섹션: max(자식 span, 슬라이드 아이템 최대 높이 + 컨트롤 여유). slidesPerView는 세로에 사용하지 않음.
+ * 비슬라이드 섹션은 섹션 박스 높이(기존과 동일).
+ */
+function computeFinalSectionHeight(sectionNode, bgChildId, slideMeta) {
+    if (!sectionNode) return 0
+    if (!getSlideItems(sectionNode)) {
+        var boxOnly = getAbs(sectionNode)
+        return boxOnly && boxOnly.h != null ? boxOnly.h : 0
+    }
+    var spanH = computeSectionContentSpanHeight(sectionNode, bgChildId)
+    var maxItem =
+        slideMeta && slideMeta.maxSlideHeightPc != null
+            ? slideMeta.maxSlideHeightPc
+            : maxSwiperSlideItemHeightPx(sectionNode, bgChildId)
+    var slideNeed = r2(maxItem + computeSwiperControlsExtraPx())
+    return r2(Math.max(spanH, slideNeed))
 }
 
 /** PC HTML 기준 MO 미디어쿼리 오버라이드 (visible 자식 1:1 매칭, diff만 출력) */
@@ -3807,6 +3990,11 @@ function injectBgOverridesForMo(sectionStyles, overridesCss, excludedSecClasses)
     return overrides
 }
 
+/** 슬라이드(.swiper-slide) 하위 이미지: PC 전용 경로만 쓸 때 부착 → combine 시 picture/_mo 생략 */
+function apSlidePcImgAttr(opts) {
+    return opts && opts.insideSwiperSlide ? 'data-slide-pc-img="1" ' : ""
+}
+
 /** PC HTML + @media로 MO 스타일 오버라이드. MO 이미지는 picture/source로 전환 */
 function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, options) {
     options = options || {}
@@ -3819,7 +4007,8 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     var styleBlock = "<style>\n" + base + "\n" + (sectionStyles ? sectionStyles + "\n" : "") + overrides + "\n</style>\n\n"
     var articleHtml = pc.articleHtml || ""
     var bp = Number(breakpoint) || 750
-    articleHtml = articleHtml.replace(/<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+)\.(png|jpg|jpeg)"([^>]*)>/gi, function (_, before, basePath, ext, after) {
+    articleHtml = articleHtml.replace(/<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+)\.(png|jpg|jpeg)"([^>]*)>/gi, function (full, before, basePath, ext, after) {
+        if (/\bdata-slide-pc-img\s*=\s*["']1["']/.test(before + after)) return full
         if (String(ext).toLowerCase() === "svg") { return "<img " + before + "src=\"" + basePath + "." + ext + "\"" + after + ">"; }
         return '<picture><source media="(max-width:' + bp + 'px)" srcset="' + basePath + "_mo." + ext + '"><img ' + before + 'src="' + basePath + "." + ext + '"' + after + "></picture>"
     })
@@ -4053,7 +4242,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         })
 }
 
-// ----- Code Builder (node-id 기반 HTML/CSS 생성) -----
+// ----- 9. HTML Renderers / Code Builder (node-id 기반 HTML·CSS) -----
 /** 루트 노드와 캐시로 전체 HTML/CSS 문자열 생성 (섹션별 스타일·article 본문) */
 function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot) {
     var codeLines = []
@@ -4254,7 +4443,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         pushDeferredImageImgSizeVars(ctx, secClass, id, node, rasterOpts, textAbs)
                         return wrapIfBtn(
                             node,
-                            indent(depth) + '<div class="' + imgWrapCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>',
+                            indent(depth) + '<div class="' + imgWrapCls + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (path || "") + '" alt="' + altText + '" /></div>',
                             depth
                         )
                     })
@@ -4312,7 +4501,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (id) ctx.ownImageNodeIds[id] = true
             var svgImgCls = apNodeClassList(("ap-image" + (svgImgAbs ? " ap-abs" : "")).trim(), id, opts)
             pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, svgImgAbs)
-            var html = indent(depth) + '<div class="' + svgImgCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>'
+            var html = indent(depth) + '<div class="' + svgImgCls + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (path || "") + '" alt="' + altText + '" /></div>'
             return wrapIfBtn(node, html, depth)
         })
     }
@@ -4377,7 +4566,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (id) ctx.ownImageNodeIds[id] = true
             var figureCls = apNodeClassList("ap-image" + (imgAbs ? " ap-abs" : ""), id, opts)
             pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs)
-            var figureHtml = '<div class="' + figureCls + '"><img src="' + (path || "") + '" alt="' + altText + '" /></div>'
+            var figureHtml = '<div class="' + figureCls + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (path || "") + '" alt="' + altText + '" /></div>'
             return wrapIfBtn(node, indent(depth) + figureHtml, depth)
         })
     }
@@ -4708,6 +4897,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
         // section style: height + background (incl child bg detection) + flex(섹션이 Auto Layout일 때)
         return buildSectionBackgroundAsync(sectionNode, cache, secNo).then(function (bg) {
+            var slideSectionMeta = null
             var sectionSemantics = buildSectionSemanticClasses(sectionNode, geoStructure, bg.bgChildId)
             promoteRasterTextNodesToImageSemantics(sectionNode, sectionSemantics, allowedFontsForHtml, fontHtmlUnrestricted)
             demoteNestedDuplicateSectionRoles(sectionNode, sectionSemantics)
@@ -4720,12 +4910,17 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 mobileRoot: mobileRoot || null,
             }
             var sectionDeclParts = []
+            var slideData = getSlideItems(sectionNode)
 
-            // 섹션 높이: 슬라이드 섹션은 슬라이드 아이템 높이 최댓값 → --ap-section-h, 그 외는 섹션 박스 높이
             var box = getAbs(sectionNode)
-            if (getSlideItems(sectionNode)) {
-                var maxPcSlideH = maxSwiperSlideItemHeightPx(sectionNode, bg.bgChildId)
-                if (maxPcSlideH > 0) sectionDeclParts.push("--ap-section-h:" + r2(maxPcSlideH))
+            if (slideData) {
+                var mSecForSlide = mobileRoot ? (getSectionNodes(mobileRoot)[secNo - 1] || null) : null
+                slideSectionMeta = resolveSlideMeta(sectionNode, mSecForSlide, bg.bgChildId, {
+                    mobileRoot: mobileRoot || null,
+                    secNo: secNo,
+                })
+                var finalSecH = computeFinalSectionHeight(sectionNode, bg.bgChildId, slideSectionMeta)
+                if (finalSecH > 0) sectionDeclParts.push("--ap-section-h:" + r2(finalSecH))
                 else sectionDeclParts.push("min-height:auto")
             } else if (box && box.h != null) {
                 sectionDeclParts.push("--ap-section-h:" + box.h)
@@ -4750,12 +4945,18 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (sectionNode.id != null) ctx.exportedNodeIds[String(sectionNode.id)] = true
 
             var secClassList =
-                apNodeClassList("ap-section ap-section--" + secClass + (isFlex(sectionNode) ? " ap-flex" : ""), String(sectionNode.id), {
-                    sectionSemantics: {},
-                })
+                apNodeClassList(
+                    "ap-section ap-section--" +
+                        secClass +
+                        (isFlex(sectionNode) ? " ap-flex" : "") +
+                        (slideData ? " ap-section--swiper" : ""),
+                    String(sectionNode.id),
+                    {
+                        sectionSemantics: {},
+                    },
+                )
             contentLines.push('    <section class="' + secClassList + '">')
 
-            var slideData = getSlideItems(sectionNode)
             var slideParent = sectionNode
             var slideItems = slideData ? collectSwiperSlideItemNodes(sectionNode, bg.bgChildId) : []
             if (slideData) slideParent = slideData.parent || sectionNode
@@ -4849,20 +5050,26 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 hasSlideSection = true
 
                 var slideCount = slideItems.length
-                var pcSlidesPerView = computeSlidesPerView(sectionNode, bg.bgChildId, 1)
-                var moSlidesPerView = pcSlidesPerView
-
-                if (sectionRenderOpts && sectionRenderOpts.mobileRoot) {
-                    var mobileSections = getSectionNodes(sectionRenderOpts.mobileRoot)
-                    var mobileSectionNode = mobileSections[secNo - 1] || null
-                    moSlidesPerView = computeSlidesPerViewMo(sectionNode, mobileSectionNode, bg.bgChildId, pcSlidesPerView)
-                }
+                var swiperMeta =
+                    slideSectionMeta ||
+                    resolveSlideMeta(sectionNode, mobileRoot ? (getSectionNodes(mobileRoot)[secNo - 1] || null) : null, bg.bgChildId, {
+                        mobileRoot: mobileRoot || null,
+                        secNo: secNo,
+                    })
+                var pcSlidesPerView = swiperMeta.pcSlidesPerView
+                var moSlidesPerView = swiperMeta.moSlidesPerView
+                var pcSlideSpace = Math.round(Number(swiperMeta.pcSlideSpaceBetween) || 0)
+                var moSlideSpace = Math.round(Number(swiperMeta.moSlideSpaceBetween) || 0)
 
                 contentLines.push(
                     '      <div class="swiper" data-slide-view="' +
                         escapeHtml(String(pcSlidesPerView)) +
                         '" data-slide-view-mo="' +
                         escapeHtml(String(moSlidesPerView)) +
+                        '" data-slide-space-pc="' +
+                        escapeHtml(String(pcSlideSpace)) +
+                        '" data-slide-space-mo="' +
+                        escapeHtml(String(moSlideSpace)) +
                         '">',
                 )
                 contentLines.push('        <div class="swiper-wrapper">')
@@ -4885,7 +5092,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         return renderSlide(idx + 1)
                     }
 
-                    return renderSectionChildAsync(ch, slideParent, secNo, secClass, bg, 6, sectionRenderOpts).then(function (html) {
+                    return renderSectionChildAsync(ch, slideParent, secNo, secClass, bg, 6, Object.assign({}, sectionRenderOpts, { insideSwiperSlide: true })).then(function (html) {
                         if (html) contentLines.push(html)
                         contentLines.push("          </div>")
                         return renderSlide(idx + 1)
@@ -4926,6 +5133,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         }
         if (hasSlideSection) {
             codeLines.push("")
+            codeLines.push("/* 슬라이드: 다음 장 피크·카드 폭이 슬라이드 셀보다 클 때 섹션/셀 overflow로 잘리지 않게 */")
+            codeLines.push(".ap-section--swiper { overflow: visible; }")
             codeLines.push(".ap-post .swiper {")
             codeLines.push("  width:100%; min-width:0; flex:1 1 auto; align-self:stretch;")
             codeLines.push("  height:100%; min-height:200px;")
@@ -4935,7 +5144,11 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             codeLines.push("}")
             codeLines.push(".ap-post .ap-section.ap-flex > .swiper { width:100%; }")
             codeLines.push(
-                ".ap-post .swiper .swiper-slide { min-height:calc(var(--ap-section-h, 400) / var(--ap-width) * 100cqi); height:auto; box-sizing:border-box; }",
+                ".ap-post .swiper .swiper-slide { overflow: visible; min-height:calc(var(--ap-section-h, 400) / var(--ap-width) * 100cqi); height:auto; box-sizing:border-box; }",
+            )
+            codeLines.push(".ap-post .swiper .swiper-slide .ap-image { overflow: visible; max-width: none; }")
+            codeLines.push(
+                ".ap-post .swiper .swiper-slide .ap-image img { max-width: 100%; width: auto; height: auto; display: block; }",
             )
             codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after { content:none; }")
             codeLines.push(".ap-post .swiper-button-prev,")
@@ -4974,14 +5187,18 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 '\n' +
                 '    var pcView = parseFloat(el.getAttribute("data-slide-view") || "1");\n' +
                 '    var moView = parseFloat(el.getAttribute("data-slide-view-mo") || "1");\n' +
+                '    var pcSpace = parseFloat(el.getAttribute("data-slide-space-pc") || "0");\n' +
+                '    var moSpace = parseFloat(el.getAttribute("data-slide-space-mo") || "0");\n' +
                 '\n' +
                 '    if (!isFinite(pcView) || pcView <= 0) pcView = 1;\n' +
                 '    if (!isFinite(moView) || moView <= 0) moView = 1;\n' +
+                '    if (!isFinite(pcSpace) || pcSpace < 0) pcSpace = 0;\n' +
+                '    if (!isFinite(moSpace) || moSpace < 0) moSpace = 0;\n' +
                 '\n' +
                 '    new Swiper(el, {\n' +
                 '      slidesPerView: moView,\n' +
-                '      spaceBetween: 0,\n' +
-                '      watchOverflow: false,\n' +
+                '      spaceBetween: moSpace,\n' +
+                '      watchOverflow: true,\n' +
                 '      pagination: {\n' +
                 '        el: el.querySelector(".swiper-pagination"),\n' +
                 '        clickable: true\n' +
@@ -4992,7 +5209,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 '      },\n' +
                 '      breakpoints: {\n' +
                 '        768: {\n' +
-                '          slidesPerView: pcView\n' +
+                '          slidesPerView: pcView,\n' +
+                '          spaceBetween: pcSpace\n' +
                 '        }\n' +
                 '      }\n' +
                 '    });\n' +
@@ -5006,7 +5224,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     })
 }
 
-// ----- UI Message Router (ui.html → code.js) -----
+// ----- 1. UI Router (ui.html → code.js) -----
 figma.ui.onmessage = function (msg) {
     if (!msg) return
 
