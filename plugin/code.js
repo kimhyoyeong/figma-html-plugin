@@ -18,6 +18,53 @@ setTimeout(function () {
 function r2(v) {
     return Math.round(v * 100) / 100
 }
+/** CSS 출력용: 거의 정수면 정수, 아니면 소수 최대 2자리·불필요한 끝 0 제거 */
+function cssOutNum(v) {
+    if (v == null || v === "") return ""
+    var n = Number(v)
+    if (!isFinite(n)) return String(v)
+    if (Math.abs(n - Math.round(n)) < 1e-4) return String(Math.round(n))
+    var x = Math.round(n * 100) / 100
+    if (Math.abs(x - Math.round(x)) < 1e-4) return String(Math.round(x))
+    var s = x.toFixed(2).replace(/\.?0+$/, "")
+    return s
+}
+/** 간격·패딩 등 레이아웃 px: 정수로 통일 (Figma 부동소수·긴 소수 제거) */
+function cssOutLayoutPx(v) {
+    if (v == null || v === "") return ""
+    var n = Number(v)
+    if (!isFinite(n)) return String(v)
+    return String(Math.round(n))
+}
+/** 레이아웃 숫자 비교용 (부동소수·문자열 차이로 인한 불필요한 MO :0 방지) */
+function layoutPxInt(s) {
+    return Math.round(Number(s !== "" && s != null ? s : 0) || 0)
+}
+/** 좌표·크기 비교용 */
+function layoutPxNum(n) {
+    if (n == null || !isFinite(Number(n))) return 0
+    return Math.round(Number(n))
+}
+/** abs+AutoLayout: 자식 없고 갭·패딩도 없으면 ap-flex 불필요(display:flex 낭비) */
+function useApFlexClass(node, abs, flex) {
+    if (!flex) return false
+    if (!abs) return true
+    var vis = 0
+    var ch = (node && node.children) || []
+    for (var i = 0; i < ch.length; i++) {
+        if (ch[i] && isVisible(ch[i])) vis++
+    }
+    if (vis > 0) return true
+    var lv = getLayoutVars(node)
+    if (!lv) return false
+    return (
+        layoutPxInt(lv.gap) !== 0 ||
+        layoutPxInt(lv.pt) !== 0 ||
+        layoutPxInt(lv.pr) !== 0 ||
+        layoutPxInt(lv.pb) !== 0 ||
+        layoutPxInt(lv.pl) !== 0
+    )
+}
 /** 1~9를 "01", "02" 형태 2자리 문자열로 */
 function pad2(n) {
     n = Number(n) || 0
@@ -344,19 +391,19 @@ function buildLineVarsDecl(node) {
     var len, rot
     if (node.type === "LINE") {
         len = typeof node.width === "number" ? node.width : 100
-        rot = typeof node.rotation === "number" ? r2(node.rotation) : 0
+        rot = typeof node.rotation === "number" ? node.rotation : 0
     } else {
         var box = getAbs(node)
         if (!box || box.w == null) return ""
         len = Math.max(box.w, box.h != null ? box.h : 0) || 100
-        rot = typeof node.rotation === "number" ? r2(node.rotation) : 0
+        rot = typeof node.rotation === "number" ? node.rotation : 0
         weight = weight > 0 ? weight : box.h != null && box.h > 0 ? box.h : 1
     }
     var parts = []
-    parts.push("--ap-line-w:" + r2(len))
-    parts.push("--ap-line-h:" + r2(weight))
+    parts.push("--ap-line-w:" + cssOutLayoutPx(len))
+    parts.push("--ap-line-h:" + cssOutLayoutPx(weight))
     parts.push("--ap-line-color:" + color)
-    parts.push("--ap-line-rot:" + rot)
+    parts.push("--ap-line-rot:" + cssOutNum(rot))
     return parts.join(";")
 }
 /** PC/MO LINE diff */
@@ -376,10 +423,10 @@ function buildEllipseVarsDecl(node) {
     var fill = getFirstSolidFill(node)
     var stroke = getFirstSolidStroke(node)
     var parts = []
-    parts.push("--ap-ellipse-w:" + r2(box.w))
-    parts.push("--ap-ellipse-h:" + r2(box.h))
+    parts.push("--ap-ellipse-w:" + cssOutLayoutPx(box.w))
+    parts.push("--ap-ellipse-h:" + cssOutLayoutPx(box.h))
     parts.push("--ap-ellipse-bgc:" + (fill && fill.color ? fill.color : "transparent"))
-    parts.push("--ap-ellipse-bd:" + (stroke && stroke.weight > 0 ? r2(stroke.weight) : "0"))
+    parts.push("--ap-ellipse-bd:" + (stroke && stroke.weight > 0 ? cssOutLayoutPx(stroke.weight) : "0"))
     parts.push("--ap-ellipse-bdc:" + (stroke && stroke.color ? stroke.color : "transparent"))
     return parts.join(";")
 }
@@ -778,12 +825,12 @@ function getLayoutVars(node) {
 
         var primary = String(node.primaryAxisAlignItems || "").toUpperCase()
         var gap = Number(node.itemSpacing) || 0
-        out.gap = primary === "SPACE_BETWEEN" ? "0" : r2(gap)
+        out.gap = primary === "SPACE_BETWEEN" ? "0" : cssOutLayoutPx(gap)
 
-        out.pt = r2(Number(node.paddingTop) || 0)
-        out.pr = r2(Number(node.paddingRight) || 0)
-        out.pb = r2(Number(node.paddingBottom) || 0)
-        out.pl = r2(Number(node.paddingLeft) || 0)
+        out.pt = cssOutLayoutPx(Number(node.paddingTop) || 0)
+        out.pr = cssOutLayoutPx(Number(node.paddingRight) || 0)
+        out.pb = cssOutLayoutPx(Number(node.paddingBottom) || 0)
+        out.pl = cssOutLayoutPx(Number(node.paddingLeft) || 0)
 
         if (primary === "MIN") out.justify = "flex-start"
         else if (primary === "MAX") out.justify = "flex-end"
@@ -818,44 +865,76 @@ function getLayoutVars(node) {
     return out
 }
 
+/** .ap-flex 생성부의 --ap-* 초기값과 반드시 동기화 */
+var AP_FLEX_STYLE_DEFAULTS = {
+    direction: "row",
+    wrap: "nowrap",
+    justify: "flex-start",
+    align: "stretch",
+}
+
+function getFlexStyleDefaultForKey(key) {
+    if (key === "direction") return AP_FLEX_STYLE_DEFAULTS.direction
+    if (key === "wrap") return AP_FLEX_STYLE_DEFAULTS.wrap
+    if (key === "justify") return AP_FLEX_STYLE_DEFAULTS.justify
+    if (key === "align") return AP_FLEX_STYLE_DEFAULTS.align
+    return ""
+}
+
+/** PC 섹션 export와 동일: 단일 자식 + align center → flex-start */
+function applySectionSingleChildAlignOverride(sectionNode, lv) {
+    if (!lv || !sectionNode) return lv
+    var vis = (sectionNode.children || []).filter(function (c) {
+        return c && isVisible(c)
+    })
+    if (vis.length === 1 && lv.align === "center") return Object.assign({}, lv, { align: "flex-start" })
+    return lv
+}
+
 /** ap-flex 노드용 flex CSS 변수 선언 */
 function buildFlexVarsDecl(layoutVars) {
     if (!layoutVars) return ""
     var parts = []
-    if (layoutVars.direction) parts.push("--ap-direction:" + layoutVars.direction)
-    parts.push("--ap-gap:" + (layoutVars.gap !== "" ? layoutVars.gap : "0"))
-    parts.push("--ap-pt:" + (layoutVars.pt !== "" ? layoutVars.pt : "0"))
-    parts.push("--ap-pr:" + (layoutVars.pr !== "" ? layoutVars.pr : "0"))
-    parts.push("--ap-pb:" + (layoutVars.pb !== "" ? layoutVars.pb : "0"))
-    parts.push("--ap-pl:" + (layoutVars.pl !== "" ? layoutVars.pl : "0"))
-    if (layoutVars.justify) parts.push("--ap-justify:" + layoutVars.justify)
-    if (layoutVars.align) parts.push("--ap-align:" + layoutVars.align)
-    if (layoutVars.wrap) parts.push("--ap-wrap:" + layoutVars.wrap)
+    var d = AP_FLEX_STYLE_DEFAULTS
+    if (layoutVars.direction && layoutVars.direction !== d.direction) parts.push("--ap-direction:" + layoutVars.direction)
+    var gapN = r2(Number(layoutVars.gap !== "" && layoutVars.gap != null ? layoutVars.gap : 0) || 0)
+    if (gapN !== 0) parts.push("--ap-gap:" + (layoutVars.gap !== "" ? layoutVars.gap : "0"))
+    if (r2(Number(layoutVars.pt !== "" && layoutVars.pt != null ? layoutVars.pt : 0) || 0) !== 0)
+        parts.push("--ap-pt:" + (layoutVars.pt !== "" ? layoutVars.pt : "0"))
+    if (r2(Number(layoutVars.pr !== "" && layoutVars.pr != null ? layoutVars.pr : 0) || 0) !== 0)
+        parts.push("--ap-pr:" + (layoutVars.pr !== "" ? layoutVars.pr : "0"))
+    if (r2(Number(layoutVars.pb !== "" && layoutVars.pb != null ? layoutVars.pb : 0) || 0) !== 0)
+        parts.push("--ap-pb:" + (layoutVars.pb !== "" ? layoutVars.pb : "0"))
+    if (r2(Number(layoutVars.pl !== "" && layoutVars.pl != null ? layoutVars.pl : 0) || 0) !== 0)
+        parts.push("--ap-pl:" + (layoutVars.pl !== "" ? layoutVars.pl : "0"))
+    if (layoutVars.justify && layoutVars.justify !== d.justify) parts.push("--ap-justify:" + layoutVars.justify)
+    if (layoutVars.align && layoutVars.align !== d.align) parts.push("--ap-align:" + layoutVars.align)
+    if (layoutVars.wrap && layoutVars.wrap !== d.wrap) parts.push("--ap-wrap:" + layoutVars.wrap)
     return parts.join(";")
 }
 
-/** 절대 위치 노드의 부모 기준 left/top/width/height (calc) */
+/** 절대 위치: 설계 좌표는 --ap-left/--ap-top/--ap-w/--ap-h (디자인 px). 실제 calc는 .ap-abs 공통 규칙. */
 function buildAbsDecl(childNode, parentNode) {
     var box = getAbs(childNode)
     var parentBox = getAbs(parentNode)
     if (!box || !parentBox) return ""
-    var relX = r2(box.x - parentBox.x)
-    var relY = r2(box.y - parentBox.y)
-    var w = box.w != null ? r2(box.w) : 0
-    var h = box.h != null ? r2(box.h) : 0
-    return "left:calc(" + relX + "/var(--ap-width)*100cqi);" + "top:calc(" + relY + "/var(--ap-width)*100cqi);" + "width:calc(" + w + "/var(--ap-width)*100cqi);" + "height:calc(" + h + "/var(--ap-width)*100cqi)"
+    var relX = cssOutLayoutPx(box.x - parentBox.x)
+    var relY = cssOutLayoutPx(box.y - parentBox.y)
+    var w = box.w != null ? cssOutLayoutPx(box.w) : "0"
+    var h = box.h != null ? cssOutLayoutPx(box.h) : "0"
+    return "--ap-left:" + relX + ";--ap-top:" + relY + ";--ap-w:" + w + ";--ap-h:" + h
 }
 
-/** TEXT 래스터(.ap-image) 절대 배치: 시각적 bounds 기준 left/top/width/height */
+/** TEXT 래스터(.ap-image) 절대 배치: 시각적 bounds 기준 */
 function buildAbsDeclTextRaster(childNode, parentNode) {
     var box = getTextRasterBounds(childNode) || getAbs(childNode)
     var parentBox = getAbs(parentNode)
     if (!box || !parentBox) return ""
-    var relX = r2(box.x - parentBox.x)
-    var relY = r2(box.y - parentBox.y)
-    var w = box.w != null ? r2(box.w) : 0
-    var h = box.h != null ? r2(box.h) : 0
-    return "left:calc(" + relX + "/var(--ap-width)*100cqi);" + "top:calc(" + relY + "/var(--ap-width)*100cqi);" + "width:calc(" + w + "/var(--ap-width)*100cqi);" + "height:calc(" + h + "/var(--ap-width)*100cqi)"
+    var relX = cssOutLayoutPx(box.x - parentBox.x)
+    var relY = cssOutLayoutPx(box.y - parentBox.y)
+    var w = box.w != null ? cssOutLayoutPx(box.w) : "0"
+    var h = box.h != null ? cssOutLayoutPx(box.h) : "0"
+    return "--ap-left:" + relX + ";--ap-top:" + relY + ";--ap-w:" + w + ";--ap-h:" + h
 }
 
 /** PC/MO TEXT 래스터 절대 위치 비교 후 MO 기준 선언 */
@@ -873,13 +952,15 @@ function buildAbsDeclTextRasterDiff(dChild, dParent, mChild, mParent) {
         mRelY = r2(mB.y - mPB.y),
         mW = r2(mB.w != null ? mB.w : 0),
         mH = r2(mB.h != null ? mB.h : 0)
-    if (dRelX === mRelX && dRelY === mRelY && dW === mW && dH === mH) return ""
+    if (layoutPxNum(dRelX) === layoutPxNum(mRelX) && layoutPxNum(dRelY) === layoutPxNum(mRelY) && layoutPxNum(dW) === layoutPxNum(mW) && layoutPxNum(dH) === layoutPxNum(mH))
+        return ""
     return buildAbsDeclTextRaster(mChild, mParent)
 }
 
 /** PC(d)와 MO(m) 레이아웃 변수 비교 후 달라진 것만 MO 값으로 선언 */
 function buildFlexVarsDeclDiff(dLv, mLv) {
     if (!mLv) return ""
+    var dNoFlex = !dLv
     var keys = ["direction", "gap", "pt", "pr", "pb", "pl", "justify", "align", "wrap"]
     var parts = []
     for (var k = 0; k < keys.length; k++) {
@@ -887,13 +968,44 @@ function buildFlexVarsDeclDiff(dLv, mLv) {
         var dv = dLv && dLv[key] != null ? String(dLv[key]) : ""
         var mv = mLv[key] != null ? String(mLv[key]) : ""
         if (key === "gap" || key === "pt" || key === "pr" || key === "pb" || key === "pl") {
-            if (r2(Number(dv) || 0) !== r2(Number(mv) || 0)) parts.push("--ap-" + (key === "gap" ? "gap" : key) + ":" + (mv !== "" ? mv : "0"))
-        } else if (dv !== mv) {
-            if (key === "direction" && mv) parts.push("--ap-direction:" + mv)
-            else if (key === "justify" && mv) parts.push("--ap-justify:" + mv)
-            else if (key === "align" && mv) parts.push("--ap-align:" + mv)
-            else if (key === "wrap" && mv) parts.push("--ap-wrap:" + mv)
+            var dN = layoutPxInt(dv)
+            var mN = layoutPxInt(mv)
+            if (dN === mN) continue
+            var prop = "--ap-" + (key === "gap" ? "gap" : key)
+            if (dNoFlex) {
+                if (mN === 0) continue
+                parts.push(prop + ":" + String(mN))
+                continue
+            }
+            if (mN === 0) {
+                if (dN !== 0) parts.push(prop + ":0")
+            } else parts.push(prop + ":" + String(mN))
+            continue
         }
+        if (dv === mv) continue
+        var def = getFlexStyleDefaultForKey(key)
+        if (!mv) continue
+        if (dNoFlex) {
+            if (mv === def) continue
+            if (key === "direction") parts.push("--ap-direction:" + mv)
+            else if (key === "justify") parts.push("--ap-justify:" + mv)
+            else if (key === "align") parts.push("--ap-align:" + mv)
+            else if (key === "wrap") parts.push("--ap-wrap:" + mv)
+            continue
+        }
+        if (mv === def) {
+            if (dv !== def && dv !== "") {
+                if (key === "direction") parts.push("--ap-direction:" + mv)
+                else if (key === "justify") parts.push("--ap-justify:" + mv)
+                else if (key === "align") parts.push("--ap-align:" + mv)
+                else if (key === "wrap") parts.push("--ap-wrap:" + mv)
+            }
+            continue
+        }
+        if (key === "direction") parts.push("--ap-direction:" + mv)
+        else if (key === "justify") parts.push("--ap-justify:" + mv)
+        else if (key === "align") parts.push("--ap-align:" + mv)
+        else if (key === "wrap") parts.push("--ap-wrap:" + mv)
     }
     return parts.join(";")
 }
@@ -913,8 +1025,24 @@ function buildAbsDeclDiff(dChild, dParent, mChild, mParent) {
         mRelY = r2(mB.y - mPB.y),
         mW = r2(mB.w != null ? mB.w : 0),
         mH = r2(mB.h != null ? mB.h : 0)
-    if (dRelX === mRelX && dRelY === mRelY && dW === mW && dH === mH) return ""
+    if (layoutPxNum(dRelX) === layoutPxNum(mRelX) && layoutPxNum(dRelY) === layoutPxNum(mRelY) && layoutPxNum(dW) === layoutPxNum(mW) && layoutPxNum(dH) === layoutPxNum(mH))
+        return ""
     return buildAbsDecl(mChild, mParent)
+}
+
+/** ap-section__image figure: 크기는 getImageSizeDeclDiff 의 --ap-w/--ap-h 만 쓰고, MO 절대배치는 left/top 만 */
+function buildAbsDeclDiffPositionOnly(dChild, dParent, mChild, mParent) {
+    var dB = getAbs(dChild)
+    var dPB = getAbs(dParent)
+    var mB = getAbs(mChild)
+    var mPB = getAbs(mParent)
+    if (!dB || !dPB || !mB || !mPB) return ""
+    var dRelX = r2(dB.x - dPB.x),
+        dRelY = r2(dB.y - dPB.y)
+    var mRelX = r2(mB.x - mPB.x),
+        mRelY = r2(mB.y - mPB.y)
+    if (layoutPxNum(dRelX) === layoutPxNum(mRelX) && layoutPxNum(dRelY) === layoutPxNum(mRelY)) return ""
+    return "--ap-left:" + cssOutLayoutPx(mRelX) + ";--ap-top:" + cssOutLayoutPx(mRelY)
 }
 
 /** PC(d)와 MO(m) 이미지 크기 비교 후 달라진 것만 MO 값으로 선언 */
@@ -922,14 +1050,14 @@ function getImageSizeDeclDiff(dNode, mNode) {
     var dBox = dNode && dNode.type === "TEXT" ? getTextRasterBounds(dNode) : getAbs(dNode)
     var mBox = mNode && mNode.type === "TEXT" ? getTextRasterBounds(mNode) : getAbs(mNode)
     if (!mBox || (mBox.w == null && mBox.h == null)) return ""
-    var dw = dBox && dBox.w != null ? r2(dBox.w) : null
-    var dh = dBox && dBox.h != null ? r2(dBox.h) : null
-    var mw = mBox.w != null ? r2(mBox.w) : null
-    var mh = mBox.h != null ? r2(mBox.h) : null
-    if (dw === mw && dh === mh) return ""
+    var dw = dBox && dBox.w != null ? layoutPxNum(dBox.w) : null
+    var dh = dBox && dBox.h != null ? layoutPxNum(dBox.h) : null
+    var mw = mBox.w != null ? layoutPxNum(mBox.w) : null
+    var mh = mBox.h != null ? layoutPxNum(mBox.h) : null
+    if (layoutPxNum(dw) === layoutPxNum(mw) && layoutPxNum(dh) === layoutPxNum(mh)) return ""
     var parts = []
-    if (mw != null) parts.push("--ap-w:" + mw)
-    if (mh != null) parts.push("--ap-h:" + mh)
+    if (mw != null) parts.push("--ap-w:" + cssOutLayoutPx(mw))
+    if (mh != null) parts.push("--ap-h:" + cssOutLayoutPx(mh))
     return parts.join(";")
 }
 
@@ -938,12 +1066,12 @@ function getVideoSizeDeclDiff(dNode, mNode) {
     var mAbs = getAbs(mNode)
     if (!mAbs || mAbs.w == null || mAbs.h == null || mAbs.h <= 0) return ""
     var dAbs = getAbs(dNode)
-    var dw = dAbs && dAbs.w != null ? r2(dAbs.w) : null
-    var dh = dAbs && dAbs.h != null ? r2(dAbs.h) : null
-    var mw = r2(mAbs.w)
-    var mh = r2(mAbs.h)
+    var dw = dAbs && dAbs.w != null ? layoutPxNum(dAbs.w) : null
+    var dh = dAbs && dAbs.h != null ? layoutPxNum(dAbs.h) : null
+    var mw = layoutPxNum(mAbs.w)
+    var mh = layoutPxNum(mAbs.h)
     if (dw === mw && dh === mh) return ""
-    return "aspect-ratio:" + mw + "/" + mh
+    return "aspect-ratio:" + cssOutLayoutPx(mw) + "/" + cssOutLayoutPx(mh)
 }
 /** 0~255 숫자 → 2자리 hex 문자열 */
 function toHex2(n) {
@@ -1008,6 +1136,68 @@ function hasImageFill(node) {
     return false
 }
 
+
+/** section이 캔버스형 레이아웃이면 min-height 필요 */
+function needsMinHeight(sectionNode) {
+    if (!sectionNode) return false
+
+    var children = sectionNode.children || []
+    var absCount = 0
+    for (var i = 0; i < children.length; i++) {
+        var c = children[i]
+        if (!c || !isVisible(c)) continue
+        if (isAbsoluteLike(c, sectionNode) || (c.layoutPositioning === "ABSOLUTE")) absCount++
+    }
+
+    var hasBgImage = false
+    try {
+        hasBgImage = hasImageFill(sectionNode)
+    } catch (e) {}
+
+    return absCount >= 1 || hasBgImage
+}
+
+/**
+ * PC 기본(.ap-section--NN): 캔버스형 min-height 블록을 넣을지.
+ * 슬라이더 섹션 제외, 박스 높이 있음, needsMinHeight 참일 때만 --ap-section-h + min-height(calc).
+ */
+function getPcSectionCanvasHeightDecls(sectionNode, slideData, box) {
+    if (slideData || !box || box.h == null || !needsMinHeight(sectionNode)) return null
+    return ["--ap-section-h:" + cssOutLayoutPx(box.h), "min-height:calc(var(--ap-section-h)/var(--ap-width)*100cqi)"]
+}
+
+/**
+ * @media(max-width): MO 섹션 높이를 PC와 맞출 때 (슬라이드 섹션 제외).
+ * - PC·MO 모두 비캔버스 → 선언 없음 (불필요한 --ap-section-h 제거)
+ * - MO만 캔버스형 → --ap-section-h + min-height (PC 베이스에 calc 없을 때)
+ * - PC 캔버스형(단독 또는 MO도 캔버스) → --ap-section-h만 MO 값으로 덮어씀 (min-height는 PC 베이스 규칙 유지)
+ */
+function getMediaSectionCanvasHeightDecl(dSec, mSec, mSecBox) {
+    if (!dSec || !mSec || getSlideItems(dSec) || !mSecBox || mSecBox.h == null) return null
+    var h = cssOutLayoutPx(mSecBox.h)
+    var pcNeed = needsMinHeight(dSec)
+    var moNeed = needsMinHeight(mSec)
+    if (!pcNeed && !moNeed) return null
+    if (moNeed && !pcNeed) {
+        return "--ap-section-h:" + h + ";min-height:calc(var(--ap-section-h)/var(--ap-width)*100cqi)"
+    }
+    if (pcNeed) return "--ap-section-h:" + h
+    return null
+}
+
+/** PC renderFrameNodeAsync와 동일: 배경(fill/이미지) 또는 stroke 또는 radius가 있을 때만 min-height 부여 */
+function frameHasMinHeightVisualReason(node) {
+    if (!node) return false
+    try {
+        if (hasImageFill(node)) return true
+        var fill = getFirstSolidFill(node)
+        if (fill && fill.color && (typeof fill.opacity !== "number" || fill.opacity > 0)) return true
+    } catch (e) {}
+    if (buildStrokeDecl(node)) return true
+    if (buildCornerRadiusDecl(node)) return true
+    return false
+}
+
 /** strokes에서 첫 번째 SOLID stroke 추출. 개별 변(FRAME/RECTANGLE) 지원 */
 function getFirstSolidStroke(node) {
     try {
@@ -1048,7 +1238,7 @@ function getFirstSolidStroke(node) {
 function buildCornerRadiusDecl(node) {
     if (!node) return ""
     var calc = function (px) {
-        return "calc(" + px + "/var(--ap-width)*100cqi)"
+        return "calc(" + cssOutLayoutPx(px) + "/var(--ap-width)*100cqi)"
     }
     try {
         var cr = node.cornerRadius
@@ -1070,7 +1260,7 @@ function buildStrokeDecl(node) {
     if (!stroke || !stroke.color) return ""
     var style = stroke.dashes ? "dashed" : "solid"
     var calc = function (w) {
-        return "calc(" + w + "/var(--ap-width)*100cqi)"
+        return "calc(" + cssOutLayoutPx(w) + "/var(--ap-width)*100cqi)"
     }
     var parts = []
     if (stroke.top > 0 || stroke.bottom > 0 || stroke.left > 0 || stroke.right > 0) {
@@ -1578,6 +1768,23 @@ function shouldExportAsSingleRasterImage(node) {
     return true
 }
 
+/**
+ * renderNodeAsync 최종 출력이 .ap-image(<img> 또는 SVG img)인지 — walkImg가 놓친 노드도
+ * walkFillMissing에서 ap-section__layer 대신 ap-section__image 로 맞추기 위해 사용.
+ * (이미지 2장 이상 분리 출력 프레임은 .ap-flex 등으로 나가므로 제외)
+ */
+function nodeWillRenderAsApImageFigure(node) {
+    if (!node || node.type === "TEXT") return false
+    if (isVideoNode(node)) return false
+    if (isVectorOnlyTree(node)) {
+        return !isLineLikeNode(node) && node.type !== "ELLIPSE"
+    }
+    if (!isImageCandidate(node)) return false
+    if (isContainer(node) && hasTextInSubtree(node)) return false
+    if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node)) return false
+    return true
+}
+
 /** fill 중 하나라도 opacity < 1 이면 true (투명 필요) */
 function hasVisibleFillWithOpacityLessThanOne(node) {
     try {
@@ -1790,6 +1997,18 @@ function sanitizeGeoRoleForBem(role) {
 }
 
 /**
+ * walkStructure 에서 depth 기반 container/content/… 를 줄 FRAME 인지.
+ * 단일 이미지·이미지 fill 위주 프레임 등은 leaf 가 tagImageNode 로 image 가 되므로 여기서 구조 역할을 주지 않음.
+ */
+function isSemanticWrapperFrame(n) {
+    if (!n || n.type !== "FRAME" || !isContainer(n)) return false
+    if (hasTextInSubtree(n)) return true
+    if (hasMultipleImageLikeChildren(n) && !isCompositeCandidate(n)) return false
+    if (isImageCandidate(n)) return false
+    return true
+}
+
+/**
  * 섹션 트리 기준 시맨틱 보조 클래스 (id → 클래스 배열).
  * geoHints: AI 검수 GEO.structure [{ text, role }] — 본문 텍스트 매칭 시 ap-section__* 우선 반영.
  * bgChildId: 섹션 배경으로만 승격된 직계 이미지 — HTML/CSS에 해당 노드가 없으므로 시맨틱·중복 접미사·이미지 번호에서 제외.
@@ -1808,7 +2027,7 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
 
     function walkStructure(n, depthFromSection) {
         if (!n || !isVisible(n)) return
-        if (n.id && n.type === "FRAME" && isContainer(n)) {
+        if (n.id && isSemanticWrapperFrame(n)) {
             var role = SECTION_STRUCTURE_LEVELS[depthFromSection - 1] || "part"
             add(n.id, apSectionBem(role))
         }
@@ -1916,12 +2135,10 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
         add(remaining[rj].id, apSectionBem(roleRem))
     }
 
+    /** walkStructure 가 먼지 부여한 content 등과 충돌하지 않게: .ap-image 로 나가는 노드는 시맨틱을 image 하나로만 둠 */
     function tagImageNode(n) {
         if (!n || !n.id) return
-        var nm = String(n.name || "").toLowerCase()
-        if (/logo|brand|wordmark|sym/.test(nm)) add(n.id, apSectionBem("logo"))
-        else if (/icon|deco|decoration|divider|bullet|line/.test(nm)) add(n.id, apSectionBem("decoration"))
-        else add(n.id, apSectionBem("image"))
+        map[String(n.id)] = [apSectionBem("image")]
     }
     function walkImg(n) {
         if (!n || !isVisible(n)) return
@@ -1954,6 +2171,8 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
             if (isVideoNode(n)) add(n.id, apSectionBem("video"))
             else if (isLineLikeNode(n)) add(n.id, apSectionBem("line"))
             else if (n.type === "ELLIPSE") add(n.id, apSectionBem("ellipse"))
+            else if (nodeWillRenderAsApImageFigure(n)) tagImageNode(n)
+            else if (isImageCandidate(n) && !isContainer(n)) tagImageNode(n)
             else add(n.id, apSectionBem("layer"))
         }
         if (isContainer(n)) for (var wf = 0; wf < (n.children || []).length; wf++) walkFillMissing(n.children[wf])
@@ -2062,7 +2281,7 @@ function cssInnerSelForNode(id, opts, forImgChild) {
     var pick = sem[sem.length - 1]
     if (forImgChild) {
         for (var i = sem.length - 1; i >= 0; i--) {
-            if (/__(image|logo|decoration)(--|$)/.test(sem[i])) {
+            if (/^ap-section__image(?:--[0-9]{2})?$/.test(String(sem[i] || ""))) {
                 pick = sem[i]
                 break
             }
@@ -2089,7 +2308,7 @@ function optsWithRasterTextAsImageSemantics(id, opts) {
         return !RASTER_STRIP_TEXT_ROLE_RE.test(String(c || ""))
     })
     var hasImgLike = arr.some(function (c) {
-        return /^ap-section__(image|logo|decoration)(--|$)/.test(String(c || ""))
+        return /^ap-section__image(?:--[0-9]{2})?$/.test(String(c || ""))
     })
     if (!hasImgLike) arr.push(apSectionBem("image") + disambigSuffix)
     var nextSem = {}
@@ -2200,8 +2419,8 @@ function getImageSizeDecl(node) {
     var box = node && node.type === "TEXT" ? getTextRasterBounds(node) : getAbs(node)
     if (!box || (box.w == null && box.h == null)) return ""
     var parts = []
-    if (box.w != null) parts.push("--ap-w:" + box.w)
-    if (box.h != null) parts.push("--ap-h:" + box.h)
+    if (box.w != null) parts.push("--ap-w:" + cssOutLayoutPx(box.w))
+    if (box.h != null) parts.push("--ap-h:" + cssOutLayoutPx(box.h))
     return parts.join(";")
 }
 
@@ -2640,17 +2859,17 @@ function buildTextVarsDecl(ts) {
     var clr = ts.clr || ""
 
     var parts = []
-    parts.push("--ap-fs:" + fs)
+    parts.push("--ap-fs:" + cssOutNum(fs))
 
     if (lhRaw > 0) {
         var lhPx = lhRaw
         if (lhRaw <= 3 && fs > 0) lhPx = lhRaw * fs // ratio -> px
-        parts.push("--ap-lh:" + r2(lhPx))
+        parts.push("--ap-lh:" + cssOutNum(lhPx))
     } else {
-        parts.push("--ap-lh:" + fs)
+        parts.push("--ap-lh:" + cssOutNum(fs))
     }
 
-    parts.push("--ap-ls:" + ls)
+    parts.push("--ap-ls:" + cssOutNum(ls))
     parts.push("--ap-fw:" + fw)
     parts.push("--ap-ta:" + ta)
     if (clr) parts.push("--ap-clr:" + clr)
@@ -2681,9 +2900,9 @@ function buildTextVarsDeclDiff(tsD, tsM) {
     }
     var d = normTs(tsD)
     var m = normTs(tsM)
-    if (d.fs !== m.fs) parts.push("--ap-fs:" + m.fs)
-    if (d.lhPx !== m.lhPx) parts.push("--ap-lh:" + m.lhPx)
-    if (r2(d.ls) !== r2(m.ls)) parts.push("--ap-ls:" + m.ls)
+    if (d.fs !== m.fs) parts.push("--ap-fs:" + cssOutNum(m.fs))
+    if (d.lhPx !== m.lhPx) parts.push("--ap-lh:" + cssOutNum(m.lhPx))
+    if (r2(d.ls) !== r2(m.ls)) parts.push("--ap-ls:" + cssOutNum(m.ls))
     if (d.fw !== m.fw) parts.push("--ap-fw:" + m.fw)
     if (d.ta !== m.ta) parts.push("--ap-ta:" + m.ta)
     if (d.clr !== m.clr && m.clr) parts.push("--ap-clr:" + m.clr)
@@ -2785,7 +3004,7 @@ function promoteRasterTextNodesToImageSemantics(sectionNode, map, allowedHtml, u
             return !RASTER_STRIP_TEXT_ROLE_RE.test(String(c || ""))
         })
         var hasImg = arr.some(function (c) {
-            return /^ap-section__(image|logo|decoration)(--|$)/.test(String(c || ""))
+            return /^ap-section__image(?:--[0-9]{2})?$/.test(String(c || ""))
         })
         if (!hasImg) {
             arr.push(apSectionBem("image"))
@@ -3153,6 +3372,94 @@ function stripUnusedApSectionBemFromContentLines(contentLines, usedBySection) {
     }
 }
 
+/**
+ * PC보내기 최종 article HTML에 등장한 ap-section__* 토큰만 섹션별 집계.
+ * deferred 규칙에 안 잡혀 stripUnused로 클래스가 빠진 뒤에도 MO가 옛 BEM으로 오버라이드하는 것을 막기 위함.
+ */
+function buildUsedApSectionBemFromArticleHtml(articleHtml) {
+    var map = Object.create(null)
+    if (!articleHtml) return map
+    var lines = String(articleHtml).split(/\r?\n/)
+    var stack = []
+    for (var i = 0; i < lines.length; i++) {
+        var line = lines[i]
+        if (/<section\b/i.test(line)) {
+            var sid = null
+            var cm = /class="([^"]*)"/.exec(line)
+            if (cm) {
+                var sm = cm[1].match(/(?:^|\s)ap-section--(\d+)(?:\s|$)/)
+                if (sm) sid = sm[1]
+            }
+            stack.push(sid)
+        }
+        var closeSecs = line.match(/<\/section>/gi)
+        if (closeSecs) {
+            for (var ci = 0; ci < closeSecs.length; ci++) if (stack.length) stack.pop()
+        }
+        var curSec = stack.length ? stack[stack.length - 1] : null
+        if (curSec == null) continue
+        var idx = 0
+        while (true) {
+            var q = line.indexOf('class="', idx)
+            if (q < 0) break
+            var eq = line.indexOf('"', q + 7)
+            if (eq < 0) break
+            var inner = line.slice(q + 7, eq)
+            var toks = inner.split(/\s+/).filter(Boolean)
+            for (var t = 0; t < toks.length; t++) {
+                if (toks[t].indexOf("ap-section__") === 0) {
+                    if (!map[curSec]) map[curSec] = Object.create(null)
+                    map[curSec][toks[t]] = true
+                }
+            }
+            idx = eq + 1
+        }
+    }
+    return map
+}
+
+function moOverrideSelectorPartIsLive(part, usedBySection) {
+    part = String(part || "").trim()
+    if (!part) return true
+    if (/^\.ap-section--\d+$/.test(part)) return true
+    if (/^\.ap-section--\d+\./.test(part)) {
+        if (!/ap-section__/.test(part)) return true
+        var m0 = /^\.ap-section--(\d+)/.exec(part)
+        if (!m0) return true
+        var sec0 = m0[1]
+        var used0 = usedBySection[sec0]
+        var re0 = /\.(ap-section__[a-zA-Z0-9_-]+)/g
+        var mm0
+        while ((mm0 = re0.exec(part)) !== null) {
+            if (!used0 || !used0[mm0[1]]) return false
+        }
+        return true
+    }
+    var m = /^\.ap-section--(\d+)\s+(.+)$/.exec(part)
+    if (!m) return true
+    var sec = m[1]
+    var rest = m[2]
+    var used = usedBySection[sec]
+    var re = /\.(ap-section__[a-zA-Z0-9_-]+)/g
+    var mm
+    while ((mm = re.exec(rest)) !== null) {
+        if (!used || !used[mm[1]]) return false
+    }
+    return true
+}
+
+/** MO @media 규칙: 본문에 없는 ap-section__* 를 가리키면 생략 */
+function moOverrideSelectorIsLive(sel, usedBySection) {
+    if (!usedBySection) return true
+    sel = String(sel || "").trim()
+    if (!sel) return true
+    var parts = splitTopLevelCommaSelectors(sel)
+    for (var p = 0; p < parts.length; p++) {
+        if (!moOverrideSelectorPartIsLive(parts[p], usedBySection)) return false
+    }
+    return true
+}
+
 var ASSETS_IMAGES_PREFIX = "assets/images/"
 /** 프로젝트명 → 파일명에 쓸 수 있는 문자열 (공백·특수문자 제거) */
 function normalizeProjectName(s) {
@@ -3464,6 +3771,22 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         if (!ownImageSet || id == null) return true
         return ownImageSet[String(id)] === true
     }
+    /** @media 블록 안: 동일 셀렉터 선언을 한 규칙으로 합침 (diff·파일 길이·리뷰용) */
+    var moMediaRuleList = []
+    function pushMoMoRule(sel, decl) {
+        if (!sel || !decl) return
+        if (options.usedApSectionBemBySection && !moOverrideSelectorIsLive(sel, options.usedApSectionBemBySection)) return
+        var d = dedupeCssDecl(String(decl).trim())
+        if (!d) return
+        sel = String(sel).trim()
+        for (var i = 0; i < moMediaRuleList.length; i++) {
+            if (moMediaRuleList[i].sel === sel) {
+                moMediaRuleList[i].decl = dedupeCssDecl(moMediaRuleList[i].decl + ";" + d)
+                return
+            }
+        }
+        moMediaRuleList.push({ sel: sel, decl: d })
+    }
     var lines = []
     var bp = Number(breakpoint) || 750
     lines.push("")
@@ -3498,6 +3821,8 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             }
             var sel = ""
             var declParts = []
+            var moImageFigureDup =
+                nodeHasApSectionImageSemantic(d.id, moOpts) && nodeWillRenderAsApImageFigure(d)
             if (d.type === "FRAME" && isContainer(d)) {
                 sel = ".ap-section--" + secClass + " " + cssInnerSelForNode(String(d.id), moOpts, false)
                 if (isFlex(m)) {
@@ -3506,9 +3831,11 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 }
                 var mAbs = isAbsoluteLike(m, mNode)
                 if (mAbs) {
-                    var ad = buildAbsDeclDiff(d, dNode, m, mNode)
-                    if (ad) declParts.push(ad)
-                } else {
+                    var adFr = moImageFigureDup
+                        ? buildAbsDeclDiffPositionOnly(d, dNode, m, mNode)
+                        : buildAbsDeclDiff(d, dNode, m, mNode)
+                    if (adFr) declParts.push(adFr)
+                } else if (!moImageFigureDup) {
                     var fillW = getFillFlexStartWidthDecl(m, mNode)
                     var fillWD = getFillFlexStartWidthDecl(d, dNode)
                     if (fillW && fillW !== fillWD && !nodeHasApSectionImageSemantic(d.id, moOpts)) declParts.push(fillW)
@@ -3516,14 +3843,27 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                         var mBox = getAbs(m)
                         var dBox = getAbs(d)
                         var mFixed = mBox && mBox.w != null && m.layoutSizingHorizontal === "FIXED"
-                        if (mFixed && r2(mBox.w) !== r2(dBox && dBox.w != null ? dBox.w : 0)) declParts.push("width:calc(" + r2(mBox.w) + "/var(--ap-width)*100cqi)")
+                        if (mFixed && layoutPxNum(mBox.w) !== layoutPxNum(dBox && dBox.w != null ? dBox.w : 0)) {
+                            declParts.push("--ap-w:" + cssOutLayoutPx(mBox.w))
+                            declParts.push("width:calc(var(--ap-w)/var(--ap-width)*100cqi)")
+                        }
                     }
                 }
                 var strokeDiff = buildStrokeDeclDiff(d, m)
                 if (strokeDiff) declParts.push(strokeDiff)
-                // 모바일에서도 min-height 오버라이드(데스크톱만 적용되던 min-height가 미디어쿼리에서 덮이도록)
+                // PC 프레임과 동일 조건(bg|stroke|radius) + 높이가 다를 때만 MO min-height (Auto Layout+HUG 세로 제외)
                 var mBoxH = getAbs(m)
-                if (mBoxH && mBoxH.h != null) declParts.push("min-height:calc(" + r2(mBoxH.h) + "/var(--ap-width)*100cqi)")
+                var dBoxH = getAbs(d)
+                var mMinReason = frameHasMinHeightVisualReason(m)
+                var dMinReason = frameHasMinHeightVisualReason(d)
+                if (!moImageFigureDup && mBoxH && mBoxH.h != null && mMinReason) {
+                    if (!(isFlex(m) && m.layoutSizingVertical !== "FIXED")) {
+                        var mh = layoutPxNum(mBoxH.h)
+                        var dh = dBoxH && dBoxH.h != null ? layoutPxNum(dBoxH.h) : null
+                        if (!dMinReason || dh === null || mh !== dh)
+                            declParts.push("min-height:calc(" + cssOutLayoutPx(mBoxH.h) + "/var(--ap-width)*100cqi)")
+                    }
+                }
             } else if (d.type === "TEXT" && m.type === "TEXT") {
                 if (ownImageSet && ownImageSet[String(d.id)]) {
                     var moRasterOpts = optsWithRasterTextAsImageSemantics(String(d.id), moOpts)
@@ -3562,34 +3902,31 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 if (fillW2 && fillW2 !== fillW2D && !nodeHasApSectionImageSemantic(d.id, moOpts)) declParts.push(fillW2)
                 var mAbs2 = isAbsoluteLike(m, mNode)
                 if (mAbs2) {
-                    var ad2 = buildAbsDeclDiff(d, dNode, m, mNode)
+                    var ad2 =
+                        moImageFigureDup && (isVectorOnlyTree(d) || hasImageFill(d) || isImageCandidate(d))
+                            ? buildAbsDeclDiffPositionOnly(d, dNode, m, mNode)
+                            : buildAbsDeclDiff(d, dNode, m, mNode)
                     if (ad2) declParts.push(ad2)
                 }
                 var strokeDiff2 = buildStrokeDeclDiff(d, m)
                 if (strokeDiff2) declParts.push(strokeDiff2)
             }
-            if (declParts.length && isExported(d.id)) lines.push("  " + sel + "{ " + declParts.join(";") + " }")
-            if ((isVectorOnlyTree(d) || hasImageFill(d) || isImageCandidate(d)) && isExported(d.id) && hasOwnImageFigure(d.id)) {
-                var sizeDecl = ""
-                var leafSel = ""
-                if (isLineLikeNode(d)) {
-                    sizeDecl = buildLineVarsDeclDiff(d, m)
-                    leafSel = cssInnerSelForNode(String(d.id), moOpts, false)
-                } else if (d.type === "ELLIPSE") {
-                    sizeDecl = buildEllipseVarsDeclDiff(d, m)
-                    leafSel = cssInnerSelForNode(String(d.id), moOpts, false)
-                } else if (isVideoNode(d)) {
-                    sizeDecl = getVideoSizeDeclDiff(d, m)
-                    leafSel = cssInnerSelForNode(String(d.id), moOpts, false)
-                } else {
-                    sizeDecl = getImageSizeDeclDiff(d, m)
-                    leafSel = cssInnerSelForNode(String(d.id), moOpts, true)
-                    if (imageOverrideDone && d.id != null) imageOverrideDone[String(d.id)] = true
-                }
-                if (sizeDecl && leafSel) {
-                    lines.push("  .ap-section--" + secClass + " " + leafSel + "{ " + sizeDecl + " }")
+            if ((isVectorOnlyTree(d) || hasImageFill(d) || isImageCandidate(d)) && d.id && isExported(d.id) && hasOwnImageFigure(d.id)) {
+                var sizeDeclM = ""
+                if (isLineLikeNode(d)) sizeDeclM = buildLineVarsDeclDiff(d, m)
+                else if (d.type === "ELLIPSE") sizeDeclM = buildEllipseVarsDeclDiff(d, m)
+                else if (isVideoNode(d)) sizeDeclM = getVideoSizeDeclDiff(d, m)
+                else sizeDeclM = getImageSizeDeclDiff(d, m)
+                if (sizeDeclM) {
+                    var leafSelM = cssInnerSelForNode(String(d.id), moOpts, false)
+                    var fullSelM = ".ap-section--" + secClass + " " + leafSelM
+                    if (sel && fullSelM === sel) declParts.push(sizeDeclM)
+                    else pushMoMoRule(fullSelM, sizeDeclM)
+                    if (imageOverrideDone && d.id != null && !isLineLikeNode(d) && d.type !== "ELLIPSE" && !isVideoNode(d))
+                        imageOverrideDone[String(d.id)] = true
                 }
             }
+            if (sel && declParts.length && isExported(d.id)) pushMoMoRule(sel, declParts.join(";"))
             if (d.type === "FRAME" && isContainer(d))
                 walkPair(d, m, m, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone, semMap)
         }
@@ -3604,15 +3941,16 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         if (!mSec || dSec.type !== mSec.type) continue
         var secClass = sectionClassPrefix(s + 1)
         var mSecBox = getAbs(mSec)
-        if (!getSlideItems(dSec) && mSecBox && mSecBox.h != null) {
-            lines.push("  .ap-section--" + secClass + "{ --ap-section-h:" + r2(mSecBox.h) + "; }")
-        }
+        var mediaSecH = getMediaSectionCanvasHeightDecl(dSec, mSec, mSecBox)
+        if (mediaSecH) pushMoMoRule(".ap-section--" + secClass, mediaSecH)
         if (isFlex(mSec)) {
-            var secLvDiff = buildFlexVarsDeclDiff(isFlex(dSec) ? getLayoutVars(dSec) : null, getLayoutVars(mSec))
-            if (secLvDiff) lines.push("  .ap-section--" + secClass + ".ap-flex{ " + secLvDiff + " }")
+            var dLvSec = isFlex(dSec) ? applySectionSingleChildAlignOverride(dSec, getLayoutVars(dSec)) : null
+            var mLvSec = applySectionSingleChildAlignOverride(mSec, getLayoutVars(mSec))
+            var secLvDiff = buildFlexVarsDeclDiff(dLvSec, mLvSec)
+            if (secLvDiff) pushMoMoRule(".ap-section--" + secClass + ".ap-flex", secLvDiff)
         }
         var secStrokeDiff = buildStrokeDeclDiff(dSec, mSec)
-        if (secStrokeDiff) lines.push("  .ap-section--" + secClass + "{ " + secStrokeDiff + " }")
+        if (secStrokeDiff) pushMoMoRule(".ap-section--" + secClass, secStrokeDiff)
         var secImageByName = collectImageNodesByName(mSec)
         var secTextByName = collectTextNodesByName(mSec)
         var sectionImageOverrideDone = {}
@@ -3643,8 +3981,9 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 if (mImg) {
                     var decl = getImageSizeDeclDiff(dNode, mImg)
                     if (decl)
-                        lines.push(
-                            "  .ap-section--" + secCls + " " + cssInnerSelForNode(String(dNode.id), deskMoOpts, true) + "{ " + decl + " }"
+                        pushMoMoRule(
+                            ".ap-section--" + secCls + " " + cssInnerSelForNode(String(dNode.id), deskMoOpts, false),
+                            decl
                         )
                 }
             }
@@ -3668,7 +4007,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                                 : cssInnerSelForNode(String(dNode.id), deskMoOpts, false)
                         if (ownImageSet && ownImageSet[String(dNode.id)]) {
                             var declTrN = getImageSizeDeclDiff(dNode, mText)
-                            if (declTrN) lines.push("  .ap-section--" + secCls + " " + deskTxtSel + "{ " + declTrN + " }")
+                            if (declTrN) pushMoMoRule(".ap-section--" + secCls + " " + deskTxtSel, declTrN)
                         } else {
                             var textDecl = buildTextVarsDeclDiff(tsD, tsM)
                             var nameTxtDecls = []
@@ -3680,7 +4019,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                                 if (adName) nameTxtDecls.push(adName)
                             }
                             if (nameTxtDecls.length) {
-                                lines.push("  .ap-section--" + secCls + " " + deskTxtSel + "{ " + nameTxtDecls.join(";") + " }")
+                                pushMoMoRule(".ap-section--" + secCls + " " + deskTxtSel, nameTxtDecls.join(";"))
                             }
                         }
                     }
@@ -3689,6 +4028,9 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             if (isContainer(dNode)) for (var j = 0; j < dNode.children.length; j++) pushTextOverridesByName(dNode.children[j], secCls, txtByName, overrideDone)
         }
         pushTextOverridesByName(dSec, secClass, secTextByName, sectionTextOverrideDone)
+    }
+    for (var moR = 0; moR < moMediaRuleList.length; moR++) {
+        lines.push("  " + moMediaRuleList[moR].sel + "{ " + dedupeCssDecl(moMediaRuleList[moR].decl) + " }")
     }
     lines.push("}")
     return lines.join("\n")
@@ -3839,10 +4181,20 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     var pc = parseCodeIntoParts(pcCode)
     var base = pc.baseStyles || ""
     var sectionStyles = pc.sectionStyles || ""
-    var overrides = buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options)
+    var artTrim = String(pc.articleHtml || "").trim()
+    var usedBem = artTrim ? buildUsedApSectionBemFromArticleHtml(pc.articleHtml) : null
+    var overrides = buildMobileOverrides(
+        desktopRoot,
+        mobileRoot,
+        breakpoint,
+        Object.assign({}, options, { usedApSectionBemBySection: usedBem }),
+    )
     overrides = injectBgOverridesForMo(sectionStyles, overrides)
 
-    var styleBlock = "<style>\n" + base + "\n" + (sectionStyles ? sectionStyles + "\n" : "") + overrides + "\n</style>\n\n"
+    var mergedCss = [base, sectionStyles, overrides].filter(function (x) {
+        return x && String(x).trim()
+    }).join("\n")
+    var styleBlock = "<style>" + compressCssForStyleTag(mergedCss) + "</style>\n\n"
     var articleHtml = pc.articleHtml || ""
     var bp = Number(breakpoint) || 750
     articleHtml = articleHtml.replace(/<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+)\.(png|jpg|jpeg)"([^>]*)>/gi, function (full, before, basePath, ext, after) {
@@ -4081,6 +4433,30 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
 }
 
 // ----- 9. HTML Renderers / Code Builder (node-id 기반 HTML·CSS) -----
+/** CMS <style> 블록용: 주석 제거·내부 공백 축약 + 닫는 } 마다 줄바꿈 (한 덩어리 한 줄 방지) */
+function compressCssForStyleTag(src) {
+    if (!src) return ""
+    var s = String(src)
+    s = s.replace(/\/\*[\s\S]*?\*\//g, "")
+    s = s.replace(/[\r\n\t]+/g, "")
+    s = s.replace(/\s*;\s*/g, ";")
+    s = s.replace(/\s*{\s*/g, "{")
+    s = s.replace(/\s*}\s*/g, "}")
+    s = s.replace(/\s*,\s*/g, ",")
+    s = s.replace(/\s+/g, " ")
+    s = s.replace(/;\s*}/g, "}")
+    s = s.replace(/}/g, "}\n")
+    s = s.replace(/@media/g, "\n@media")
+    s = s.replace(/\n+/g, "\n").replace(/^\n+/, "").trim()
+    return s
+}
+/** 생성된 HTML 문자열 안의 각 <style>…</style>을 압축 (CMS 산출물) */
+function compressEmbeddedStyleTagsInHtml(html) {
+    return String(html || "").replace(/<style>([\s\S]*?)<\/style>/gi, function (_, inner) {
+        return "<style>" + compressCssForStyleTag(inner) + "</style>"
+    })
+}
+
 /** 루트 노드와 캐시로 전체 HTML/CSS 문자열 생성 (섹션별 스타일·article 본문) */
 function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot) {
     var codeLines = []
@@ -4117,7 +4493,6 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push(".ap-section {")
     codeLines.push("  position:relative;")
     codeLines.push("  overflow:hidden;")
-    codeLines.push("  min-height:calc(var(--ap-section-h, 0) / var(--ap-width) * 100cqi);")
     codeLines.push("  background-color:var(--bgc,transparent);")
     codeLines.push("  background-image:var(--bg-img,none);")
     codeLines.push("  background-repeat:no-repeat;")
@@ -4128,6 +4503,16 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push(".ap-flex {")
     codeLines.push("  position:relative;")
     codeLines.push("  display:flex;")
+    // ✅ 기본값 추가
+    codeLines.push("  --ap-direction:row;")
+    codeLines.push("  --ap-wrap:nowrap;")
+    codeLines.push("  --ap-justify:flex-start;")
+    codeLines.push("  --ap-align:stretch;")
+    codeLines.push("  --ap-gap:0;")
+    codeLines.push("  --ap-pt:0;")
+    codeLines.push("  --ap-pr:0;")
+    codeLines.push("  --ap-pb:0;")
+    codeLines.push("  --ap-pl:0;")
     codeLines.push("  flex-direction:var(--ap-direction);")
     codeLines.push("  flex-wrap:var(--ap-wrap);")
     codeLines.push("  justify-content:var(--ap-justify);")
@@ -4139,7 +4524,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("  padding-left:calc(var(--ap-pl)/var(--ap-width)*100cqi);")
     codeLines.push("}")
 
-    codeLines.push(".ap-abs{ position:absolute; }")
+    codeLines.push(".ap-abs{")
+    codeLines.push("  position:absolute;")
+    codeLines.push("  left:calc(var(--ap-left, 0)/var(--ap-width)*100cqi);")
+    codeLines.push("  top:calc(var(--ap-top, 0)/var(--ap-width)*100cqi);")
+    codeLines.push("  width:calc(var(--ap-w, 0)/var(--ap-width)*100cqi);")
+    codeLines.push("  height:calc(var(--ap-h, 0)/var(--ap-width)*100cqi);")
+    codeLines.push("}")
     codeLines.push("")
 
     // text
@@ -4351,6 +4742,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var id = node.id != null ? String(node.id) : ""
         if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node)) {
             var absImgGrp = isAbsoluteLike(node, parent)
+            var useFlexImg = useApFlexClass(node, absImgGrp, isFlex(node))
             var declPartsImgGrp = []
             return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgImgGrp) {
                 if (bgImgGrp) declPartsImgGrp.push(bgImgGrp)
@@ -4360,19 +4752,19 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     var absImgGrpDecl = buildAbsDecl(node, parent)
                     if (absImgGrpDecl) declPartsImgGrp.push(absImgGrpDecl)
                 }
-                if (isFlex(node)) {
+                if (useFlexImg) {
                     var lvImgGrp = getLayoutVars(node)
                     var flexImgGrp = buildFlexVarsDecl(lvImgGrp)
                     if (flexImgGrp) declPartsImgGrp.push(flexImgGrp)
                 }
                 var fillWImgGrp = getFillFlexStartWidthDecl(node, parent)
                 if (fillWImgGrp && !nodeHasApSectionImageSemantic(node.id, opts)) declPartsImgGrp.push(fillWImgGrp)
-                if (!isFlex(node) && !absImgGrp && containerNeedsRelativeForAbsoluteChildren(node)) declPartsImgGrp.push("position:relative")
+                if (!useFlexImg && !absImgGrp && containerNeedsRelativeForAbsoluteChildren(node)) declPartsImgGrp.push("position:relative")
                 if (declPartsImgGrp.length && id) {
                     pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declPartsImgGrp.join(";"))
                 }
                 var chunksImg = []
-                var imgGrpBase = [isFlex(node) ? "ap-flex" : "", absImgGrp ? "ap-abs" : ""].filter(Boolean).join(" ")
+                var imgGrpBase = [useFlexImg ? "ap-flex" : "", absImgGrp ? "ap-abs" : ""].filter(Boolean).join(" ")
                 var imgGrpFrameCls = apNodeClassList(imgGrpBase, id, opts)
                 var imgGrpTagOpen = indent(depth) + '<div class="' + imgGrpFrameCls + '">'
                 var childrenImgGrp = node.children || []
@@ -4413,20 +4805,21 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var id = node.id != null ? String(node.id) : ""
         var abs = isAbsoluteLike(node, parent)
         var flex = isFlex(node)
+        var useFlex = useApFlexClass(node, abs, flex)
         var box = getAbs(node)
         var parentBox = parent ? getAbs(parent) : null
         var isFullWidth = node.layoutSizingHorizontal === "FILL" ||
             (parentBox && box && box.w != null && parentBox.w != null && r2(box.w) === r2(parentBox.w))
 
-        var frameBase = [flex ? "ap-flex" : "", abs ? "ap-abs" : "", isBtnNode(node) ? "ap-btn" : ""].filter(Boolean).join(" ")
+        var frameBase = [useFlex ? "ap-flex" : "", abs ? "ap-abs" : "", isBtnNode(node) ? "ap-btn" : ""].filter(Boolean).join(" ")
         var cls = apNodeClassList(frameBase, id, opts)
 
         // style decl for this frame: flex vars + bg (frame는 background-image 가능)
         var declParts = []
         /** 자기 자신이 ap-abs면 position은 클래스에만 있음 — relative를 deferred로 넣으면 섹션 셀렉터가 덮어써 깨짐 */
-        if (!flex && !abs && containerNeedsRelativeForAbsoluteChildren(node)) declParts.push("position:relative")
+        if (!useFlex && !abs && containerNeedsRelativeForAbsoluteChildren(node)) declParts.push("position:relative")
 
-        if (flex) {
+        if (useFlex) {
             var lv = getLayoutVars(node)
             var flexDecl = buildFlexVarsDecl(lv)
             if (flexDecl) declParts.push(flexDecl)
@@ -4443,7 +4836,10 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (fillWidthDecl && !nodeHasApSectionImageSemantic(node.id, opts)) declParts.push(fillWidthDecl)
             else if (!abs) {
                 var sizingH = node.layoutSizingHorizontal
-                if (sizingH === "FIXED" && box && box.w != null) declParts.push("width:calc(" + box.w + "/var(--ap-width)*100cqi)")
+                if (sizingH === "FIXED" && box && box.w != null) {
+                    declParts.push("--ap-w:" + cssOutLayoutPx(box.w))
+                    declParts.push("width:calc(var(--ap-w)/var(--ap-width)*100cqi)")
+                }
             }
         }
 
@@ -4451,19 +4847,28 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl) {
             if (bgDecl) {
                 declParts.push(bgDecl)
-                var hasWidth = declParts.some(function (s) { return String(s).indexOf("width:") !== -1 })
-                if (box && box.w != null && !hasWidth) declParts.push("width:calc(" + box.w + "/var(--ap-width)*100cqi)")
+                var hasWidth = declParts.some(function (s) {
+                    var t = String(s)
+                    return t.indexOf("width:") !== -1 || t.indexOf("--ap-w:") !== -1
+                })
+                if (box && box.w != null && !hasWidth) {
+                    declParts.push("--ap-w:" + cssOutLayoutPx(box.w))
+                    declParts.push("width:calc(var(--ap-w)/var(--ap-width)*100cqi)")
+                }
             }
             var strokeDecl = buildStrokeDecl(node)
             if (strokeDecl) declParts.push(strokeDecl)
             var radiusDecl = buildCornerRadiusDecl(node)
             if (radiusDecl) declParts.push(radiusDecl)
-            // min-height: 시각적 영역이 있을 때 최소 높이만 지정 → 콘텐츠가 늘어나도 잘리지 않고 유연하게 확장.
-            // ・배경(fill/이미지): bgDecl
-            // ・테두리: strokeDecl
-            // ・모서리 둥글기: radiusDecl (박스 느낌 있음)
-            // ・height 대신 min-height 사용 시 다국어/긴 텍스트 오버플로우 방지.
-            if (box && box.h != null && (bgDecl || strokeDecl || radiusDecl)) declParts.push("min-height:calc(" + box.h + "/var(--ap-width)*100cqi)")
+            // min-height: Auto Layout+HUG 세로면 콘텐츠 높이 우선 → 프레임 고정 높이 min-height 생략
+            // ・배경(fill/이미지): bgDecl · 테두리: strokeDecl · radius (박스 느낌)
+            if (
+                box &&
+                box.h != null &&
+                (bgDecl || strokeDecl || radiusDecl) &&
+                (!flex || node.layoutSizingVertical === "FIXED")
+            )
+                declParts.push("min-height:calc(" + cssOutLayoutPx(box.h) + "/var(--ap-width)*100cqi)")
 
             // abs 좌표(부모 기준)
             if (abs) {
@@ -4561,6 +4966,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     function renderGenericContainerAsync(node, parent, secNo, secClass, depth, opts) {
         var id = node.id != null ? String(node.id) : ""
         var abs2 = isAbsoluteLike(node, parent)
+        var flex = isFlex(node)
+        var useFlex = useApFlexClass(node, abs2, flex)
         var declParts2Visual = []  // 배경/테두리/abs → 있으면 반드시 래퍼 유지
         var declParts2Flex = []
 
@@ -4574,9 +4981,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 if (absDecl3) declParts2Visual.push(absDecl3)
             }
 
-            if (!isFlex(node) && !abs2 && containerNeedsRelativeForAbsoluteChildren(node)) declParts2Visual.push("position:relative")
+            if (!useFlex && !abs2 && containerNeedsRelativeForAbsoluteChildren(node)) declParts2Visual.push("position:relative")
 
-            if (isFlex(node)) {
+            if (useFlex) {
                 var lv3 = getLayoutVars(node)
                 var flexDecl3 = buildFlexVarsDecl(lv3)
                 if (flexDecl3) declParts2Flex.push(flexDecl3)
@@ -4591,8 +4998,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var groupHasVisualAttrs = declParts2Visual.length > 0
             var declParts2 = declParts2Visual.concat(declParts2Flex)
             var groupHasAttrs = declParts2.length > 0
-            // flex 전용 변수만 있어도 래퍼 유지(단일 자식이어도 ap-flex DOM이 사라지면 레이아웃·겹침 붕괴)
-            var skipGroupWrapper = singleChild && !groupHasAttrs
+            // 단일 자식·선언 없음이면 래퍼 생략. 단 Auto Layout(ap-flex)은 변수를 기본값만 써도 DOM은 유지
+            var skipGroupWrapper = singleChild && !groupHasAttrs && !isFlex(node)
 
             if (groupHasAttrs && id && !skipGroupWrapper) {
                 pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declParts2.join(";"))
@@ -4608,7 +5015,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
             var isGroupBtn = isBtnNode(node)
             var groupTag = isGroupBtn ? "a" : "div"
-            var groupBase = [isFlex(node) ? "ap-flex" : "", abs2 ? "ap-abs" : "", isBtnNode(node) ? "ap-btn" : ""].filter(Boolean).join(" ")
+            var groupBase = [useFlex ? "ap-flex" : "", abs2 ? "ap-abs" : "", isBtnNode(node) ? "ap-btn" : ""].filter(Boolean).join(" ")
             var frameCls = apNodeClassList(groupBase, id, opts)
             var groupTagOpen = "<" + groupTag + (isGroupBtn ? ' href="#"' : "") + ' class="' + frameCls + '">'
             var chunks2 = []
@@ -4758,8 +5165,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     secNo: secNo,
                 })
                 sectionDeclParts.push("height:auto;min-height:auto")
-            } else if (box && box.h != null) {
-                sectionDeclParts.push("--ap-section-h:" + box.h)
+            } else {
+                var pcSecH = getPcSectionCanvasHeightDecls(sectionNode, slideData, box)
+                if (pcSecH) {
+                    sectionDeclParts.push(pcSecH[0])
+                    sectionDeclParts.push(pcSecH[1])
+                }
             }
 
             if (bg.decl) sectionDeclParts.push(bg.decl)
@@ -4993,7 +5404,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         codeLines.push("</article>")
         codeLines.push("<!--//CMS-->")
 
-        var code = codeLines.join("\n").replace(/\u2028/g, "\n").replace(/\u2029/g, "\n")
+        var code = compressEmbeddedStyleTagsInHtml(codeLines.join("\n").replace(/\u2028/g, "\n").replace(/\u2029/g, "\n"))
         if (hasSlideSection) {
             // manifest networkAccess: cdnjs.cloudflare.com 만 허용 → jsdelivr 는 플러그인 UI/미리보기에서 차단됨
             var swiperCdnBase = "https://cdnjs.cloudflare.com/ajax/libs/Swiper/11.0.0"
