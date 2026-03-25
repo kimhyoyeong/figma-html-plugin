@@ -5,11 +5,20 @@ figma.showUI(__html__, {width: 900, height: 900})
 
 // ui 검수: 비전 기본 ON. 이미지 바이너리는 PC/MO 분석 후 RESULT_IMAGES_* 로만 UI 전달(ZIP만으로 코드만 붙은 경우 미전달).
 var AP_AI_DEFAULT_ALT_VISION = true
+/** AI 제공자 기본값 (ui.html 셀렉트·AI_UI_DEFAULTS와 동기) */
+var AP_AI_DEFAULT_PROVIDER = "gemini"
+/** Gemini 기본 모델 (Flash) */
+var AP_AI_DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 // 시맨틱 title/subtitle: 이 px 이하 → ap-section__desc
 var AP_SECTION_TITLE_MIN_FS = 26
 setTimeout(function () {
     try {
-        figma.ui.postMessage({type: "AI_UI_DEFAULTS", aiVisionAlt: AP_AI_DEFAULT_ALT_VISION})
+        figma.ui.postMessage({
+            type: "AI_UI_DEFAULTS",
+            aiVisionAlt: AP_AI_DEFAULT_ALT_VISION,
+            aiProvider: AP_AI_DEFAULT_PROVIDER,
+            aiGeminiModel: AP_AI_DEFAULT_GEMINI_MODEL
+        })
     } catch (e) {}
 }, 0)
 

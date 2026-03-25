@@ -985,8 +985,8 @@
             <button type="button" id="btnApplyAltProposals" class="gray" title="마지막 분석의 alt를 그대로 적용·헤딩은 동일 분석 headingAudit에 맞춰 패치">반영</button>
             <span class="aiRefineSep">|</span>
             <select id="aiProvider" class="field field--provider">
-              <option value="openai" selected>OpenAI</option>
-              <option value="gemini">Gemini</option>
+              <option value="openai">OpenAI</option>
+              <option value="gemini" selected>Gemini</option>
             </select>
             <input type="password" id="apiKey" class="field field--key" placeholder="OpenAI API 키" autocomplete="off" />
             <select id="aiModel" class="field field--model"></select>
@@ -1683,6 +1683,23 @@
     onmessage = function (e) {
       var msg = e.data.pluginMessage;
       if (!msg) return;
+
+      if (msg.type === "AI_UI_DEFAULTS") {
+        if (msg.aiProvider === "openai" || msg.aiProvider === "gemini") {
+          var pEl = $("#aiProvider");
+          if (pEl) pEl.value = msg.aiProvider;
+          renderAiModelOptions();
+          if (msg.aiGeminiModel && getAiProvider() === "gemini") {
+            var mEl = $("#aiModel");
+            var gm = String(msg.aiGeminiModel);
+            if (mEl && AI_PROVIDER_MODELS.gemini && AI_PROVIDER_MODELS.gemini.some(function (it) { return it.value === gm; })) {
+              mEl.value = gm;
+            }
+          }
+          syncApiKeyInputFromProvider();
+        }
+        return;
+      }
 
       if (msg.type === "LOADING") setLoading(!!msg.value);
       if (msg.type === "PROGRESS") setProgress(msg.phase, msg.current, msg.total);
@@ -2403,8 +2420,8 @@
 
     function getAiProvider() {
       var providerEl = $("#aiProvider");
-      var v = providerEl && providerEl.value ? String(providerEl.value) : "openai";
-      return AI_PROVIDER_MODELS[v] ? v : "openai";
+      var v = providerEl && providerEl.value ? String(providerEl.value) : "gemini";
+      return AI_PROVIDER_MODELS[v] ? v : "gemini";
     }
 
     function getCachedApiKey(provider) {
