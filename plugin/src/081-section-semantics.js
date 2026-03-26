@@ -35,6 +35,22 @@ function collectImageNodesByName(root) {
     return map
 }
 
+/** 섹션 서브트리에서 code-video 레이어를 name 기준으로 수집 (MO 비디오 이름 매칭용) */
+function collectVideoNodesByName(root) {
+    var map = {}
+    if (!root) return map
+    function walk(n) {
+        if (!n || !isVisible(n)) return
+        if (n.id && isVideoNode(n)) {
+            var key = String(n.name || "").trim()
+            if (key !== "" && !map[key]) map[key] = n
+        }
+        if (isContainer(n)) for (var i = 0; i < n.children.length; i++) walk(n.children[i])
+    }
+    walk(root)
+    return map
+}
+
 /** 섹션 서브트리에서 TEXT 노드를 레이어 name 기준으로 수집 (MO 텍스트 이름 매칭용) */
 function collectTextNodesByName(root) {
     var map = {}
@@ -301,7 +317,7 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
     /** walkStructure 가 먼지 부여한 content 등과 충돌하지 않게: .ap-image 로 나가는 노드는 시맨틱을 image 하나로만 둠 */
     function tagImageNode(n) {
         if (!n || !n.id) return
-        /** 이름이 video인 레이어는 render에서 플레이스홀더로 나감 — IMAGE fill 있어도 image 시맨틱만 주면 apply가 image를 지운 뒤 빈 map이 됨 */
+        /** 이름이 code-video인 레이어는 render에서 플레이스홀더로 나감 — IMAGE fill 있어도 image 시맨틱만 주면 apply가 image를 지운 뒤 빈 map이 됨 */
         if (isVideoNode(n)) {
             map[String(n.id)] = [apSectionBem("video")]
             return
@@ -310,12 +326,12 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
     }
     function walkImg(n) {
         if (!n || !isVisible(n)) return
-        if (isContainer(n) && hasTextInSubtree(n)) {
+        if (isContainer(n) && hasTextInSubtree(n) && !isCodeRasterNode(n)) {
             for (var k = 0; k < (n.children || []).length; k++) walkImg(n.children[k])
             return
         }
         if (isContainer(n) && isImageCandidate(n)) {
-            if (hasMultipleImageLikeChildren(n) && !isCompositeCandidate(n)) {
+            if (hasMultipleImageLikeChildren(n) && !isCompositeCandidate(n) && !isCodeRasterNode(n)) {
                 for (var k2 = 0; k2 < (n.children || []).length; k2++) walkImg(n.children[k2])
                 return
             }

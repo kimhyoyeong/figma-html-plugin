@@ -9,7 +9,7 @@
  */
 // Figma → HTML/CMS export.
 // 소스 파트는 build-paths.js 의 MAIN_SOURCE_DIR · 합쳐서 plugin/code.js (npm run build).
-figma.showUI(__html__, {width: 900, height: 900})
+figma.showUI(__html__, {width: 700, height: 900})
 
 // ui 검수: 비전 기본 ON. 이미지 바이너리는 PC/MO 분석 후 RESULT_IMAGES_* 로만 UI 전달(ZIP만으로 코드만 붙은 경우 미전달).
 var AP_AI_DEFAULT_ALT_VISION = true

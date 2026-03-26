@@ -422,7 +422,8 @@ function moOverrideSelectorPartIsLive(part, usedBySection) {
         var re0 = /\.(ap-section__[a-zA-Z0-9_-]+)/g
         var mm0
         while ((mm0 = re0.exec(part)) !== null) {
-            if (!used0 || !used0[mm0[1]]) return false
+            // 본문에 ap-section__* 집계가 없으면(섹션 키 없음) 필터 완화 — MO 오버라이드 전부 막히지 않게
+            if (used0 && !used0[mm0[1]]) return false
         }
         return true
     }
@@ -434,12 +435,12 @@ function moOverrideSelectorPartIsLive(part, usedBySection) {
     var re = /\.(ap-section__[a-zA-Z0-9_-]+)/g
     var mm
     while ((mm = re.exec(rest)) !== null) {
-        if (!used || !used[mm[1]]) return false
+        if (used && !used[mm[1]]) return false
     }
     return true
 }
 
-/** MO @media 규칙: 본문에 없는 ap-section__* 를 가리키면 생략 */
+/** MO @media 규칙: strip 후 본문에 남은 ap-section__* 집계가 있을 때만, 그 맵에 없는 토큰은 생략 */
 function moOverrideSelectorIsLive(sel, usedBySection) {
     if (!usedBySection) return true
     sel = String(sel || "").trim()

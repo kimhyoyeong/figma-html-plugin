@@ -119,7 +119,7 @@ function imageFillSourceHasTransparencyAsync(node) {
     try {
         var fills = node.fills
         if (!fills || fills === figma.mixed) return Promise.resolve(false)
-        for (var i = 0; i < fills.length; i++) {
+        for (var i = fills.length - 1; i >= 0; i--) {
             var f = fills[i]
             if (f && f.visible !== false && f.type === "IMAGE" && f.imageHash) {
                 var imageObj = figma.getImageByHash(f.imageHash)
@@ -357,7 +357,7 @@ function exportImageFillOnlyAsync(node) {
     try {
         var fills = node.fills
         if (!fills || fills === figma.mixed) return Promise.resolve(null)
-        for (var i = 0; i < fills.length; i++) {
+        for (var i = fills.length - 1; i >= 0; i--) {
             var f = fills[i]
             if (f && f.visible !== false && f.type === "IMAGE" && f.imageHash) {
                 var img = figma.getImageByHash(f.imageHash)
@@ -481,7 +481,7 @@ function isCompositeCandidate(node) {
  * - false: 이미지 fill 없고 클립 아님 → 일반 FRAME/GROUP (자식만 순회)
  */
 function isImageCandidate(node) {
-    return !!(node && (hasImageFill(node) || isCompositeCandidate(node)))
+    return !!(node && (hasImageFill(node) || isCompositeCandidate(node) || isCodeRasterNode(node)))
 }
 
 /**
@@ -492,6 +492,8 @@ function isImageCandidate(node) {
  * 3) (1)(2) 로도 안 막히는 경우만 true — 예: 리프 사각형+이미지 fill, 클립 마스크만 있는 그룹+이미지만 등.
  */
 function shouldExportAsSingleRasterImage(node) {
+    if (!node) return false
+    if (isCodeRasterNode(node)) return true
     if (!isImageCandidate(node)) return false
     if (isContainer(node) && hasTextInSubtree(node)) return false
     return true
@@ -505,6 +507,7 @@ function shouldExportAsSingleRasterImage(node) {
 function nodeWillRenderAsApImageFigure(node) {
     if (!node || node.type === "TEXT") return false
     if (isVideoNode(node)) return false
+    if (isCodeRasterNode(node)) return true
     if (isVectorOnlyTree(node)) {
         return !isLineLikeNode(node) && node.type !== "ELLIPSE"
     }

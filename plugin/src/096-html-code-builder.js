@@ -70,32 +70,10 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("  background-image:var(--bg-img,none);")
     codeLines.push("  background-repeat:no-repeat;")
     codeLines.push("  background-position:center;")
-    codeLines.push("  background-size:100% 100%;")
+    codeLines.push("  background-size:cover;")
     codeLines.push("}")
     codeLines.push("")
-    codeLines.push(".ap-flex {")
-    codeLines.push("  position:relative;")
-    codeLines.push("  display:flex;")
-    // ✅ 기본값 추가
-    codeLines.push("  --ap-direction:row;")
-    codeLines.push("  --ap-wrap:nowrap;")
-    codeLines.push("  --ap-justify:flex-start;")
-    codeLines.push("  --ap-align:stretch;")
-    codeLines.push("  --ap-gap:0;")
-    codeLines.push("  --ap-pt:0;")
-    codeLines.push("  --ap-pr:0;")
-    codeLines.push("  --ap-pb:0;")
-    codeLines.push("  --ap-pl:0;")
-    codeLines.push("  flex-direction:var(--ap-direction);")
-    codeLines.push("  flex-wrap:var(--ap-wrap);")
-    codeLines.push("  justify-content:var(--ap-justify);")
-    codeLines.push("  align-items:var(--ap-align);")
-    codeLines.push("  gap:calc(var(--ap-gap)/var(--ap-width)*100cqi);")
-    codeLines.push("  padding-top:calc(var(--ap-pt)/var(--ap-width)*100cqi);")
-    codeLines.push("  padding-right:calc(var(--ap-pr)/var(--ap-width)*100cqi);")
-    codeLines.push("  padding-bottom:calc(var(--ap-pb)/var(--ap-width)*100cqi);")
-    codeLines.push("  padding-left:calc(var(--ap-pl)/var(--ap-width)*100cqi);")
-    codeLines.push("}")
+    codeLines.push("")
 
     codeLines.push(".ap-abs{")
     codeLines.push("  position:absolute;")
@@ -130,7 +108,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     // image: 인라인은 --ap-w로 크기, absolute는 wrapper 크기에 맞춤(중복 제거)
     codeLines.push(".ap-image img {")
     codeLines.push("  width:calc(var(--ap-w, 0) / var(--ap-width) * 100cqi);")
-    codeLines.push("  height:auto;max-width:100%;")
+    codeLines.push("  height:calc(var(--ap-h, 0) / var(--ap-width) * 100cqi);")
     codeLines.push("  display:block;")
     codeLines.push("}")
     codeLines.push(".ap-image.ap-abs img { width:100%; height:100%; object-fit:contain; }")
@@ -368,7 +346,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     // 겹친 composite(clipsContent)일 때만 한 장으로 export. 분리된 이미지 2개 이상이면 래퍼로 풀어서 각각 figure로
     function renderImageNodeAsync(node, parent, secNo, secClass, depth, opts) {
         var id = node.id != null ? String(node.id) : ""
-        if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node)) {
+        if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node) && !isCodeRasterNode(node)) {
             var absImgGrp = isAbsoluteLike(node, parent)
             var useFlexImg = useApFlexClass(node, absImgGrp, isFlex(node))
             var declPartsImgGrp = []
@@ -382,7 +360,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 }
                 if (useFlexImg) {
                     var lvImgGrp = getLayoutVars(node)
-                    var flexImgGrp = buildFlexVarsDecl(lvImgGrp)
+                    var flexImgGrp = buildFlexDecl(lvImgGrp, node)
                     if (flexImgGrp) declPartsImgGrp.push(flexImgGrp)
                 }
                 var fillWImgGrp = getFillFlexStartWidthDecl(node, parent)
@@ -392,7 +370,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declPartsImgGrp.join(";"))
                 }
                 var chunksImg = []
-                var imgGrpBase = [useFlexImg ? "ap-flex" : "", absImgGrp ? "ap-abs" : ""].filter(Boolean).join(" ")
+                var imgGrpBase = [absImgGrp ? "ap-abs" : ""].filter(Boolean).join(" ")
                 var imgGrpFrameCls = apNodeClassList(imgGrpBase, id, opts)
                 var imgGrpTagOpen = indent(depth) + '<div class="' + imgGrpFrameCls + '">'
                 var childrenImgGrp = node.children || []
@@ -463,8 +441,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var isFullWidth = node.layoutSizingHorizontal === "FILL" ||
             (parentBox && box && box.w != null && parentBox.w != null && r2(box.w) === r2(parentBox.w))
 
-        var frameBase = [useFlex ? "ap-flex" : "", abs ? "ap-abs" : "", isBtnNode(node) ? "ap-btn" : ""].filter(Boolean).join(" ")
-        var cls = apNodeClassList(frameBase, id, opts)
+            var frameBase = [abs ? "ap-abs" : "", isBtnNode(node) ? "ap-btn" : ""].filter(Boolean).join(" ")
+            var cls = apNodeClassList(frameBase, id, opts)
 
         // style decl for this frame: flex vars + bg (frame는 background-image 가능)
         var declParts = []
@@ -473,14 +451,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
         if (useFlex) {
             var lv = getLayoutVars(node)
-            var flexDecl = buildFlexVarsDecl(lv)
+            var flexDecl = buildFlexDecl(lv, node)
             if (flexDecl) declParts.push(flexDecl)
         }
 
         if (isFullWidth && !nodeHasApSectionImageSemantic(node.id, opts)) {
-
             declParts.push("width:100%")
-
         }
 
         if (!isFullWidth) {
@@ -581,7 +557,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     (function () {
                         if (!isFlex(ch)) return Promise.resolve("")
                         var lv2 = getLayoutVars(ch)
-                        return Promise.resolve(buildFlexVarsDecl(lv2))
+                        return Promise.resolve(buildFlexDecl(lv2, ch))
                     })(),
                 ]).then(function (res) {
                     var itemDeclParts = [res[2], res[0]].filter(Boolean)
@@ -637,7 +613,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
             if (useFlex) {
                 var lv3 = getLayoutVars(node)
-                var flexDecl3 = buildFlexVarsDecl(lv3)
+                var flexDecl3 = buildFlexDecl(lv3, node)
                 if (flexDecl3) declParts2Flex.push(flexDecl3)
             }
 
@@ -667,7 +643,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
             var isGroupBtn = isBtnNode(node)
             var groupTag = isGroupBtn ? "a" : "div"
-            var groupBase = [useFlex ? "ap-flex" : "", abs2 ? "ap-abs" : "", isBtnNode(node) ? "ap-btn" : ""].filter(Boolean).join(" ")
+            var groupBase = [abs2 ? "ap-abs" : "", isBtnNode(node) ? "ap-btn" : ""].filter(Boolean).join(" ")
             var frameCls = apNodeClassList(groupBase, id, opts)
             var groupTagOpen = "<" + groupTag + (isGroupBtn ? ' href="#"' : "") + ' class="' + frameCls + '">'
             var chunks2 = []
@@ -700,7 +676,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             return renderTextNodeAsync(node, parent, secNo, secClass, depth, opts)
         }
 
-        // 레이어 이름이 video면 그룹/프레임 여부와 관계없이 비디오 플레이스홀더로 출력
+        // 레이어 이름이 code-video면 그룹/프레임 여부와 관계없이 비디오 플레이스홀더로 출력
         if (isVideoNode(node)) {
             var videoAbs = isAbsoluteLike(node, parent)
             var videoParentWraps = parent && parent.type === "FRAME" && isContainer(parent)
@@ -717,8 +693,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             return Promise.resolve(wrapIfBtn(node, indent(depth) + videoHtml, depth))
         }
 
-        // VECTOR — LINE/line/ELLIPSE는 CSS로 그리기, 나머지는 SVG export
-        if (isVectorOnlyTree(node)) {
+        // VECTOR — LINE/line/ELLIPSE는 CSS로 그리기, 나머지는 SVG export (code-raster는 단일 래스터로 아래 분기)
+        if (isVectorOnlyTree(node) && !isCodeRasterNode(node)) {
             return renderVectorNodeAsync(node, parent, secNo, secClass, depth, opts)
         }
 
@@ -843,9 +819,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 var sectionLayoutVars = getLayoutVars(sectionNode)
                 var visibleSecChildren = (sectionNode.children || []).filter(function (c) { return c && isVisible(c) })
                 if (visibleSecChildren.length === 1 && sectionLayoutVars.align === "center") {
-                    sectionLayoutVars = Object.assign({}, sectionLayoutVars, { align: "flex-start" })
+                    sectionLayoutVars = Object.assign({}, sectionLayoutVars, { align: "" })
                 }
-                var sectionFlexDecl = buildFlexVarsDecl(sectionLayoutVars)
+                var sectionFlexDecl = buildFlexDecl(sectionLayoutVars, sectionNode)
                 if (sectionFlexDecl) sectionDeclParts.push(sectionFlexDecl)
             }
 
@@ -859,7 +835,6 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 apNodeClassList(
                     "ap-section ap-section--" +
                         secClass +
-                        (isFlex(sectionNode) ? " ap-flex" : "") +
                         (slideData ? " ap-section--swiper" : ""),
                     String(sectionNode.id),
                     {
@@ -875,16 +850,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             function isSlideContainerNodeInSection(child) {
                 if (!slideData || !child) return false
 
-                // 케이스1) 섹션 자식 중 slide 그룹 1개 → slideData.parent가 그 그룹
+                // 케이스1) 섹션 자식 중 code-slide 그룹 1개 → slideData.parent가 그 그룹
                 if (slideData.parent && child.id === slideData.parent.id) return true
 
-                // 케이스2) 섹션 자식 중 slide 여러 개 → 자식들 자체가 이름 slide일 수 있음
+                // 케이스2) 섹션 자식 중 code-slide 여러 개 → 자식 레이어명이 code-slide일 수 있음
                 if (isSlideNode(child)) return true
 
-                // 케이스3) 섹션 자체가 slide면(=sectionNode가 slide 이름) 이 케이스는 보통 섹션 자체를 슬라이더로 쓰는거라
-                // 형제 개념이 없음. 여기선 section child들을 slideItems로 잡았으니 1-pass는 스킵하고 2-pass만 쓰고 싶으면:
-                //if (isSlideNode(sectionNode)) return true
-
+                // 케이스3) 섹션 자체가 code-slide면 — pass1 자식 순회와는 별도로 slideItems에서 처리
                 return false
             }
 

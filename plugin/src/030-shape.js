@@ -4,7 +4,7 @@
  * isLineLikeNode — LINE 또는 이름 "line" 벡터 트리 → ap-line 대상 (isVectorOnlyTree는 070)
  * buildLineVarsDecl / buildLineVarsDeclDiff — ap-line용 --ap-line-* 선언·PC/MO 차이
  * buildEllipseVarsDecl / buildEllipseVarsDeclDiff — 타원 --ap-ellipse-* 선언·차이
- * wrapIfBtn — btn 레이어를 <a class="ap-btn">로 감쌈
+ * wrapIfBtn — code-btn 레이어를 <a class="ap-btn">로 감쌈
  * textNodeTag — TEXT용 <a>/<span> 여는·닫는 태그
  * getImageAltText — 레이어 이름 기반 img alt (이스케이프·길이 제한)
  */
@@ -74,13 +74,13 @@ function buildEllipseVarsDeclDiff(dNode, mNode) {
     return mDecl
 }
 
-/** btn 노드면 <a href="#" class="ap-btn">로 감싸기. TEXT/프레임 btn은 각각 ap-btn을 태그 class에 직접 포함 */
+/** code-btn 노드면 <a href="#" class="ap-btn">로 감싸기. TEXT/프레임은 각각 ap-btn을 태그 class에 직접 포함 */
 function wrapIfBtn(node, html, depth) {
     if (!html || !isBtnNode(node)) return html
     return indent(depth) + '<a href="#" class="ap-btn">' + "\n" + html + "\n" + indent(depth) + "</a>"
 }
 
-/** TEXT 노드용 태그: btn이면 <a href="#" class="ap-btn ap-text">, 아니면 <span class="ap-text">. parentStyle 있으면 open에 style 속성 추가 */
+/** TEXT 노드용 태그: code-btn이면 <a href="#" class="ap-btn ap-text">, 아니면 <span class="ap-text">. parentStyle 있으면 open에 style 속성 추가 */
 function textNodeTag(node, textCls, dataIdAttr, depth, parentStyle) {
     var styleAttr = (parentStyle && String(parentStyle).trim()) ? ' style="' + String(parentStyle).trim() + '"' : ""
     var open = isBtnNode(node)

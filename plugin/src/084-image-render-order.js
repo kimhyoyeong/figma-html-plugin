@@ -43,13 +43,14 @@ function collectImageFigureNodeIdsRenderNodeAsync(node, parent, cache, secNo, ro
     if (isVideoNode(node)) return Promise.resolve([])
 
     if (isVectorOnlyTree(node)) {
+        if (isCodeRasterNode(node)) return node.id != null ? Promise.resolve([String(node.id)]) : Promise.resolve([])
         if (isLineLikeNode(node)) return Promise.resolve([])
         if (node.type === "ELLIPSE") return Promise.resolve([])
         return node.id != null ? Promise.resolve([String(node.id)]) : Promise.resolve([])
     }
 
     if (shouldExportAsSingleRasterImage(node)) {
-        if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node)) {
+        if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node) && !isCodeRasterNode(node)) {
             var childrenImgGrp = node.children || []
             var acc = []
             var ix = 0
@@ -143,7 +144,7 @@ function collectImageFigureNodeIdsGenericContainerAsync(node, parent, cache, sec
         if (!useFlex && !abs2 && containerNeedsRelativeForAbsoluteChildren(node)) declParts2Visual.push("position:relative")
         if (useFlex) {
             var lv3 = getLayoutVars(node)
-            var flexDecl3 = buildFlexVarsDecl(lv3)
+            var flexDecl3 = buildFlexDecl(lv3, node)
             if (flexDecl3) declParts2Visual.push(flexDecl3)
         }
         var fillWidthDecl2 = getFillFlexStartWidthDecl(node, parent)

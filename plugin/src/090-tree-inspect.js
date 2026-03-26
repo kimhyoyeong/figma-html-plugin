@@ -56,8 +56,8 @@ function flexDetails(node) {
     parts.push("flex-direction:" + (v.direction || ""))
     parts.push("gap:" + (v.gap !== "" ? v.gap : "0"))
     parts.push("padding:" + [v.pt, v.pr, v.pb, v.pl].join(" "))
-    parts.push("justify-content:" + (v.justify || ""))
-    parts.push("align-items:" + (v.align || ""))
+    parts.push("justify-content:" + (v.justify || "flex-start"))
+    parts.push("align-items:" + (v.align || "flex-start"))
     parts.push("flex-wrap:" + (v.wrap || ""))
     return parts.join("; ")
 }
@@ -96,8 +96,8 @@ function getFillFlexStartWidthDecl(node, parent) {
     if (node.layoutSizingHorizontal !== "FILL") return ""
     var pv = getLayoutVars(parent)
     var isColumn = pv.direction === "column"
-    if (isColumn && pv.align === "flex-start") return "width:100%"
-    if (!isColumn && pv.justify === "flex-start") return "width:100%"
+    if (isColumn && (pv.align === "" || pv.align === "flex-start")) return "width:100%"
+    if (!isColumn && (pv.justify === "" || pv.justify === "flex-start")) return "width:100%"
     return ""
 }
 

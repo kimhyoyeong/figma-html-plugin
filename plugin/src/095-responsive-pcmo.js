@@ -1,7 +1,7 @@
 /**
  * 095-responsive-pcmo — PC HTML + @media로 MO 스타일·배경·picture 병합
  *
- * buildMobileOverrides — PC/MO 트리 1:1 walk로 달라진 CSS만 @media 블록에 출력
+ * buildMobileOverrides — PC/MO 트리 visible 자식 인덱스 1:1 walk로 달라진 CSS만 @media에 출력
  * getSectionStructureMatch — 섹션별 구조 시그니처 일치 여부(하이브리드 경고용)
  * parseCodeIntoParts — 산출 HTML에서 base/section 스타일/article 분리
  * injectBgOverridesForMo — sectionStyles의 --bg-img를 MO용 _mo 경로로 덮어씀
@@ -9,13 +9,14 @@
  * combinePcMoAsBreakpoint — 위 요소 합쳐 최종 HTML 문자열
  */
 // ----- 6. Section Utils (배경은 buildSectionBackgroundAsync) -----
-/** PC HTML 기준 MO 미디어쿼리 오버라이드 (visible 자식 1:1 매칭, diff만 출력) */
+/** PC HTML 기준 MO 미디어쿼리 오버라이드 (visible 자식 인덱스 1:1 매칭, diff만 출력) */
 function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
     options = options || {}
     var exportedSet = options.exportedNodeIds || null
     var ownImageSet = options.ownImageNodeIds || null
     function isExported(id) {
         if (!exportedSet || id == null) return true
+        if (Object.keys(exportedSet).length === 0) return true
         return exportedSet[String(id)] === true
     }
     function hasOwnImageFigure(id) {
@@ -52,7 +53,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         return lines.join("\n")
     }
 
-    function walkPair(dNode, mNode, mParent, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone, semMap) {
+    function walkPair(dNode, mNode, mParent, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone, semMap, videoByName, videoOverrideDone) {
         var moOpts = { sectionSemantics: semMap || {} }
         var dKids = (dNode.children || []).filter(function (c) {
             return c && isVisible(c)
@@ -67,7 +68,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             if (d.type !== m.type) continue
             if (!d.id) {
                 if (d.type === "FRAME" && isContainer(d))
-                    walkPair(d, m, m, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone, semMap)
+                    walkPair(d, m, m, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone, semMap, videoByName, videoOverrideDone)
                 continue
             }
             var sel = ""
@@ -77,7 +78,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             if (d.type === "FRAME" && isContainer(d)) {
                 sel = ".ap-section--" + secClass + " " + cssInnerSelForNode(String(d.id), moOpts, false)
                 if (isFlex(m)) {
-                    var flexDiff = buildFlexVarsDeclDiff(isFlex(d) ? getLayoutVars(d) : null, getLayoutVars(m))
+                    var flexDiff = buildFlexDeclDiff(isFlex(d) ? getLayoutVars(d) : null, getLayoutVars(m), m)
                     if (flexDiff) declParts.push(flexDiff)
                 }
                 var mAbs = isAbsoluteLike(m, mNode)
@@ -145,7 +146,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var leafSelRaw = getLeafSelectorForNode(d, moOpts)
                 sel = leafSelRaw ? ".ap-section--" + secClass + " " + leafSelRaw.replace(/,/g, ", .ap-section--" + secClass + " ") : ""
                 if (isFlex(m)) {
-                    var flexDiff2 = buildFlexVarsDeclDiff(isFlex(d) ? getLayoutVars(d) : null, getLayoutVars(m))
+                    var flexDiff2 = buildFlexDeclDiff(isFlex(d) ? getLayoutVars(d) : null, getLayoutVars(m), m)
                     if (flexDiff2) declParts.push(flexDiff2)
                 }
                 var fillW2 = getFillFlexStartWidthDecl(m, mNode)
@@ -162,24 +163,30 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var strokeDiff2 = buildStrokeDeclDiff(d, m)
                 if (strokeDiff2) declParts.push(strokeDiff2)
             }
-            if ((isVectorOnlyTree(d) || hasImageFill(d) || isImageCandidate(d)) && d.id && isExported(d.id) && hasOwnImageFigure(d.id)) {
+            var sizePairVideo = isVideoNode(d) || isVideoNode(m)
+            if (
+                d.id &&
+                isExported(d.id) &&
+                (((isVectorOnlyTree(d) || hasImageFill(d) || isImageCandidate(d)) && hasOwnImageFigure(d.id)) || sizePairVideo)
+            ) {
                 var sizeDeclM = ""
                 if (isLineLikeNode(d)) sizeDeclM = buildLineVarsDeclDiff(d, m)
                 else if (d.type === "ELLIPSE") sizeDeclM = buildEllipseVarsDeclDiff(d, m)
-                else if (isVideoNode(d)) sizeDeclM = getVideoSizeDeclDiff(d, m)
+                else if (sizePairVideo) sizeDeclM = getVideoSizeDeclDiff(d, m)
                 else sizeDeclM = getImageSizeDeclDiff(d, m)
                 if (sizeDeclM) {
                     var leafSelM = cssInnerSelForNode(String(d.id), moOpts, false)
                     var fullSelM = ".ap-section--" + secClass + " " + leafSelM
                     if (sel && fullSelM === sel) declParts.push(sizeDeclM)
                     else pushMoMoRule(fullSelM, sizeDeclM)
-                    if (imageOverrideDone && d.id != null && !isLineLikeNode(d) && d.type !== "ELLIPSE" && !isVideoNode(d))
+                    if (sizePairVideo && videoOverrideDone && d.id != null) videoOverrideDone[String(d.id)] = true
+                    if (imageOverrideDone && d.id != null && !isLineLikeNode(d) && d.type !== "ELLIPSE" && !sizePairVideo)
                         imageOverrideDone[String(d.id)] = true
                 }
             }
             if (sel && declParts.length && isExported(d.id)) pushMoMoRule(sel, declParts.join(";"))
             if (d.type === "FRAME" && isContainer(d))
-                walkPair(d, m, m, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone, semMap)
+                walkPair(d, m, m, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone, semMap, videoByName, videoOverrideDone)
         }
     }
 
@@ -197,14 +204,16 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         if (isFlex(mSec)) {
             var dLvSec = isFlex(dSec) ? applySectionSingleChildAlignOverride(dSec, getLayoutVars(dSec)) : null
             var mLvSec = applySectionSingleChildAlignOverride(mSec, getLayoutVars(mSec))
-            var secLvDiff = buildFlexVarsDeclDiff(dLvSec, mLvSec)
-            if (secLvDiff) pushMoMoRule(".ap-section--" + secClass + ".ap-flex", secLvDiff)
+            var secLvDiff = buildFlexDeclDiff(dLvSec, mLvSec, mSec)
+            if (secLvDiff) pushMoMoRule(".ap-section--" + secClass, secLvDiff)
         }
         var secStrokeDiff = buildStrokeDeclDiff(dSec, mSec)
         if (secStrokeDiff) pushMoMoRule(".ap-section--" + secClass, secStrokeDiff)
         var secImageByName = collectImageNodesByName(mSec)
+        var secVideoByName = collectVideoNodesByName(mSec)
         var secTextByName = collectTextNodesByName(mSec)
         var sectionImageOverrideDone = {}
+        var sectionVideoOverrideDone = {}
         var sectionTextOverrideDone = {}
         var deskSem = buildSectionSemanticClasses(dSec, (options && options.geoStructure) || null)
         var allowedMo = Array.isArray(options.allowedFonts)
@@ -221,7 +230,19 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         demoteNestedDuplicateSectionRoles(dSec, deskSem)
         disambiguateSectionSemantics(dSec, deskSem)
         var deskMoOpts = { sectionSemantics: deskSem }
-        walkPair(dSec, mSec, mSec, secClass, secImageByName, sectionImageOverrideDone, secTextByName, sectionTextOverrideDone, deskSem)
+        walkPair(
+            dSec,
+            mSec,
+            mSec,
+            secClass,
+            secImageByName,
+            sectionImageOverrideDone,
+            secTextByName,
+            sectionTextOverrideDone,
+            deskSem,
+            secVideoByName,
+            sectionVideoOverrideDone
+        )
         // 이미지: 인덱스로 매칭 안 된 경우에만 레이어 name 기준으로 MO 매칭
         function pushImageOverridesByName(dNode, secCls, imgByName, overrideDone) {
             if (!dNode || !isVisible(dNode)) return
@@ -241,6 +262,30 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             if (isContainer(dNode)) for (var j = 0; j < dNode.children.length; j++) pushImageOverridesByName(dNode.children[j], secCls, imgByName, overrideDone)
         }
         pushImageOverridesByName(dSec, secClass, secImageByName, sectionImageOverrideDone)
+        // code-video: 인덱스 매칭이 어긋난 경우 레이어 name 기준으로 MO 비디오 aspect-ratio 등
+        function pushVideoOverridesByName(dNode, secCls, vidByName, overrideDone) {
+            if (!dNode || !isVisible(dNode)) return
+            if (
+                dNode.id &&
+                isExported(dNode.id) &&
+                isVideoNode(dNode) &&
+                !overrideDone[String(dNode.id)]
+            ) {
+                var key = String(dNode.name || "").trim()
+                var mVid = key !== "" && vidByName ? vidByName[key] : null
+                if (mVid && isVideoNode(mVid)) {
+                    var declV = getVideoSizeDeclDiff(dNode, mVid)
+                    if (declV)
+                        pushMoMoRule(
+                            ".ap-section--" + secCls + " " + cssInnerSelForNode(String(dNode.id), deskMoOpts, false),
+                            declV
+                        )
+                }
+            }
+            if (isContainer(dNode))
+                for (var vi = 0; vi < dNode.children.length; vi++) pushVideoOverridesByName(dNode.children[vi], secCls, vidByName, overrideDone)
+        }
+        pushVideoOverridesByName(dSec, secClass, secVideoByName, sectionVideoOverrideDone)
         // 텍스트: 인덱스로 매칭 안 된 경우 레이어 name 기준으로 MO 폰트/크기/색 등 오버라이드
         function pushTextOverridesByName(dNode, secCls, txtByName, overrideDone) {
             if (!dNode || !isVisible(dNode)) return

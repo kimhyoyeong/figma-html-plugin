@@ -1,12 +1,12 @@
 /**
- * 010-format-class — 숫자/CSS 출력, ap- 클래스·BEM, 레이어 이름 규칙(btn/video/slide)
+ * 010-format-class — 숫자/CSS 출력, ap- 클래스·BEM, 레이어 이름 규칙(code-btn / code-slide / code-video / code-raster)
  *
  * r2, cssOutNum, cssOutLayoutPx, layoutPxInt, layoutPxNum — Figma 수치 → CSS 문자열·비교용 정수
  * useApFlexClass — 불필요한 ap-flex 생략 여부
  * pad2, sectionClassPrefix — 섹션 번호 → "01" 형태 클래스 접두
  * stripApAiAuditBlock — AI 검수 HTML 주석 제거(ZIP용)
  * makeClassName, nodeUniqueClass, apSectionBem — 클래스 문자열 생성
- * isNodeName, isBtnNode, isVideoNode, isSlideNode — 레이어명 기반 특수 처리 판별
+ * isNodeName, isBtnNode, isVideoNode, isSlideNode, isCodeRasterNode — 레이어명 기반 특수 처리 판별
  */
 // ----- 공통·포맷 (r2, 클래스, BEM) + Core 일부(레이어명 판별은 아래 isNodeName~) -----
 /** 숫자를 소수 둘째 자리까지 반올림 */
@@ -108,16 +108,20 @@ function apSectionBem(part) {
 function isNodeName(node, name) {
     return !!(node && String(node.name || "").trim().toLowerCase() === name)
 }
-/** 레이어 이름이 btn이면 링크로 감쌀지 여부 (대소문자 무관: btn, Btn, BTN 등) */
+/** 레이어 이름이 code-btn이면 <a class="ap-btn"> 링크 (정확히 일치, 대소문자 무관) */
 function isBtnNode(node) {
-    return isNodeName(node, "btn")
+    return isNodeName(node, "code-btn")
 }
-/** 레이어 이름이 video이면 비디오 영역 플레이스홀더 (대소문자 무관: video, Video, VIDEO 등) */
+/** 레이어 이름이 code-video이면 비디오 플레이스홀더 */
 function isVideoNode(node) {
-    return isNodeName(node, "video")
+    return isNodeName(node, "code-video")
 }
-/** 레이어 이름이 slide이면 Swiper 구조로 감쌈 */
+/** 레이어 이름이 code-slide이면 Swiper 구조 */
 function isSlideNode(node) {
-    return isNodeName(node, "slide")
+    return isNodeName(node, "code-slide")
+}
+/** 레이어 이름이 code-raster이면 단일 래스터 이미지 export 강제(벡터·다중 자식 분할 등 일반 규칙보다 우선) */
+function isCodeRasterNode(node) {
+    return isNodeName(node, "code-raster")
 }
 

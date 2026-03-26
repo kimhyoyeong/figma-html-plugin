@@ -5,76 +5,99 @@
  * buildSectionBackgroundAsync — stroke/radius 포함, 90% 이상 덮는 직계 이미지 → --bg-img 승격
  */
 // ----- Section background (fill → CSS vars, 풀블리드 자식 승격) -----
+
+/** fills 스택에서 최상단(마지막 visible) fill 1개만 반환 */
+function getTopmostVisibleFill(node, opts) {
+    try {
+        if (!node || !node.fills || node.fills === figma.mixed) return null
+
+        opts = opts || {}
+        var skipImageFill = opts.skipImageFill === true
+        var skipSolidFill = opts.skipSolidFill === true
+
+        var fills = node.fills || []
+        for (var i = fills.length - 1; i >= 0; i--) {
+            var f = fills[i]
+            if (!f || f.visible === false) continue
+
+            if (f.type === "IMAGE" && !skipImageFill) {
+                return { type: "IMAGE", fill: f, index: i }
+            }
+            if (f.type === "SOLID" && !skipSolidFill) {
+                return { type: "SOLID", fill: f, index: i }
+            }
+        }
+    } catch (e) {}
+    return null
+}
+
 /** section이면 --bgc/--bg-img, 그 외는 background-color/background-image */
 function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts) {
     if (!node) return Promise.resolve("")
     if (node.type === "TEXT") return Promise.resolve("")
 
-    var skipImageFill = opts && opts.skipImageFill === true
-    var skipSolidFill = opts && opts.skipSolidFill === true
-
-    var fill = getFirstSolidFill(node)
-    var hasImg = skipImageFill ? false : hasImageFill(node)
-
-    if (!fill && !hasImg) return Promise.resolve("")
+    opts = opts || {}
+    var topFill = getTopmostVisibleFill(node, opts)
+    if (!topFill) return Promise.resolve("")
 
     var parts = []
-    var solidVisible = fill && fill.color && !skipSolidFill && (typeof fill.opacity !== "number" || fill.opacity > 0)
-    if (solidVisible) {
-        if (useCssVarsForSection) {
-            parts.push("--bgc:" + fill.color)
-        } else {
-            parts.push("background-color:" + fill.color)
+
+    // 최상단이 SOLID면 색만 적용
+    if (topFill.type === "SOLID") {
+        var solid = topFill.fill
+        var color = solid && solid.color ? rgbToHex(solid.color) : ""
+        if (!color) return Promise.resolve("")
+
+        var opacity = typeof solid.opacity === "number" ? r2(solid.opacity) : null
+        var finalColor = color
+        if (opacity != null && opacity >= 0 && opacity < 1) {
+            finalColor = hexToRgba(color, opacity) || color
         }
+
+        if (useCssVarsForSection) parts.push("--bgc:" + finalColor)
+        else parts.push("background-color:" + finalColor)
+
+        return Promise.resolve(parts.join(";"))
     }
 
-    if (!hasImg) return Promise.resolve(parts.join(";"))
+    // 최상단이 IMAGE면 이미지 1개만 적용
+    if (topFill.type === "IMAGE") {
+        var dataUrlPromise
+        if (cache && cache.image && node.id != null && cache.image[node.id]) {
+            dataUrlPromise = Promise.resolve(cache.image[node.id])
+        } else {
+            dataUrlPromise = exportImagePreferSourceBytesAsync(node)
+        }
 
-    var dataUrlPromise
-    if (cache && cache.image && node.id != null && cache.image[node.id]) {
-        dataUrlPromise = Promise.resolve(cache.image[node.id])
-    } else {
-        dataUrlPromise = exportImagePreferSourceBytesAsync(node)
-    }
+        return dataUrlPromise
+            .then(function (dataUrl) {
+                if (node.id != null && dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
 
-    return dataUrlPromise
-        .then(function (dataUrl) {
-            if (node.id != null && dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
+                var path = cache
+                    ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, {
+                          skipExport: isVideoNode(node),
+                          imageHash: getPrimaryImageFillHash(node),
+                      })
+                    : ""
+                var imgUrl = (path && path.length) ? path : dataUrl
+                if (!imgUrl) return ""
 
-            var path = cache
-                ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
-                      skipExport: isVideoNode(node),
-                      imageHash: getPrimaryImageFillHash(node),
-                  })
-                : ""
-            var imgUrl = (path && path.length) ? path : dataUrl
-            if (imgUrl && dataUrl) {
-                var overlay = ""
-                if (fill && fill.color && typeof fill.opacity === "number" && fill.opacity < 1) {
-                    var rgba = hexToRgba(fill.color, fill.opacity)
-                    if (rgba) overlay = "linear-gradient(" + rgba + "," + rgba + "),"
-                }
-                var imgValue = overlay + "url(" + imgUrl + ")"
                 if (useCssVarsForSection) {
-                    parts.push("--bg-img:" + imgValue)
+                    parts.push("--bg-img:url(" + imgUrl + ")")
                 } else {
-                    parts.push("background-image:" + imgValue, "background-repeat:no-repeat", "background-position:center", "background-size:100% 100%")
+                    parts.push("background-image:url(" + imgUrl + ")")
+                    parts.push("background-repeat:no-repeat")
+                    parts.push("background-position:center")
+                    parts.push("background-size:100% 100%")
                 }
-            } else if (dataUrl && !cache) {
-                var overlay2 = ""
-                if (fill && fill.color && typeof fill.opacity === "number" && fill.opacity < 1) {
-                    var rgba2 = hexToRgba(fill.color, fill.opacity)
-                    if (rgba2) overlay2 = "linear-gradient(" + rgba2 + "," + rgba2 + "),"
-                }
-                var imgValue2 = overlay2 + "url(" + dataUrl + ")"
-                if (useCssVarsForSection) parts.push("--bg-img:" + imgValue2)
-                else parts.push("background-image:" + imgValue2, "background-repeat:no-repeat", "background-position:center", "background-size:100% 100%")
-            }
-            return parts.join(";")
-        })
-        .catch(function () {
-            return parts.join(";")
-        })
+                return parts.join(";")
+            })
+            .catch(function () {
+                return ""
+            })
+    }
+
+    return Promise.resolve("")
 }
 
 /** 섹션 배경: fill 또는 직계 자식 중 90% 이상 크기 이미지 → --bg-img 승격 (slide 섹션 제외) */
@@ -87,7 +110,8 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
       var radiusDecl = buildCornerRadiusDecl(sectionNode)
       if (radiusDecl) decl = decl ? decl + ";" + radiusDecl : radiusDecl
 
-      if (hasImageFill(sectionNode)) return {decl: decl, bgChildId: null}
+      var topFillForBg = getTopmostVisibleFill(sectionNode)
+      if (topFillForBg && topFillForBg.type === "IMAGE") return {decl: decl, bgChildId: null}
       if (slideData) return {decl: decl, bgChildId: null}
 
       var children = sectionNode && sectionNode.children ? sectionNode.children : []
@@ -134,4 +158,3 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
           })
   })
 }
-

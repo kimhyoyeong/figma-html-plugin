@@ -1,7 +1,7 @@
 /**
  * 020-slide — Swiper 슬라이드 구조·slidesPerView·뷰포트/피치 계산
  *
- * getSlideItems — 섹션에서 slide 레이어 규칙에 따라 슬라이드 아이템·부모 노드 반환
+ * getSlideItems — 섹션에서 code-slide 레이어 규칙에 따라 슬라이드 아이템·부모 노드 반환
  * collectSwiperSlideItemNodes — 배경 자식 제외 후 실제 슬라이드 노드 배열
  * clamp — min~max 제한
  * getSlideViewportWidth — 슬라이드 영역 가로(섹션 폭으로 클램프)
@@ -12,9 +12,9 @@
  */
 // ----- 7. Slide Utils (캐러셀 meta, pitch, slidesPerView) -----
 /** 섹션에서 swiper-slide 대상 노드들 반환. null이면 슬라이드 모드 아님.
- * - 섹션 자식 중 slide 1개(그룹) → 그 그룹의 자식들이 각각 swiper-slide
- * - 섹션 자식 중 slide 여러 개 → 각각 swiper-slide
- * - 섹션 자체가 slide이면 → 섹션의 자식들이 각각 swiper-slide */
+ * - 섹션 자식 중 code-slide 1개(그룹) → 그 그룹의 자식들이 각각 swiper-slide
+ * - 섹션 자식 중 code-slide 여러 개 → 각각 swiper-slide
+ * - 섹션 자체가 code-slide이면 → 섹션의 자식들이 각각 swiper-slide */
 function getSlideItems(sectionNode) {
     if (!sectionNode) return null
     var children = sectionNode.children || []

@@ -3,7 +3,7 @@
  *
  * 경계: CSS 선언 조립(레이아웃·칠·테두리). 노드 판별은 050, 최종 HTML 문자열은 096.
  *
- * getLayoutVars, getFlexStyleDefaultForKey, applySectionSingleChildAlignOverride, buildFlexVarsDecl — ap-flex 변수
+ * getLayoutVars, applySectionSingleChildAlignOverride, buildFlexDecl, buildFlexPaddingDecl — ap-flex 변수·padding 한 줄
  * buildAbsDecl, buildAbsDeclTextRaster, *Diff — 절대 위치·TEXT 래스터·PC/MO 차이
  * getImageSizeDeclDiff, getVideoSizeDeclDiff — figure/비디오 크기 MO 오버라이드
  * toHex2, rgbToHex, hexToRgba, getFirstSolidColorFromPaints — 색 문자열
@@ -31,14 +31,16 @@ function getLayoutVars(node) {
         out.pb = cssOutLayoutPx(Number(node.paddingBottom) || 0)
         out.pl = cssOutLayoutPx(Number(node.paddingLeft) || 0)
 
-        if (primary === "MIN") out.justify = "flex-start"
+        // MIN·기타 미매칭 = CSS 주축 기본(flex-start)과 동일 → 값 생략(buildFlexDecl에서 출력 안 함)
+        if (primary === "MIN") out.justify = ""
         else if (primary === "MAX") out.justify = "flex-end"
         else if (primary === "CENTER") out.justify = "center"
         else if (primary === "SPACE_BETWEEN") out.justify = "space-between"
-        else out.justify = "flex-start"
+        else out.justify = ""
 
         var counter = String(node.counterAxisAlignItems || "").toUpperCase()
-        if (counter === "MIN") out.align = "flex-start"
+        // MIN = CSS align-items:flex-start 와 동일 → 선언 생략(buildFlexDecl)
+        if (counter === "MIN") out.align = ""
         else if (counter === "MAX") out.align = "flex-end"
         else if (counter === "CENTER") out.align = "center"
         else if (counter === "BASELINE") out.align = "baseline"
@@ -64,51 +66,79 @@ function getLayoutVars(node) {
     return out
 }
 
-/** .ap-flex 생성부의 --ap-* 초기값과 반드시 동기화 */
-var AP_FLEX_STYLE_DEFAULTS = {
-    direction: "row",
-    wrap: "nowrap",
-    justify: "flex-start",
-    align: "stretch",
-}
-
-function getFlexStyleDefaultForKey(key) {
-    if (key === "direction") return AP_FLEX_STYLE_DEFAULTS.direction
-    if (key === "wrap") return AP_FLEX_STYLE_DEFAULTS.wrap
-    if (key === "justify") return AP_FLEX_STYLE_DEFAULTS.justify
-    if (key === "align") return AP_FLEX_STYLE_DEFAULTS.align
-    return ""
-}
-
-/** PC 섹션 export와 동일: 단일 자식 + align center → flex-start */
+/** PC 섹션 export와 동일: 단일 자식 + align center → MIN과 같이 align-items 선언 생략 */
 function applySectionSingleChildAlignOverride(sectionNode, lv) {
     if (!lv || !sectionNode) return lv
     var vis = (sectionNode.children || []).filter(function (c) {
         return c && isVisible(c)
     })
-    if (vis.length === 1 && lv.align === "center") return Object.assign({}, lv, { align: "flex-start" })
+    if (vis.length === 1 && lv.align === "center") return Object.assign({}, lv, { align: "" })
     return lv
 }
 
+/** 패딩 한 변: 0은 키워드 0, 그 외는 cqi calc */
+function paddingSideToCqi(px) {
+    var n = Number(px) || 0
+    if (n === 0) return "0"
+    return "calc(" + n + "/var(--ap-width)*100cqi)"
+}
+/** ap-flex: padding 을 top right bottom left 네 값 한 줄로 (전부 0이면 생략) */
+function buildFlexPaddingDecl(pt, pr, pb, pl) {
+    pt = Number(pt) || 0
+    pr = Number(pr) || 0
+    pb = Number(pb) || 0
+    pl = Number(pl) || 0
+    if (pt === 0 && pr === 0 && pb === 0 && pl === 0) return ""
+    return (
+        "padding:" +
+        paddingSideToCqi(pt) +
+        " " +
+        paddingSideToCqi(pr) +
+        " " +
+        paddingSideToCqi(pb) +
+        " " +
+        paddingSideToCqi(pl)
+    )
+}
+
 /** ap-flex 노드용 flex CSS 변수 선언 */
-function buildFlexVarsDecl(layoutVars) {
+function buildFlexDecl(layoutVars, node) {
     if (!layoutVars) return ""
     var parts = []
-    var d = AP_FLEX_STYLE_DEFAULTS
-    if (layoutVars.direction && layoutVars.direction !== d.direction) parts.push("--ap-direction:" + layoutVars.direction)
-    var gapN = r2(Number(layoutVars.gap !== "" && layoutVars.gap != null ? layoutVars.gap : 0) || 0)
-    if (gapN !== 0) parts.push("--ap-gap:" + (layoutVars.gap !== "" ? layoutVars.gap : "0"))
-    if (r2(Number(layoutVars.pt !== "" && layoutVars.pt != null ? layoutVars.pt : 0) || 0) !== 0)
-        parts.push("--ap-pt:" + (layoutVars.pt !== "" ? layoutVars.pt : "0"))
-    if (r2(Number(layoutVars.pr !== "" && layoutVars.pr != null ? layoutVars.pr : 0) || 0) !== 0)
-        parts.push("--ap-pr:" + (layoutVars.pr !== "" ? layoutVars.pr : "0"))
-    if (r2(Number(layoutVars.pb !== "" && layoutVars.pb != null ? layoutVars.pb : 0) || 0) !== 0)
-        parts.push("--ap-pb:" + (layoutVars.pb !== "" ? layoutVars.pb : "0"))
-    if (r2(Number(layoutVars.pl !== "" && layoutVars.pl != null ? layoutVars.pl : 0) || 0) !== 0)
-        parts.push("--ap-pl:" + (layoutVars.pl !== "" ? layoutVars.pl : "0"))
-    if (layoutVars.justify && layoutVars.justify !== d.justify) parts.push("--ap-justify:" + layoutVars.justify)
-    if (layoutVars.align && layoutVars.align !== d.align) parts.push("--ap-align:" + layoutVars.align)
-    if (layoutVars.wrap && layoutVars.wrap !== d.wrap) parts.push("--ap-wrap:" + layoutVars.wrap)
+
+    var direction = layoutVars.direction || "row"
+    var wrap = layoutVars.wrap || "nowrap"
+    var justify = layoutVars.justify || "flex-start"
+
+    parts.push("display:flex")
+
+    // ✅ 자식에 absolute 있을 때만
+    if (hasAbsoluteChild(node)) {
+        parts.push("position:relative")
+    }
+
+    if (direction !== "row") parts.push("flex-direction:" + direction)
+    if (wrap !== "nowrap") parts.push("flex-wrap:" + wrap)
+    if (justify !== "flex-start") parts.push("justify-content:" + justify)
+    var alignRaw = layoutVars.align
+    if (alignRaw !== "" && alignRaw !== "flex-start") {
+        var align = alignRaw || "stretch"
+        if (align !== "stretch") parts.push("align-items:" + align)
+    }
+
+    var gap = Number(layoutVars.gap) || 0
+    var pt = Number(layoutVars.pt) || 0
+    var pr = Number(layoutVars.pr) || 0
+    var pb = Number(layoutVars.pb) || 0
+    var pl = Number(layoutVars.pl) || 0
+
+    if (gap !== 0) {
+        parts.push("gap:calc(" + gap + "/var(--ap-width)*100cqi)")
+    }
+
+    var padDecl = buildFlexPaddingDecl(pt, pr, pb, pl)
+    if (padDecl) parts.push(padDecl)
+
     return parts.join(";")
 }
 
@@ -156,59 +186,75 @@ function buildAbsDeclTextRasterDiff(dChild, dParent, mChild, mParent) {
     return buildAbsDeclTextRaster(mChild, mParent)
 }
 
-/** PC(d)와 MO(m) 레이아웃 변수 비교 후 달라진 것만 MO 값으로 선언 */
-function buildFlexVarsDeclDiff(dLv, mLv) {
-    if (!mLv) return ""
-    var dNoFlex = !dLv
-    var keys = ["direction", "gap", "pt", "pr", "pb", "pl", "justify", "align", "wrap"]
-    var parts = []
-    for (var k = 0; k < keys.length; k++) {
-        var key = keys[k]
-        var dv = dLv && dLv[key] != null ? String(dLv[key]) : ""
-        var mv = mLv[key] != null ? String(mLv[key]) : ""
-        if (key === "gap" || key === "pt" || key === "pr" || key === "pb" || key === "pl") {
-            var dN = layoutPxInt(dv)
-            var mN = layoutPxInt(mv)
-            if (dN === mN) continue
-            var prop = "--ap-" + (key === "gap" ? "gap" : key)
-            if (dNoFlex) {
-                if (mN === 0) continue
-                parts.push(prop + ":" + String(mN))
-                continue
-            }
-            if (mN === 0) {
-                if (dN !== 0) parts.push(prop + ":0")
-            } else parts.push(prop + ":" + String(mN))
-            continue
-        }
-        if (dv === mv) continue
-        var def = getFlexStyleDefaultForKey(key)
-        if (!mv) continue
-        if (dNoFlex) {
-            if (mv === def) continue
-            if (key === "direction") parts.push("--ap-direction:" + mv)
-            else if (key === "justify") parts.push("--ap-justify:" + mv)
-            else if (key === "align") parts.push("--ap-align:" + mv)
-            else if (key === "wrap") parts.push("--ap-wrap:" + mv)
-            continue
-        }
-        if (mv === def) {
-            if (dv !== def && dv !== "") {
-                if (key === "direction") parts.push("--ap-direction:" + mv)
-                else if (key === "justify") parts.push("--ap-justify:" + mv)
-                else if (key === "align") parts.push("--ap-align:" + mv)
-                else if (key === "wrap") parts.push("--ap-wrap:" + mv)
-            }
-            continue
-        }
-        if (key === "direction") parts.push("--ap-direction:" + mv)
-        else if (key === "justify") parts.push("--ap-justify:" + mv)
-        else if (key === "align") parts.push("--ap-align:" + mv)
-        else if (key === "wrap") parts.push("--ap-wrap:" + mv)
-    }
-    return parts.join(";")
+function hasAbsoluteChild(node) {
+    if (!node || !node.children) return false
+    return node.children.some(function (child) {
+        return child.layoutPositioning === "ABSOLUTE"
+    })
 }
 
+/** PC(d)와 MO(m) 레이아웃 변수 비교 후 달라진 것만 MO 값으로 선언 */
+function buildFlexDeclDiff(dLv, mLv, node) {
+    if (!mLv) return ""
+
+    function norm(lv) {
+        if (!lv) {
+            return {
+                direction: "row",
+                wrap: "nowrap",
+                justify: "flex-start",
+                align: "stretch",
+                gap: 0,
+                pt: 0,
+                pr: 0,
+                pb: 0,
+                pl: 0,
+            }
+        }
+        return {
+            direction: lv.direction || "row",
+            wrap: lv.wrap || "nowrap",
+            justify: lv.justify || "flex-start",
+            align:
+                lv.align === "" || lv.align === "flex-start"
+                    ? "flex-start"
+                    : lv.align == null
+                      ? "stretch"
+                      : lv.align,
+            gap: layoutPxInt(lv.gap),
+            pt: layoutPxInt(lv.pt),
+            pr: layoutPxInt(lv.pr),
+            pb: layoutPxInt(lv.pb),
+            pl: layoutPxInt(lv.pl),
+        }
+    }
+
+    var d = norm(dLv)
+    var m = norm(mLv)
+    var parts = []
+
+    parts.push("display:flex")
+
+    if (hasAbsoluteChild(node)) {
+        parts.push("position:relative")
+    }
+
+    if (d.direction !== m.direction) parts.push("flex-direction:" + m.direction)
+    if (d.wrap !== m.wrap) parts.push("flex-wrap:" + m.wrap)
+    if (d.justify !== m.justify) parts.push("justify-content:" + m.justify)
+    if (d.align !== m.align) parts.push("align-items:" + m.align)
+
+    if (d.gap !== m.gap && m.gap !== 0) {
+        parts.push("gap:calc(" + m.gap + "/var(--ap-width)*100cqi)")
+    }
+
+    if (d.pt !== m.pt || d.pr !== m.pr || d.pb !== m.pb || d.pl !== m.pl) {
+        var padMo = buildFlexPaddingDecl(m.pt, m.pr, m.pb, m.pl)
+        parts.push(padMo || "padding:0")
+    }
+
+    return parts.join(";")
+}
 /** PC(d)와 MO(m) 절대 위치 비교 후 달라질 때만 MO 기준 선언 */
 function buildAbsDeclDiff(dChild, dParent, mChild, mParent) {
     var dB = getAbs(dChild)
@@ -335,12 +381,12 @@ function hasImageFill(node) {
     return false
 }
 
-/** 첫 번째 보이는 IMAGE fill의 imageHash (동일 피그마 소스 → 같은 imgNN·파일 하나) */
+/** 최상단(스택 맨 위) 보이는 IMAGE fill의 imageHash — UI·getTopmostVisibleFill과 동일 순서 (fills[0]=아래, 끝=위) */
 function getPrimaryImageFillHash(node) {
     try {
         var fills = node.fills
         if (!fills || fills === figma.mixed) return ""
-        for (var i = 0; i < fills.length; i++) {
+        for (var i = fills.length - 1; i >= 0; i--) {
             var f = fills[i]
             if (f && f.visible !== false && f.type === "IMAGE" && f.imageHash) return String(f.imageHash)
         }
