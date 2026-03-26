@@ -1,0 +1,5 @@
+# 로컬에만 두는 레거시 단일 파일 스냅샷 (extract 소스)
+plugin/code.legacy.js
+
+# ui.html 단일 파일로 되돌릴 때만 쓰는 백업 (split-ui-assets.js)
+plugin/ui.monolith.html.bak

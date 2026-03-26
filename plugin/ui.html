@@ -1,10 +1,10 @@
 <!doctype html>
+<!-- 단일 파일 UI (<style>·<script> 인라인). 메인 스레드: plugin/src + npm run build -->
 <html>
-
 <head>
   <meta charset="utf-8" />
   <style>
-    /* --- Base · 헤더 · 탭 · 패널 공통 --- */
+/* --- Base · 헤더 · 탭 · 패널 공통 --- */
     body {
       margin: 0;
       font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -908,6 +908,7 @@
     .detailKvMoTitle--matched {
       color: #0d6db7;
     }
+
   </style>
 </head>
 
@@ -1031,7 +1032,11 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script>
-    /* ui.html: 렌더·OpenAI·미리보기. 비즈니스 로직은 code.js (postMessage). */
+/**
+ * 플러그인 패널 UI 스크립트 — ui.html과 같은 폴더(루트)에 둠. 하위 경로 script src는 Figma에서 로드 실패할 수 있음.
+ * 트리 렌더·OpenAI/Gemini·미리보기·ZIP. Figma 문서 조작은 parent.postMessage → code.js.
+ */
+/* ui.html: 렌더·OpenAI·미리보기. 비즈니스 로직은 code.js (postMessage). */
 
     // ----- OpenAI: 분석 검수 프롬프트 ({{N_IMG}}, {{LANG}} 치환) -----
     var AP_AI_ANALYSIS_SYSTEM_PROMPT_TEMPLATE = [
@@ -4358,6 +4363,7 @@
         btn.textContent = "Export ZIP";
       }
     }
+
   </script>
 </body>
 

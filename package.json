@@ -1,0 +1,8 @@
+{
+  "name": "figma-html-plugin",
+  "private": true,
+  "scripts": {
+    "build": "node plugin/scripts/build-code.js",
+    "dev": "node plugin/scripts/dev.js"
+  }
+}

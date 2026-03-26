@@ -1,6 +1,14 @@
+/**
+ * 00-entry — 플러그인 UI 띄우기 + AI/섹션 관련 전역 기본값
+ *
+ * Figma 엔트리: manifest "main" → plugin/code.js (빌드 산출물). 편집은 이 파일 등 src/*.js.
+ *
+ * - figma.showUI: ui.html 로드 (900×900)
+ * - AP_* 상수: UI 초기값·시맨틱 임계값 (postMessage로 ui에 전달)
+ * - setTimeout(0): 플러그인 부팅 직후 AI_UI_DEFAULTS 메시지 (비전 alt, Gemini 기본 등)
+ */
 // Figma → HTML/CMS export.
-// 파일 구역: 1.UI Router · 2.Core · 3.Text · 4.Layout · 5.Style/Shape · 6.Section · 7.Slide · 8.Image Export · 9.HTML/Code Builder
-// (실제 나열 순서는 함수 의존성에 따름 — 주석 헤더로 구역 식별)
+// 소스 파트는 build-paths.js 의 MAIN_SOURCE_DIR · 합쳐서 plugin/code.js (npm run build).
 figma.showUI(__html__, {width: 900, height: 900})
 
 // ui 검수: 비전 기본 ON. 이미지 바이너리는 PC/MO 분석 후 RESULT_IMAGES_* 로만 UI 전달(ZIP만으로 코드만 붙은 경우 미전달).
@@ -22,6 +30,16 @@ setTimeout(function () {
     } catch (e) {}
 }, 0)
 
+/**
+ * 010-format-class — 숫자/CSS 출력, ap- 클래스·BEM, 레이어 이름 규칙(btn/video/slide)
+ *
+ * r2, cssOutNum, cssOutLayoutPx, layoutPxInt, layoutPxNum — Figma 수치 → CSS 문자열·비교용 정수
+ * useApFlexClass — 불필요한 ap-flex 생략 여부
+ * pad2, sectionClassPrefix — 섹션 번호 → "01" 형태 클래스 접두
+ * stripApAiAuditBlock — AI 검수 HTML 주석 제거(ZIP용)
+ * makeClassName, nodeUniqueClass, apSectionBem — 클래스 문자열 생성
+ * isNodeName, isBtnNode, isVideoNode, isSlideNode — 레이어명 기반 특수 처리 판별
+ */
 // ----- 공통·포맷 (r2, 클래스, BEM) + Core 일부(레이어명 판별은 아래 isNodeName~) -----
 /** 숫자를 소수 둘째 자리까지 반올림 */
 function r2(v) {
@@ -135,6 +153,19 @@ function isSlideNode(node) {
     return isNodeName(node, "slide")
 }
 
+
+/**
+ * 020-slide — Swiper 슬라이드 구조·slidesPerView·뷰포트/피치 계산
+ *
+ * getSlideItems — 섹션에서 slide 레이어 규칙에 따라 슬라이드 아이템·부모 노드 반환
+ * collectSwiperSlideItemNodes — 배경 자식 제외 후 실제 슬라이드 노드 배열
+ * clamp — min~max 제한
+ * getSlideViewportWidth — 슬라이드 영역 가로(섹션 폭으로 클램프)
+ * getSlideItemPitch — 슬라이드 간격(아이템 폭+갭) 추정
+ * collectMoSlideItemNodes — PC 기준으로 MO 슬라이드 노드 순서 맞춤
+ * computeSlidesPerView / computeSlidesPerViewMo — PC·MO 각각 한 화면에 몇 장 보일지
+ * resolveSlideMeta — PC/MO slidesPerView를 한 객체로
+ */
 // ----- 7. Slide Utils (캐러셀 meta, pitch, slidesPerView) -----
 /** 섹션에서 swiper-slide 대상 노드들 반환. null이면 슬라이드 모드 아님.
  * - 섹션 자식 중 slide 1개(그룹) → 그 그룹의 자식들이 각각 swiper-slide
@@ -382,6 +413,17 @@ function resolveSlideMeta(dSec, mSec, bgChildId, opts) {
     }
 }
 
+/**
+ * 030-shape — LINE/ELLIPSE CSS 변수, 버튼 래핑, 텍스트 태그, img alt
+ *
+ * isLineLikeNode — LINE 또는 이름 "line" 벡터 트리 → ap-line 대상 (isVectorOnlyTree는 070)
+ * buildLineVarsDecl / buildLineVarsDeclDiff — ap-line용 --ap-line-* 선언·PC/MO 차이
+ * buildEllipseVarsDecl / buildEllipseVarsDeclDiff — 타원 --ap-ellipse-* 선언·차이
+ * wrapIfBtn — btn 레이어를 <a class="ap-btn">로 감쌈
+ * textNodeTag — TEXT용 <a>/<span> 여는·닫는 태그
+ * getImageAltText — 레이어 이름 기반 img alt (이스케이프·길이 제한)
+ */
+// ----- 5. Style/Shape Utils (LINE, ELLIPSE, stroke, radius 등) -----
 /** LINE 노드 또는 레이어명 "line"인 벡터 → ap-line 처리 */
 function isLineLikeNode(node) {
     if (!node) return false
@@ -390,7 +432,6 @@ function isLineLikeNode(node) {
     return false
 }
 
-// ----- 5. Style/Shape Utils (LINE, ELLIPSE, stroke, radius 등) -----
 /** LINE/line 벡터 → CSS 변수 선언 (deferred style) */
 function buildLineVarsDecl(node) {
     if (!node || !isLineLikeNode(node)) return ""
@@ -472,6 +513,21 @@ function getImageAltText(node) {
     return escapeHtml(name.length > 125 ? name.slice(0, 125) : name)
 }
 
+
+/**
+ * 040-text-utils — HTML 이스케이프, 줄바꿈, PC/MO 반응형 BR, mixed 스타일 텍스트 inner HTML
+ *
+ * 경계: 문자열·inner HTML·줄바꿈/BR 슬롯. 폰트 로드·스타일 구간·허용 폰트 필터는 080.
+ *
+ * escapeHtml, textToHtmlWithBreaks — 특수문자·개행 → 안전한 HTML
+ * normalizeTextNewlinesForResponsive, textFlatForResponsiveCompare — PC/MO 텍스트 정규화·비교용 평탄화
+ * newlineGapsForResponsive, appendResponsiveBrSlotHtml, buildResponsiveBrInnerFromPcMoChars — 개행 개수만 다를 때 pc-only/mo-only <br>
+ * textSummaryAllowsResponsiveBrOverride — 단일 스타일 구간일 때만 MO 줄바꿈 오버라이드 허용
+ * moTextNodeFromNameMap, buildResponsiveTextInnerByNodeIdMap — MO 텍스트를 이름/트리로 매칭해 노드 id → inner HTML
+ * buildTextPartInnerHtml — 스타일 구간별 ap-text__part span·부모 변수
+ * normTextAlign, getLineBreakPoints — Figma 정렬 → CSS, 줄바꿈 인덱스
+ * indent, wrapChunksAsUlOrDiv — HTML 들여쓰기·리스트/프레임 래핑
+ */
 // ----- 3. Text Utils -----
 /** HTML 이스케이프. U+2028/U+2029 → \\n 정규화 */
 function escapeHtml(s) {
@@ -490,9 +546,11 @@ function normalizeTextNewlinesForResponsive(s) {
     if (s == null) return ""
     return String(s).replace(/\u2028/g, "\n").replace(/\u2029/g, "\n").replace(/\r\n/g, "\n").replace(/\r/g, "\n")
 }
+/** 개행 제거한 문자열만 비교(PC/MO 동일 문장 여부) */
 function textFlatForResponsiveCompare(s) {
     return normalizeTextNewlinesForResponsive(s).replace(/\n/g, "")
 }
+/** 각 문자 사이의 연속 \\n 개수(gaps)와 flat 문자열 — 반응형 BR 슬롯 계산용 */
 function newlineGapsForResponsive(norm) {
     var gaps = []
     var flatParts = []
@@ -731,6 +789,19 @@ function wrapChunksAsUlOrDiv(depth, cls, frameTag, frameTagOpen, isFrameBtn, chu
     return out.join("\n")
 }
 
+
+/**
+ * 050-core-node — 바운딩 박스, 가시성, Auto Layout, 절대배치 판별
+ *
+ * 경계: 단일 노드 메타·가시성·flex/abs 판별. 전 트리 워크·데이터트리·HTML 조립은 090·097·096 쪽.
+ *
+ * getAbs — absoluteBoundingBox → {x,y,w,h}
+ * getTextRasterBounds — TEXT는 렌더 bounds 우선(이미지 export·abs)
+ * isContainer, isVisible, hasVisibleChildren — 트리 순회·export 필터
+ * isFlex — layoutMode !== NONE
+ * isAbsoluteInParent, isAbsolutePositioned, isAbsoluteByParentNotFlex, isAbsoluteLike — CSS ap-abs 판별
+ * containerNeedsRelativeForAbsoluteChildren — 비-flex 부모에 position:relative 필요 여부
+ */
 // ----- 2. Core Node Utils (bounds, visibility, flex/abs; 레이어명·slide 판별은 상단) -----
 /** 노드 absoluteBoundingBox → {x,y,w,h} (r2 적용) */
 function getAbs(node) {
@@ -822,6 +893,21 @@ function containerNeedsRelativeForAbsoluteChildren(node) {
     return false
 }
 
+
+/**
+ * 060-layout — Flex CSS 변수, 절대 좌표 선언, 채우기/스트로크/반지름, 섹션 높이
+ *
+ * 경계: CSS 선언 조립(레이아웃·칠·테두리). 노드 판별은 050, 최종 HTML 문자열은 096.
+ *
+ * getLayoutVars, getFlexStyleDefaultForKey, applySectionSingleChildAlignOverride, buildFlexVarsDecl — ap-flex 변수
+ * buildAbsDecl, buildAbsDeclTextRaster, *Diff — 절대 위치·TEXT 래스터·PC/MO 차이
+ * getImageSizeDeclDiff, getVideoSizeDeclDiff — figure/비디오 크기 MO 오버라이드
+ * toHex2, rgbToHex, hexToRgba, getFirstSolidColorFromPaints — 색 문자열
+ * getFirstSolidFill, hasImageFill — fill 조회
+ * needsMinHeight, getPcSectionCanvasHeightDecls, getMediaSectionCanvasHeightDecl — 캔버스형 섹션 min-height
+ * frameHasMinHeightVisualReason — 프레임에 시각적 이유로 min-height 줄지
+ * getFirstSolidStroke, buildCornerRadiusDecl, buildStrokeDecl, buildStrokeDeclDiff — 테두리·모서리
+ */
 // ----- 4. Layout Utils (flex vars, abs decl) -----
 /** Auto Layout 설정을 CSS 변수용 객체로 추출. isFlex(node)일 때만 값 채움 */
 function getLayoutVars(node) {
@@ -1289,14 +1375,24 @@ function buildStrokeDeclDiff(dNode, mNode) {
     return "border:none"
 }
 
+
+﻿/**
+ * 070-image-export — 이미지 바이너리 판별·PNG/JPG 휴리스틱·export·노드 분류·nodeSel
+ *
+ * 시맨틱 BEM·inner 셀렉터·이름 기반 수집은 081. 지연 CSS·이미지 크기 var는 082.
+ * readUint32BE … exportImagePreferSourceBytesAsync, isVectorOnlyTree 등 분류, nodeSel.
+ * exportNodeImageAsync, exportNodeSvgAsync, getImageSizeDecl — 래스터/SVG·크기 선언
+ */
 // ----- 8. Image Export Utils (포맷 판정, raster, 경로) -----
-// 바이너리 헤더·PNG/WebP (bytes: Uint8Array)
+/** 바이너리 헤더·PNG/WebP (bytes: Uint8Array) */
 function readUint32BE(bytes, offset) {
     return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0
 }
+/** JPEG 시그니처(FF D8 FF) 여부 */
 function isJpegBytes(bytes) {
     return !!(bytes && bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
 }
+/** PNG 시그니처 여부 */
 function isPngBytes(bytes) {
     return !!(
         bytes &&
@@ -1311,6 +1407,7 @@ function isPngBytes(bytes) {
         bytes[7] === 0x0a
     )
 }
+/** GIF 시그니처(GIF87a/89a) 여부 */
 function isGifBytes(bytes) {
     return !!(
         bytes &&
@@ -1323,6 +1420,7 @@ function isGifBytes(bytes) {
         bytes[5] === 0x61
     )
 }
+/** RIFF WEBP 시그니처 여부 */
 function isWebpBytes(bytes) {
     return !!(
         bytes &&
@@ -1838,511 +1936,6 @@ function nodeSel(id) {
     return id ? "." + nodeUniqueClass(String(id)) : ".ap-missing"
 }
 
-/** 리프·자식 노드 지연 스타일용 inner selector */
-function getLeafSelectorForNode(ch, opts) {
-    if (!ch || !ch.id) return ""
-    if (opts && opts.sectionSemantics) return cssInnerSelForNode(String(ch.id), opts, false)
-    return nodeSel(String(ch.id))
-}
-
-/** ap-section__image(+접미사) 시맨틱 — 크기는 --ap-w/--ap-h·.ap-image img 규칙으로 두고 flex fill width:100% 제외 */
-function nodeHasApSectionImageSemantic(nodeId, opts) {
-    var sid = nodeId != null ? String(nodeId) : ""
-    if (!sid || !opts || !opts.sectionSemantics) return false
-    var sem = opts.sectionSemantics[sid] || []
-    for (var i = 0; i < sem.length; i++) {
-        if (/^ap-section__image(?:--[0-9]{2})?$/.test(String(sem[i] || ""))) return true
-    }
-    return false
-}
-
-/** 섹션 서브트리에서 .ap-image로 출력되는 노드들을 레이어 name 기준으로 수집 (MO 이미지 이름 매칭용) */
-function collectImageNodesByName(root) {
-    var map = {}
-    if (!root) return map
-    function walk(n) {
-        if (!n || !isVisible(n)) return
-        var isImg = (isImageCandidate(n) || hasImageFill(n) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE"))
-        if (n.id && isImg) {
-            var key = String(n.name || "").trim()
-            if (key !== "" && !map[key]) map[key] = n
-        }
-        if (isContainer(n)) for (var i = 0; i < n.children.length; i++) walk(n.children[i])
-    }
-    walk(root)
-    return map
-}
-
-/** 섹션 서브트리에서 TEXT 노드를 레이어 name 기준으로 수집 (MO 텍스트 이름 매칭용) */
-function collectTextNodesByName(root) {
-    var map = {}
-    if (!root) return map
-    function walk(n) {
-        if (!n || !isVisible(n)) return
-        if (n.type === "TEXT" && n.id) {
-            var key = String(n.name || "").trim()
-            if (key !== "" && !map[key]) map[key] = n
-        }
-        if (isContainer(n)) for (var i = 0; i < n.children.length; i++) walk(n.children[i])
-    }
-    walk(root)
-    return map
-}
-
-/** section 기준 깊이 → 구조 역할. 10단계 넘으면 part로 통일 */
-var SECTION_STRUCTURE_LEVELS = [
-    "container",
-    "content",
-    "group",
-    "block",
-    "item",
-    "part",
-    "slot",
-    "cell",
-    "unit",
-]
-
-var AP_SECTION_ROLE_ORDER = [
-    "container",
-    "content",
-    "group",
-    "block",
-    "item",
-    "part",
-    "slot",
-    "cell",
-    "unit",
-]
-
-function getApSectionRole(cls) {
-    var m = String(cls || "").match(/^ap-section__(container|content|group|block|item|part|slot|cell|unit)(--[a-z0-9-]+)?$/)
-    return m ? m[1] : ""
-}
-
-function getApSectionRoleSuffix(cls) {
-    var m = String(cls || "").match(/^ap-section__(container|content|group|block|item|part|slot|cell|unit)(--[a-z0-9-]+)?$/)
-    return m && m[2] ? m[2] : ""
-}
-
-function getNextSectionRole(role) {
-    var idx = AP_SECTION_ROLE_ORDER.indexOf(String(role || ""))
-    if (idx < 0) return "part"
-    if (idx >= AP_SECTION_ROLE_ORDER.length - 1) return AP_SECTION_ROLE_ORDER[AP_SECTION_ROLE_ORDER.length - 1]
-    return AP_SECTION_ROLE_ORDER[idx + 1]
-}
-
-function replaceSectionRoleClass(arr, fromRole, toRole) {
-    if (!arr || !arr.length) return arr || []
-    var out = []
-    var replaced = false
-
-    for (var i = 0; i < arr.length; i++) {
-        var cls = arr[i]
-        var role = getApSectionRole(cls)
-
-        if (role && role === fromRole) {
-            var suffix = getApSectionRoleSuffix(cls)
-            var nextCls = "ap-section__" + toRole + suffix
-            if (out.indexOf(nextCls) < 0) out.push(nextCls)
-            replaced = true
-            continue
-        }
-
-        if (out.indexOf(cls) < 0) out.push(cls)
-    }
-
-    if (!replaced) return arr.slice()
-    return out
-}
-
-function demoteNestedDuplicateSectionRoles(sectionNode, classMap) {
-    if (!sectionNode || !classMap) return
-
-    function getOwnRoleFromClassMap(id) {
-        var arr = classMap[id] || []
-        for (var i = 0; i < arr.length; i++) {
-            var role = getApSectionRole(arr[i])
-            if (role) return role
-        }
-        return ""
-    }
-
-    function walk(node, parentRole) {
-        if (!node || !isVisible(node)) return
-
-        var id = node.id != null ? String(node.id) : ""
-        var ownRole = id ? getOwnRoleFromClassMap(id) : ""
-
-        if (id && parentRole && ownRole && parentRole === ownRole) {
-            var nextRole = getNextSectionRole(ownRole)
-            classMap[id] = replaceSectionRoleClass(classMap[id] || [], ownRole, nextRole)
-            ownRole = getOwnRoleFromClassMap(id)
-        }
-
-        if (isContainer(node) && node.children && node.children.length) {
-            for (var j = 0; j < node.children.length; j++) {
-                walk(node.children[j], ownRole || parentRole || "")
-            }
-        }
-    }
-
-    walk(sectionNode, "")
-}
-
-function normalizeGeoTextForMatch(s) {
-    return String(s || "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .toLowerCase()
-}
-
-function sanitizeGeoRoleForBem(role) {
-    var r = String(role || "")
-        .toLowerCase()
-        .replace(/[^a-z0-9-]/g, "")
-    if (r === "description") r = "desc"
-    var ok = {title: 1, subtitle: 1, desc: 1, caption: 1, cta: 1, label: 1, body: 1}
-    return ok[r] ? r : "desc"
-}
-
-/**
- * walkStructure 에서 depth 기반 container/content/… 를 줄 FRAME 인지.
- * 단일 이미지·이미지 fill 위주 프레임 등은 leaf 가 tagImageNode 로 image 가 되므로 여기서 구조 역할을 주지 않음.
- */
-function isSemanticWrapperFrame(n) {
-    if (!n || n.type !== "FRAME" || !isContainer(n)) return false
-    if (hasTextInSubtree(n)) return true
-    if (hasMultipleImageLikeChildren(n) && !isCompositeCandidate(n)) return false
-    if (isImageCandidate(n)) return false
-    return true
-}
-
-/**
- * 섹션 트리 기준 시맨틱 보조 클래스 (id → 클래스 배열).
- * geoHints: AI 검수 GEO.structure [{ text, role }] — 본문 텍스트 매칭 시 ap-section__* 우선 반영.
- * bgChildId: 섹션 배경으로만 승격된 직계 이미지 — HTML/CSS에 해당 노드가 없으므로 시맨틱·중복 접미사·이미지 번호에서 제외.
- */
-function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
-    if (geoHints != null && !Array.isArray(geoHints)) geoHints = null
-    if (geoHints && geoHints.length > 64) geoHints = geoHints.slice(0, 64)
-    var map = {}
-    function add(nid, cls) {
-        if (nid == null) return
-        var s = String(nid)
-        if (!map[s]) map[s] = []
-        if (map[s].indexOf(cls) < 0) map[s].push(cls)
-    }
-    if (!sectionNode) return map
-
-    function walkStructure(n, depthFromSection) {
-        if (!n || !isVisible(n)) return
-        if (n.id && isSemanticWrapperFrame(n)) {
-            var role = SECTION_STRUCTURE_LEVELS[depthFromSection - 1] || "part"
-            add(n.id, apSectionBem(role))
-        }
-        if (isContainer(n)) {
-            /** GROUP / INSTANCE / COMPONENT 는 레이아웃 단계를 한 칸 먹지 않음(빈 래퍼 통과) */
-            var passDepth =
-                n.type === "GROUP" || n.type === "INSTANCE" || n.type === "COMPONENT" ? depthFromSection : depthFromSection + 1
-            for (var i = 0; i < (n.children || []).length; i++) {
-                walkStructure(n.children[i], passDepth)
-            }
-        }
-    }
-    var visKids = (sectionNode.children || []).filter(function (c) {
-        return c && isVisible(c)
-    })
-    for (var i = 0; i < visKids.length; i++) {
-        walkStructure(visKids[i], 1)
-    }
-
-    var texts = []
-    var secBox = getAbs(sectionNode)
-    var secTop = secBox ? secBox.y : 0
-    function walkText(n) {
-        if (!n || !isVisible(n)) return
-        if (n.type === "TEXT" && n.id) {
-            var ts = getTextSummarySync(n)
-            var fs = ts && ts.fs !== "" ? Number(ts.fs) || 0 : 0
-            var tb = getAbs(n)
-            var relY = tb ? tb.y - secTop : 0
-            var rawT = ts && ts.text != null ? String(ts.text) : ""
-            texts.push({id: n.id, fs: fs, relY: relY, textNorm: normalizeGeoTextForMatch(rawT)})
-        }
-        if (isContainer(n)) for (var j = 0; j < (n.children || []).length; j++) walkText(n.children[j])
-    }
-    walkText(sectionNode)
-    texts.sort(function (a, b) {
-        if (b.fs !== a.fs) return b.fs - a.fs
-        return a.relY - b.relY
-    })
-
-    var TEXT_ROLE_RE = /^ap-section__(title|subtitle|desc|description|caption|cta|label|body)$/
-
-    function stripTextSemanticRoles(nid) {
-        var s = String(nid)
-        var arr = map[s]
-        if (!arr || !arr.length) return
-        map[s] = arr.filter(function (c) {
-            return !TEXT_ROLE_RE.test(c)
-        })
-    }
-
-    var forcedById = {}
-    if (geoHints && geoHints.length) {
-        var matchedTextIds = {}
-        for (var gi = 0; gi < geoHints.length; gi++) {
-            var gh = geoHints[gi]
-            if (!gh || typeof gh !== "object") continue
-            var gtxt = normalizeGeoTextForMatch(gh.text)
-            var groom = sanitizeGeoRoleForBem(gh.role)
-            if (!gtxt) continue
-            for (var ti = 0; ti < texts.length; ti++) {
-                var tx = texts[ti]
-                if (matchedTextIds[tx.id]) continue
-                var tn = tx.textNorm || ""
-                if (!tn) continue
-                if (tn === gtxt || tn.indexOf(gtxt) !== -1 || gtxt.indexOf(tn) !== -1) {
-                    forcedById[String(tx.id)] = groom
-                    matchedTextIds[tx.id] = true
-                    break
-                }
-            }
-        }
-    }
-
-    for (var tsIdx = 0; tsIdx < texts.length; tsIdx++) {
-        stripTextSemanticRoles(texts[tsIdx].id)
-    }
-
-    for (var fid in forcedById) {
-        if (Object.prototype.hasOwnProperty.call(forcedById, fid)) {
-            add(fid, apSectionBem(forcedById[fid]))
-        }
-    }
-
-    var remaining = []
-    for (var ri = 0; ri < texts.length; ri++) {
-        if (!forcedById[String(texts[ri].id)]) remaining.push(texts[ri])
-    }
-    remaining.sort(function (a, b) {
-        if (b.fs !== a.fs) return b.fs - a.fs
-        return a.relY - b.relY
-    })
-    var bigRank = 0
-    for (var rj = 0; rj < remaining.length; rj++) {
-        var remFs = remaining[rj].fs != null ? Number(remaining[rj].fs) || 0 : 0
-        var roleRem
-        if (remFs <= AP_SECTION_TITLE_MIN_FS) {
-            roleRem = "desc"
-        } else {
-            if (bigRank === 0) roleRem = "title"
-            else if (bigRank === 1) roleRem = "subtitle"
-            else roleRem = "desc"
-            bigRank++
-        }
-        add(remaining[rj].id, apSectionBem(roleRem))
-    }
-
-    /** walkStructure 가 먼지 부여한 content 등과 충돌하지 않게: .ap-image 로 나가는 노드는 시맨틱을 image 하나로만 둠 */
-    function tagImageNode(n) {
-        if (!n || !n.id) return
-        map[String(n.id)] = [apSectionBem("image")]
-    }
-    function walkImg(n) {
-        if (!n || !isVisible(n)) return
-        if (isContainer(n) && hasTextInSubtree(n)) {
-            for (var k = 0; k < (n.children || []).length; k++) walkImg(n.children[k])
-            return
-        }
-        if (isContainer(n) && isImageCandidate(n)) {
-            if (hasMultipleImageLikeChildren(n) && !isCompositeCandidate(n)) {
-                for (var k2 = 0; k2 < (n.children || []).length; k2++) walkImg(n.children[k2])
-                return
-            }
-            tagImageNode(n)
-            return
-        }
-        if (
-            n.id &&
-            (isImageCandidate(n) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE")) &&
-            n.type !== "TEXT"
-        ) {
-            tagImageNode(n)
-        }
-        if (isContainer(n)) for (var k3 = 0; k3 < (n.children || []).length; k3++) walkImg(n.children[k3])
-    }
-    walkImg(sectionNode)
-
-    function walkFillMissing(n) {
-        if (!n || !isVisible(n)) return
-        if (n.id && !map[String(n.id)]) {
-            if (isVideoNode(n)) add(n.id, apSectionBem("video"))
-            else if (isLineLikeNode(n)) add(n.id, apSectionBem("line"))
-            else if (n.type === "ELLIPSE") add(n.id, apSectionBem("ellipse"))
-            else if (nodeWillRenderAsApImageFigure(n)) tagImageNode(n)
-            else if (isImageCandidate(n) && !isContainer(n)) tagImageNode(n)
-            else add(n.id, apSectionBem("layer"))
-        }
-        if (isContainer(n)) for (var wf = 0; wf < (n.children || []).length; wf++) walkFillMissing(n.children[wf])
-    }
-    walkFillMissing(sectionNode)
-
-    var bgSkip = bgChildId != null ? String(bgChildId) : ""
-    if (bgSkip && Object.prototype.hasOwnProperty.call(map, bgSkip)) delete map[bgSkip]
-
-    demoteNestedDuplicateSectionRoles(sectionNode, map)
-    disambiguateSectionSemantics(sectionNode, map)
-    demoteNestedDuplicateSectionRoles(sectionNode, map)
-    disambiguateSectionSemantics(sectionNode, map)
-
-    return map
-}
-
-/**
- * ap-section__image / ap-section__content 는 섹션 트리 순서로 한 번에 번호 부여.
- * promoteRaster 이후 무접미사 image 가 생겨도 기존 --01… 과 충돌하지 않음.
- * 1개면 접미사 없음, 2개 이상이면 전부 --01, --02…
- */
-function renumberApSectionElemGlobally(sectionNode, map, elemPart) {
-    if (!sectionNode || !map) return
-    var base = "ap-section__" + elemPart
-    var re = new RegExp("^" + base + "(?:--\\d{2})?$")
-    var orderedIds = []
-    function walkOrd2(n) {
-        if (!n || !isVisible(n)) return
-        if (n.id) orderedIds.push(String(n.id))
-        if (isContainer(n)) for (var j = 0; j < (n.children || []).length; j++) walkOrd2(n.children[j])
-    }
-    walkOrd2(sectionNode)
-    var hits = []
-    for (var oi = 0; oi < orderedIds.length; oi++) {
-        var nid = orderedIds[oi]
-        if (!Object.prototype.hasOwnProperty.call(map, nid)) continue
-        var arr = map[nid]
-        if (!arr || !arr.length) continue
-        for (var ai = 0; ai < arr.length; ai++) {
-            if (re.test(String(arr[ai] || ""))) {
-                hits.push({ id: nid, idx: ai })
-                break
-            }
-        }
-    }
-    if (hits.length === 0) return
-    if (hits.length === 1) {
-        map[hits[0].id][hits[0].idx] = base
-        return
-    }
-    for (var hi = 0; hi < hits.length; hi++) {
-        map[hits[hi].id][hits[hi].idx] = base + "--" + pad2(hi + 1)
-    }
-}
-
-/** 동일 ap-section__* 가 여러 노드면: 그 외 역할은 첫 노드 접미사 없음·둘째부터 --02… (image/content 는 renumberApSectionElemGlobally) */
-function disambiguateSectionSemantics(sectionNode, map) {
-    var classToIds = {}
-    for (var nid in map) {
-        if (!Object.prototype.hasOwnProperty.call(map, nid)) continue
-        var arr = map[nid] || []
-        for (var i = 0; i < arr.length; i++) {
-            var c = arr[i]
-            if (!classToIds[c]) classToIds[c] = []
-            if (classToIds[c].indexOf(nid) < 0) classToIds[c].push(nid)
-        }
-    }
-    var order = []
-    function walkOrd(n) {
-        if (!n || !isVisible(n)) return
-        if (n.id) order.push(String(n.id))
-        if (isContainer(n)) for (var j = 0; j < (n.children || []).length; j++) walkOrd(n.children[j])
-    }
-    walkOrd(sectionNode)
-    function rank(id) {
-        var x = order.indexOf(id)
-        return x < 0 ? 999999 : x
-    }
-    for (var cls in classToIds) {
-        var ids = classToIds[cls]
-        if (ids.length <= 1) continue
-        ids = ids.slice().sort(function (a, b) {
-            return rank(a) - rank(b)
-        })
-        var clsStr = String(cls || "")
-        var baseNm = clsStr.replace(/--\d{2}$/, "")
-        if (baseNm === "ap-section__content" || baseNm === "ap-section__image") continue
-        for (var k = 0; k < ids.length; k++) {
-            var newCls = k === 0 ? clsStr : baseNm + "--" + pad2(k + 1)
-            var arrM = map[ids[k]]
-            var idx = arrM.indexOf(clsStr)
-            if (idx >= 0) arrM[idx] = newCls
-        }
-    }
-    renumberApSectionElemGlobally(sectionNode, map, "image")
-    renumberApSectionElemGlobally(sectionNode, map, "content")
-}
-
-/** 지연 CSS용: 섹션 스코프 안 시맨틱 클래스만 (ap-n 없음) */
-function cssInnerSelForNode(id, opts, forImgChild) {
-    var sid = id != null ? String(id) : ""
-    if (!sid) return forImgChild ? ".ap-missing > img" : ".ap-missing"
-    var sem = (opts && opts.sectionSemantics && opts.sectionSemantics[sid]) || []
-    if (!sem.length) return forImgChild ? ".ap-missing > img" : ".ap-missing"
-    var pick = sem[sem.length - 1]
-    if (forImgChild) {
-        for (var i = sem.length - 1; i >= 0; i--) {
-            if (/^ap-section__image(?:--[0-9]{2})?$/.test(String(sem[i] || ""))) {
-                pick = sem[i]
-                break
-            }
-        }
-    }
-    return forImgChild ? "." + pick + " > img" : "." + pick
-}
-
-/** TEXT 래스터 시 ap-section__title/__desc 등 제거 후 이미지 레이아웃(ap-section__image)과 동일 계열로 맞춤 */
-var RASTER_STRIP_TEXT_ROLE_RE = /^ap-section__(title|subtitle|desc|description|caption|cta|label|body)(--|$)/
-
-function optsWithRasterTextAsImageSemantics(id, opts) {
-    if (!opts) return { sectionSemantics: {} }
-    var sid = id != null ? String(id) : ""
-    if (!sid) return opts
-    var sem = opts.sectionSemantics || {}
-    var orig = sem[sid] ? sem[sid].slice() : []
-    var disambigSuffix = ""
-    for (var oi = 0; oi < orig.length; oi++) {
-        var m = /^ap-section__(?:title|subtitle|desc|description|caption|cta|label|body)(--[0-9]{2})$/.exec(String(orig[oi] || ""))
-        if (m) disambigSuffix = m[1]
-    }
-    var arr = orig.filter(function (c) {
-        return !RASTER_STRIP_TEXT_ROLE_RE.test(String(c || ""))
-    })
-    var hasImgLike = arr.some(function (c) {
-        return /^ap-section__image(?:--[0-9]{2})?$/.test(String(c || ""))
-    })
-    if (!hasImgLike) arr.push(apSectionBem("image") + disambigSuffix)
-    var nextSem = {}
-    for (var k in sem) {
-        if (Object.prototype.hasOwnProperty.call(sem, k)) nextSem[k] = sem[k]
-    }
-    nextSem[sid] = arr
-    var out = {}
-    for (var ko in opts) {
-        if (Object.prototype.hasOwnProperty.call(opts, ko)) out[ko] = opts[ko]
-    }
-    out.sectionSemantics = nextSem
-    return out
-}
-
-/** base + 시맨틱만 (ap-n-* 출력 안 함) */
-function apNodeClassList(base, id, opts) {
-    var parts = [base || ""]
-    var sem = id && opts && opts.sectionSemantics ? opts.sectionSemantics[String(id)] : null
-    if (sem && sem.length) {
-        for (var i = 0; i < sem.length; i++) parts.push(sem[i])
-    }
-    return parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
-}
-
 var IMAGE_EXPORT_MAX_WIDTH = 200   // 미리보기
 var IMAGE_EXPORT_ZIP_WIDTH = 1200  // ZIP 내보내기
 var _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
@@ -2433,16 +2026,12 @@ function getImageSizeDecl(node) {
     return parts.join(";")
 }
 
-/** 래퍼(.ap-image .ap-section__image--XX)에 --ap-w/--ap-h만 넣음. 기존 .ap-image img 규칙이 var()로 활용 (ap-abs 래퍼는 생략) */
-function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapperIsApAbs) {
-    if (!nodeId || wrapperIsApAbs) return
-    var decl = getImageSizeDecl(node)
-    if (!decl) return
-    var innerSel = cssInnerSelForNode(String(nodeId), opts, false)
-    var sel = ".ap-section--" + secClass + " " + innerSel.replace(/,/g, ", .ap-section--" + secClass + " ")
-    pushDeferredStyle(ctx, sel, decl)
-}
-
+/**
+ * 080-text-fonts — 폰트 로드, TEXT 스타일 구간, ap-text CSS 변수, 허용 폰트 판별
+ *
+ * getTextSummaryAsync/Sync, getTextFontFamiliesSync, buildTextVarsDecl*, textFamiliesAllowedAsHtml 등.
+ * 지연 CSS·에셋 경로·배경·섹션 시맨틱·폰트 래스터 시맨틱 승격은 082·083·085·081.
+ */
 // ----- 텍스트 (폰트 로드, 스타일 구간, CSS 변수) -----
 /** 폰트 객체 → "family::style" 고유 키 */
 function uniqFontKey(fn) {
@@ -2992,6 +2581,517 @@ function getTextFontFamiliesSync(tn) {
 }
 
 /**
+ * 081-section-semantics — ap-section BEM·GEO 힌트·이름 기반 노드 수집·클래스/inner 셀렉터
+ *
+ * 080 getTextSummarySync 이후에 둠 (buildSectionSemanticClasses).
+ * 의존: 010 BEM, 050 bounds, 070 노드 분류·isImageCandidate 등, 080 getTextSummarySync·폰트 허용 판별
+ */
+// ----- Section semantics (id → ap-section__* , MO 이름 매칭용 수집) -----
+/** ap-section__image(+접미사) 시맨틱 — 크기는 --ap-w/--ap-h·.ap-image img 규칙으로 두고 flex fill width:100% 제외 */
+function nodeHasApSectionImageSemantic(nodeId, opts) {
+    var sid = nodeId != null ? String(nodeId) : ""
+    if (!sid || !opts || !opts.sectionSemantics) return false
+    var sem = opts.sectionSemantics[sid] || []
+    for (var i = 0; i < sem.length; i++) {
+        if (/^ap-section__image(?:--[0-9]{2})?$/.test(String(sem[i] || ""))) return true
+    }
+    return false
+}
+
+/** 섹션 서브트리에서 .ap-image로 출력되는 노드들을 레이어 name 기준으로 수집 (MO 이미지 이름 매칭용) */
+function collectImageNodesByName(root) {
+    var map = {}
+    if (!root) return map
+    function walk(n) {
+        if (!n || !isVisible(n)) return
+        var isImg = (isImageCandidate(n) || hasImageFill(n) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE"))
+        if (n.id && isImg) {
+            var key = String(n.name || "").trim()
+            if (key !== "" && !map[key]) map[key] = n
+        }
+        if (isContainer(n)) for (var i = 0; i < n.children.length; i++) walk(n.children[i])
+    }
+    walk(root)
+    return map
+}
+
+/** 섹션 서브트리에서 TEXT 노드를 레이어 name 기준으로 수집 (MO 텍스트 이름 매칭용) */
+function collectTextNodesByName(root) {
+    var map = {}
+    if (!root) return map
+    function walk(n) {
+        if (!n || !isVisible(n)) return
+        if (n.type === "TEXT" && n.id) {
+            var key = String(n.name || "").trim()
+            if (key !== "" && !map[key]) map[key] = n
+        }
+        if (isContainer(n)) for (var i = 0; i < n.children.length; i++) walk(n.children[i])
+    }
+    walk(root)
+    return map
+}
+
+/** section 기준 깊이 → 구조 역할. 10단계 넘으면 part로 통일 */
+var SECTION_STRUCTURE_LEVELS = [
+    "container",
+    "content",
+    "group",
+    "block",
+    "item",
+    "part",
+    "slot",
+    "cell",
+    "unit",
+]
+
+var AP_SECTION_ROLE_ORDER = [
+    "container",
+    "content",
+    "group",
+    "block",
+    "item",
+    "part",
+    "slot",
+    "cell",
+    "unit",
+]
+
+function getApSectionRole(cls) {
+    var m = String(cls || "").match(/^ap-section__(container|content|group|block|item|part|slot|cell|unit)(--[a-z0-9-]+)?$/)
+    return m ? m[1] : ""
+}
+
+function getApSectionRoleSuffix(cls) {
+    var m = String(cls || "").match(/^ap-section__(container|content|group|block|item|part|slot|cell|unit)(--[a-z0-9-]+)?$/)
+    return m && m[2] ? m[2] : ""
+}
+
+function getNextSectionRole(role) {
+    var idx = AP_SECTION_ROLE_ORDER.indexOf(String(role || ""))
+    if (idx < 0) return "part"
+    if (idx >= AP_SECTION_ROLE_ORDER.length - 1) return AP_SECTION_ROLE_ORDER[AP_SECTION_ROLE_ORDER.length - 1]
+    return AP_SECTION_ROLE_ORDER[idx + 1]
+}
+
+function replaceSectionRoleClass(arr, fromRole, toRole) {
+    if (!arr || !arr.length) return arr || []
+    var out = []
+    var replaced = false
+
+    for (var i = 0; i < arr.length; i++) {
+        var cls = arr[i]
+        var role = getApSectionRole(cls)
+
+        if (role && role === fromRole) {
+            var suffix = getApSectionRoleSuffix(cls)
+            var nextCls = "ap-section__" + toRole + suffix
+            if (out.indexOf(nextCls) < 0) out.push(nextCls)
+            replaced = true
+            continue
+        }
+
+        if (out.indexOf(cls) < 0) out.push(cls)
+    }
+
+    if (!replaced) return arr.slice()
+    return out
+}
+
+function demoteNestedDuplicateSectionRoles(sectionNode, classMap) {
+    if (!sectionNode || !classMap) return
+
+    function getOwnRoleFromClassMap(id) {
+        var arr = classMap[id] || []
+        for (var i = 0; i < arr.length; i++) {
+            var role = getApSectionRole(arr[i])
+            if (role) return role
+        }
+        return ""
+    }
+
+    function walk(node, parentRole) {
+        if (!node || !isVisible(node)) return
+
+        var id = node.id != null ? String(node.id) : ""
+        var ownRole = id ? getOwnRoleFromClassMap(id) : ""
+
+        if (id && parentRole && ownRole && parentRole === ownRole) {
+            var nextRole = getNextSectionRole(ownRole)
+            classMap[id] = replaceSectionRoleClass(classMap[id] || [], ownRole, nextRole)
+            ownRole = getOwnRoleFromClassMap(id)
+        }
+
+        if (isContainer(node) && node.children && node.children.length) {
+            for (var j = 0; j < node.children.length; j++) {
+                walk(node.children[j], ownRole || parentRole || "")
+            }
+        }
+    }
+
+    walk(sectionNode, "")
+}
+
+function normalizeGeoTextForMatch(s) {
+    return String(s || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase()
+}
+
+function sanitizeGeoRoleForBem(role) {
+    var r = String(role || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, "")
+    if (r === "description") r = "desc"
+    var ok = {title: 1, subtitle: 1, desc: 1, caption: 1, cta: 1, label: 1, body: 1}
+    return ok[r] ? r : "desc"
+}
+
+/**
+ * walkStructure 에서 depth 기반 container/content/… 를 줄 FRAME 인지.
+ * 단일 이미지·이미지 fill 위주 프레임 등은 leaf 가 tagImageNode 로 image 가 되므로 여기서 구조 역할을 주지 않음.
+ */
+function isSemanticWrapperFrame(n) {
+    if (!n || n.type !== "FRAME" || !isContainer(n)) return false
+    if (hasTextInSubtree(n)) return true
+    if (hasMultipleImageLikeChildren(n) && !isCompositeCandidate(n)) return false
+    if (isImageCandidate(n)) return false
+    return true
+}
+
+/**
+ * 섹션 트리 기준 시맨틱 보조 클래스 (id → 클래스 배열).
+ * geoHints: AI 검수 GEO.structure [{ text, role }] — 본문 텍스트 매칭 시 ap-section__* 우선 반영.
+ * bgChildId: 섹션 배경으로만 승격된 직계 이미지 — HTML/CSS에 해당 노드가 없으므로 시맨틱·중복 접미사·이미지 번호에서 제외.
+ */
+function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
+    if (geoHints != null && !Array.isArray(geoHints)) geoHints = null
+    if (geoHints && geoHints.length > 64) geoHints = geoHints.slice(0, 64)
+    var map = {}
+    function add(nid, cls) {
+        if (nid == null) return
+        var s = String(nid)
+        if (!map[s]) map[s] = []
+        if (map[s].indexOf(cls) < 0) map[s].push(cls)
+    }
+    if (!sectionNode) return map
+
+    function walkStructure(n, depthFromSection) {
+        if (!n || !isVisible(n)) return
+        if (n.id && isSemanticWrapperFrame(n)) {
+            var role = SECTION_STRUCTURE_LEVELS[depthFromSection - 1] || "part"
+            add(n.id, apSectionBem(role))
+        }
+        if (isContainer(n)) {
+            /** GROUP / INSTANCE / COMPONENT 는 레이아웃 단계를 한 칸 먹지 않음(빈 래퍼 통과) */
+            var passDepth =
+                n.type === "GROUP" || n.type === "INSTANCE" || n.type === "COMPONENT" ? depthFromSection : depthFromSection + 1
+            for (var i = 0; i < (n.children || []).length; i++) {
+                walkStructure(n.children[i], passDepth)
+            }
+        }
+    }
+    var visKids = (sectionNode.children || []).filter(function (c) {
+        return c && isVisible(c)
+    })
+    for (var i = 0; i < visKids.length; i++) {
+        walkStructure(visKids[i], 1)
+    }
+
+    var texts = []
+    var secBox = getAbs(sectionNode)
+    var secTop = secBox ? secBox.y : 0
+    function walkText(n) {
+        if (!n || !isVisible(n)) return
+        if (n.type === "TEXT" && n.id) {
+            var ts = getTextSummarySync(n)
+            var fs = ts && ts.fs !== "" ? Number(ts.fs) || 0 : 0
+            var tb = getAbs(n)
+            var relY = tb ? tb.y - secTop : 0
+            var rawT = ts && ts.text != null ? String(ts.text) : ""
+            texts.push({id: n.id, fs: fs, relY: relY, textNorm: normalizeGeoTextForMatch(rawT)})
+        }
+        if (isContainer(n)) for (var j = 0; j < (n.children || []).length; j++) walkText(n.children[j])
+    }
+    walkText(sectionNode)
+    texts.sort(function (a, b) {
+        if (b.fs !== a.fs) return b.fs - a.fs
+        return a.relY - b.relY
+    })
+
+    var TEXT_ROLE_RE = /^ap-section__(title|subtitle|desc|description|caption|cta|label|body)$/
+
+    function stripTextSemanticRoles(nid) {
+        var s = String(nid)
+        var arr = map[s]
+        if (!arr || !arr.length) return
+        map[s] = arr.filter(function (c) {
+            return !TEXT_ROLE_RE.test(c)
+        })
+    }
+
+    var forcedById = {}
+    if (geoHints && geoHints.length) {
+        var matchedTextIds = {}
+        for (var gi = 0; gi < geoHints.length; gi++) {
+            var gh = geoHints[gi]
+            if (!gh || typeof gh !== "object") continue
+            var gtxt = normalizeGeoTextForMatch(gh.text)
+            var groom = sanitizeGeoRoleForBem(gh.role)
+            if (!gtxt) continue
+            for (var ti = 0; ti < texts.length; ti++) {
+                var tx = texts[ti]
+                if (matchedTextIds[tx.id]) continue
+                var tn = tx.textNorm || ""
+                if (!tn) continue
+                if (tn === gtxt || tn.indexOf(gtxt) !== -1 || gtxt.indexOf(tn) !== -1) {
+                    forcedById[String(tx.id)] = groom
+                    matchedTextIds[tx.id] = true
+                    break
+                }
+            }
+        }
+    }
+
+    for (var tsIdx = 0; tsIdx < texts.length; tsIdx++) {
+        stripTextSemanticRoles(texts[tsIdx].id)
+    }
+
+    for (var fid in forcedById) {
+        if (Object.prototype.hasOwnProperty.call(forcedById, fid)) {
+            add(fid, apSectionBem(forcedById[fid]))
+        }
+    }
+
+    var remaining = []
+    for (var ri = 0; ri < texts.length; ri++) {
+        if (!forcedById[String(texts[ri].id)]) remaining.push(texts[ri])
+    }
+    remaining.sort(function (a, b) {
+        if (b.fs !== a.fs) return b.fs - a.fs
+        return a.relY - b.relY
+    })
+    var bigRank = 0
+    for (var rj = 0; rj < remaining.length; rj++) {
+        var remFs = remaining[rj].fs != null ? Number(remaining[rj].fs) || 0 : 0
+        var roleRem
+        if (remFs <= AP_SECTION_TITLE_MIN_FS) {
+            roleRem = "desc"
+        } else {
+            if (bigRank === 0) roleRem = "title"
+            else if (bigRank === 1) roleRem = "subtitle"
+            else roleRem = "desc"
+            bigRank++
+        }
+        add(remaining[rj].id, apSectionBem(roleRem))
+    }
+
+    /** walkStructure 가 먼지 부여한 content 등과 충돌하지 않게: .ap-image 로 나가는 노드는 시맨틱을 image 하나로만 둠 */
+    function tagImageNode(n) {
+        if (!n || !n.id) return
+        map[String(n.id)] = [apSectionBem("image")]
+    }
+    function walkImg(n) {
+        if (!n || !isVisible(n)) return
+        if (isContainer(n) && hasTextInSubtree(n)) {
+            for (var k = 0; k < (n.children || []).length; k++) walkImg(n.children[k])
+            return
+        }
+        if (isContainer(n) && isImageCandidate(n)) {
+            if (hasMultipleImageLikeChildren(n) && !isCompositeCandidate(n)) {
+                for (var k2 = 0; k2 < (n.children || []).length; k2++) walkImg(n.children[k2])
+                return
+            }
+            tagImageNode(n)
+            return
+        }
+        if (
+            n.id &&
+            (isImageCandidate(n) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE")) &&
+            n.type !== "TEXT"
+        ) {
+            tagImageNode(n)
+        }
+        if (isContainer(n)) for (var k3 = 0; k3 < (n.children || []).length; k3++) walkImg(n.children[k3])
+    }
+    walkImg(sectionNode)
+
+    function walkFillMissing(n) {
+        if (!n || !isVisible(n)) return
+        if (n.id && !map[String(n.id)]) {
+            if (isVideoNode(n)) add(n.id, apSectionBem("video"))
+            else if (isLineLikeNode(n)) add(n.id, apSectionBem("line"))
+            else if (n.type === "ELLIPSE") add(n.id, apSectionBem("ellipse"))
+            else if (nodeWillRenderAsApImageFigure(n)) tagImageNode(n)
+            else if (isImageCandidate(n) && !isContainer(n)) tagImageNode(n)
+            else add(n.id, apSectionBem("layer"))
+        }
+        if (isContainer(n)) for (var wf = 0; wf < (n.children || []).length; wf++) walkFillMissing(n.children[wf])
+    }
+    walkFillMissing(sectionNode)
+
+    var bgSkip = bgChildId != null ? String(bgChildId) : ""
+    if (bgSkip && Object.prototype.hasOwnProperty.call(map, bgSkip)) delete map[bgSkip]
+
+    demoteNestedDuplicateSectionRoles(sectionNode, map)
+    disambiguateSectionSemantics(sectionNode, map)
+    demoteNestedDuplicateSectionRoles(sectionNode, map)
+    disambiguateSectionSemantics(sectionNode, map)
+
+    return map
+}
+
+/**
+ * ap-section__image / ap-section__content 는 섹션 트리 순서로 한 번에 번호 부여.
+ * promoteRaster 이후 무접미사 image 가 생겨도 기존 --01… 과 충돌하지 않음.
+ * 1개면 접미사 없음, 2개 이상이면 전부 --01, --02…
+ */
+function renumberApSectionElemGlobally(sectionNode, map, elemPart) {
+    if (!sectionNode || !map) return
+    var base = "ap-section__" + elemPart
+    var re = new RegExp("^" + base + "(?:--\\d{2})?$")
+    var orderedIds = []
+    function walkOrd2(n) {
+        if (!n || !isVisible(n)) return
+        if (n.id) orderedIds.push(String(n.id))
+        if (isContainer(n)) for (var j = 0; j < (n.children || []).length; j++) walkOrd2(n.children[j])
+    }
+    walkOrd2(sectionNode)
+    var hits = []
+    for (var oi = 0; oi < orderedIds.length; oi++) {
+        var nid = orderedIds[oi]
+        if (!Object.prototype.hasOwnProperty.call(map, nid)) continue
+        var arr = map[nid]
+        if (!arr || !arr.length) continue
+        for (var ai = 0; ai < arr.length; ai++) {
+            if (re.test(String(arr[ai] || ""))) {
+                hits.push({ id: nid, idx: ai })
+                break
+            }
+        }
+    }
+    if (hits.length === 0) return
+    if (hits.length === 1) {
+        map[hits[0].id][hits[0].idx] = base
+        return
+    }
+    for (var hi = 0; hi < hits.length; hi++) {
+        map[hits[hi].id][hits[hi].idx] = base + "--" + pad2(hi + 1)
+    }
+}
+
+/** 동일 ap-section__* 가 여러 노드면: 그 외 역할은 첫 노드 접미사 없음·둘째부터 --02… (image/content 는 renumberApSectionElemGlobally) */
+function disambiguateSectionSemantics(sectionNode, map) {
+    var classToIds = {}
+    for (var nid in map) {
+        if (!Object.prototype.hasOwnProperty.call(map, nid)) continue
+        var arr = map[nid] || []
+        for (var i = 0; i < arr.length; i++) {
+            var c = arr[i]
+            if (!classToIds[c]) classToIds[c] = []
+            if (classToIds[c].indexOf(nid) < 0) classToIds[c].push(nid)
+        }
+    }
+    var order = []
+    function walkOrd(n) {
+        if (!n || !isVisible(n)) return
+        if (n.id) order.push(String(n.id))
+        if (isContainer(n)) for (var j = 0; j < (n.children || []).length; j++) walkOrd(n.children[j])
+    }
+    walkOrd(sectionNode)
+    function rank(id) {
+        var x = order.indexOf(id)
+        return x < 0 ? 999999 : x
+    }
+    for (var cls in classToIds) {
+        var ids = classToIds[cls]
+        if (ids.length <= 1) continue
+        ids = ids.slice().sort(function (a, b) {
+            return rank(a) - rank(b)
+        })
+        var clsStr = String(cls || "")
+        var baseNm = clsStr.replace(/--\d{2}$/, "")
+        if (baseNm === "ap-section__content" || baseNm === "ap-section__image") continue
+        for (var k = 0; k < ids.length; k++) {
+            var newCls = k === 0 ? clsStr : baseNm + "--" + pad2(k + 1)
+            var arrM = map[ids[k]]
+            var idx = arrM.indexOf(clsStr)
+            if (idx >= 0) arrM[idx] = newCls
+        }
+    }
+    renumberApSectionElemGlobally(sectionNode, map, "image")
+    renumberApSectionElemGlobally(sectionNode, map, "content")
+}
+
+/** 지연 CSS용: 섹션 스코프 안 시맨틱 클래스만 (ap-n 없음) */
+function cssInnerSelForNode(id, opts, forImgChild) {
+    var sid = id != null ? String(id) : ""
+    if (!sid) return forImgChild ? ".ap-missing > img" : ".ap-missing"
+    var sem = (opts && opts.sectionSemantics && opts.sectionSemantics[sid]) || []
+    if (!sem.length) return forImgChild ? ".ap-missing > img" : ".ap-missing"
+    var pick = sem[sem.length - 1]
+    if (forImgChild) {
+        for (var i = sem.length - 1; i >= 0; i--) {
+            if (/^ap-section__image(?:--[0-9]{2})?$/.test(String(sem[i] || ""))) {
+                pick = sem[i]
+                break
+            }
+        }
+    }
+    return forImgChild ? "." + pick + " > img" : "." + pick
+}
+
+/** TEXT 래스터 시 ap-section__title/__desc 등 제거 후 이미지 레이아웃(ap-section__image)과 동일 계열로 맞춤 */
+var RASTER_STRIP_TEXT_ROLE_RE = /^ap-section__(title|subtitle|desc|description|caption|cta|label|body)(--|$)/
+
+function optsWithRasterTextAsImageSemantics(id, opts) {
+    if (!opts) return { sectionSemantics: {} }
+    var sid = id != null ? String(id) : ""
+    if (!sid) return opts
+    var sem = opts.sectionSemantics || {}
+    var orig = sem[sid] ? sem[sid].slice() : []
+    var disambigSuffix = ""
+    for (var oi = 0; oi < orig.length; oi++) {
+        var m = /^ap-section__(?:title|subtitle|desc|description|caption|cta|label|body)(--[0-9]{2})$/.exec(String(orig[oi] || ""))
+        if (m) disambigSuffix = m[1]
+    }
+    var arr = orig.filter(function (c) {
+        return !RASTER_STRIP_TEXT_ROLE_RE.test(String(c || ""))
+    })
+    var hasImgLike = arr.some(function (c) {
+        return /^ap-section__image(?:--[0-9]{2})?$/.test(String(c || ""))
+    })
+    if (!hasImgLike) arr.push(apSectionBem("image") + disambigSuffix)
+    var nextSem = {}
+    for (var k in sem) {
+        if (Object.prototype.hasOwnProperty.call(sem, k)) nextSem[k] = sem[k]
+    }
+    nextSem[sid] = arr
+    var out = {}
+    for (var ko in opts) {
+        if (Object.prototype.hasOwnProperty.call(opts, ko)) out[ko] = opts[ko]
+    }
+    out.sectionSemantics = nextSem
+    return out
+}
+
+/** base + 시맨틱만 (ap-n-* 출력 안 함) */
+function apNodeClassList(base, id, opts) {
+    var parts = [base || ""]
+    var sem = id && opts && opts.sectionSemantics ? opts.sectionSemantics[String(id)] : null
+    if (sem && sem.length) {
+        for (var i = 0; i < sem.length; i++) parts.push(sem[i])
+    }
+    return parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
+}
+/** 리프·자식 노드 지연 스타일용 inner selector */
+function getLeafSelectorForNode(ch, opts) {
+    if (!ch || !ch.id) return ""
+    if (opts && opts.sectionSemantics) return cssInnerSelForNode(String(ch.id), opts, false)
+    return nodeSel(String(ch.id))
+}
+
+/**
  * HTML 텍스트가 아닌(폰트 필터로 래스터) TEXT는 시맨틱에서 title/subtitle 등을 제거하고
  * ap-section__image 를 부여 — 접미사(--01…)는 호출부에서 promote 이후 disambiguateSectionSemantics 로 통일.
  */
@@ -3022,6 +3122,13 @@ function promoteRasterTextNodesToImageSemantics(sectionNode, map, allowedHtml, u
     }
 }
 
+
+/**
+ * 082-deferred-css — 지연 CSS 누적·병합·BEM 정리·MO 셀렉터 필터·이미지 크기 var
+ *
+ * 의존: 010 pad2, 070 getImageSizeDecl/cssInnerSel은 081·070 — pushDeferredImageImgSizeVars는 081 cssInner 이후
+ */
+// ----- Deferred CSS (빌드 컨텍스트에 sel+decl 누적, 최종 압축 전 병합) -----
 /** deferred 스타일 배열에 셀렉터별 선언 누적 (같은 sel이면 decl 병합) */
 function pushDeferredStyle(ctx, sel, decl) {
     if (!ctx || !ctx.deferredStyles || !sel || !decl) return
@@ -3469,6 +3576,22 @@ function moOverrideSelectorIsLive(sel, usedBySection) {
     return true
 }
 
+/** 래퍼(.ap-image .ap-section__image--XX)에 --ap-w/--ap-h만 넣음. 기존 .ap-image img 규칙이 var()로 활용 (ap-abs 래퍼는 생략) */
+function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapperIsApAbs) {
+    if (!nodeId || wrapperIsApAbs) return
+    var decl = getImageSizeDecl(node)
+    if (!decl) return
+    var innerSel = cssInnerSelForNode(String(nodeId), opts, false)
+    var sel = ".ap-section--" + secClass + " " + innerSel.replace(/,/g, ", .ap-section--" + secClass + " ")
+    pushDeferredStyle(ctx, sel, decl)
+}
+
+﻿/**
+ * 083-assets-cache — ZIP 에셋 파일명·프로젝트 슬러그·이미지 경로 할당
+ *
+ * 의존: 010 pad2
+ */
+// ----- Asset paths (cache.imageName, imageList, svgByHash) -----
 var ASSETS_IMAGES_PREFIX = "assets/images/"
 /** 프로젝트명 → 파일명에 쓸 수 있는 문자열 (공백·특수문자 제거) */
 function normalizeProjectName(s) {
@@ -3534,6 +3657,14 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
     return cache.imageName[key]
 }
 
+
+/**
+ * 085-section-background — 노드 fill 배경 선언 + 섹션 루트 풀블리드 이미지 승격
+ *
+ * buildBackgroundDeclAsync — 일반 노드 --bgc/--bg-img (060 fill·070 export·083 경로)
+ * buildSectionBackgroundAsync — stroke/radius 포함, 90% 이상 덮는 직계 이미지 → --bg-img 승격
+ */
+// ----- Section background (fill → CSS vars, 풀블리드 자식 승격) -----
 /** section이면 --bgc/--bg-img, 그 외는 background-color/background-image */
 function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts) {
     if (!node) return Promise.resolve("")
@@ -3601,7 +3732,6 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
         })
 }
 
-// ----- 6. Section Utils: 배경 승격(직계 풀블리드 이미지) -----
 /** 섹션 배경: fill 또는 직계 자식 중 90% 이상 크기 이미지 → --bg-img 승격 (slide 섹션 제외) */
 function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
   var slideData = getSlideItems(sectionNode)
@@ -3655,6 +3785,18 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
   })
 }
 
+
+/**
+ * 090-tree-inspect — 레이어 인스펙트 텍스트 덤프용 요약 + ROOT/섹션 해석
+ *
+ * 경계: 덤프 한 줄 요약·PC/MO 매칭·섹션 후보 목록. 비동기 전체 빌드 루프는 097, HTML 생성은 096.
+ *
+ * oneLineBase, dumpPadKey — 덤프 한 줄·키 패딩
+ * bgDetails, flexDetails, layoutChildDetails — 배경·flex·자식 sizing 덤프 문자열
+ * getFillFlexStartWidthDecl — FILL + flex-start일 때 width:100% 보조 선언
+ * resolveDesktopMobile — 선택 2개 시 가로 큰 쪽=PC, breakpoint=MO 폭
+ * getSectionNodes — ROOT 직계 보이는 자식 = 섹션 후보 목록
+ */
 // ----- Node Inspect / Dump (트리 덤프, PC/MO 매칭) -----
 /** 덤프용 한 줄 요약: 타입, 이름, 플래그(FLEX/ABS/TEXT 등) */
 function oneLineBase(node) {
@@ -3766,6 +3908,16 @@ function getSectionNodes(root) {
     })
 }
 
+/**
+ * 095-responsive-pcmo — PC HTML + @media로 MO 스타일·배경·picture 병합
+ *
+ * buildMobileOverrides — PC/MO 트리 1:1 walk로 달라진 CSS만 @media 블록에 출력
+ * getSectionStructureMatch — 섹션별 구조 시그니처 일치 여부(하이브리드 경고용)
+ * parseCodeIntoParts — 산출 HTML에서 base/section 스타일/article 분리
+ * injectBgOverridesForMo — sectionStyles의 --bg-img를 MO용 _mo 경로로 덮어씀
+ * apSlidePcImgAttr — 슬라이드 안 이미지는 picture 변환 생략 표시
+ * combinePcMoAsBreakpoint — 위 요소 합쳐 최종 HTML 문자열
+ */
 // ----- 6. Section Utils (배경은 buildSectionBackgroundAsync) -----
 /** PC HTML 기준 MO 미디어쿼리 오버라이드 (visible 자식 1:1 매칭, diff만 출력) */
 function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
@@ -4214,233 +4366,14 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     var headPrefix = (pc.headPrefix || "").trim()
     return (headPrefix ? headPrefix + "\n" : "") + styleBlock + articleHtml
 }
-/** 선택 루트 트리 덤프 + HTML/CSS 생성 + 이미지 export → 결과 및 이미지 목록 반환 */
-function dumpTreeAsync(root, projectName, allowedFonts, options) {
-    options = options || {}
-    var prevExportWidth = _currentExportWidth
-    if (options.exportWidth != null) _currentExportWidth = Math.max(200, Number(options.exportWidth))
 
-    var cache = {
-        projectName: normalizeProjectName(projectName),
-        allowedFonts: Array.isArray(allowedFonts)
-            ? allowedFonts
-                  .map(function (f) {
-                      return normalizeFontFamilyForMatch(f)
-                  })
-                  .filter(Boolean)
-            : [],
-        imageSuffix: options.imageSuffix != null ? String(options.imageSuffix) : "",
-        /** 이전에 분석해 폰트 UI가 있음 → 빈 allowedFonts = 체크 전부 해제 = 텍스트도 전부 이미지 */
-        fontHtmlFilterActive: options.fontHtmlFilterActive === true,
-        usedFonts: {},
-        text: {},
-        textMeta: {},
-        image: {},
-        imageName: {},
-        imageList: [],
-        imgCountBySec: {},
-    }
-    if (options.mobileRoot && options.phase === "desktop") {
-        cache.responsiveTextInnerByNodeId = buildResponsiveTextInnerByNodeIdMap(root, options.mobileRoot)
-    }
-
-    var rootBox = getAbs(root)
-    var rootSummary = ["", "  ─── LAYER INSPECT ───", "  ROOT    " + oneLineBase(root)]
-    if (rootBox) rootSummary.push("  " + dumpPadKey("ROOT_BOX") + "x=" + rootBox.x + " y=" + rootBox.y + " w=" + rootBox.w + " h=" + rootBox.h)
-    rootSummary.push("")
-
-    var sectionNodes = getSectionNodes(root)
-    if (!sectionNodes || sectionNodes.length === 0) {
-        return Promise.reject(new Error("보이는 섹션이 없습니다. ROOT 프레임의 직계 자식 레이어가 최소 1개 보이도록 선택했는지 확인하세요."))
-    }
-    var sections = []
-
-    function walkAsync(node, depth, isRootChild, sectionIndex, sectionNode, path) {
-        if (!isVisible(node)) return Promise.resolve(null)
-        path = path || []
-        var label = indent(depth) + "• " + oneLineBase(node)
-        if (isRootChild && sectionIndex != null) label += '  → <section class="ap-section ap-section--' + sectionClassPrefix(sectionIndex) + '">'
-
-        var props = []
-        var box = getAbs(node)
-
-        if (sectionNode) {
-            var sectionBox = getAbs(sectionNode)
-            if (sectionBox && box) {
-                var relX = r2(box.x - sectionBox.x)
-                var relY = r2(box.y - sectionBox.y)
-                props.push(indent(depth + 1) + dumpPadKey("sectionRelative") + "x=" + relX + ", y=" + relY + ", w=" + box.w + ", h=" + box.h)
-            }
-        }
-
-        var fd = flexDetails(node)
-        if (fd) props.push(indent(depth + 1) + dumpPadKey("flex") + fd)
-
-        var lcd = layoutChildDetails(node)
-        if (lcd) props.push(indent(depth + 1) + dumpPadKey("layoutChild") + lcd)
-
-        var bg = bgDetails(node)
-        if (bg) props.push(indent(depth + 1) + dumpPadKey("bg") + bg)
-
-        if ("layoutPositioning" in node && node.layoutPositioning === "ABSOLUTE") {
-            var px = typeof node.x === "number" ? r2(node.x) : ""
-            var py = typeof node.y === "number" ? r2(node.y) : ""
-            if (px !== "" || py !== "") props.push(indent(depth + 1) + dumpPadKey("position") + "x=" + px + ", y=" + py)
-        }
-
-        function addChildren(extra) {
-            return walkChildrenAsync(node, depth, sectionNode, sectionIndex, path).then(function (children) {
-                var out = {label: label, props: props, children: children, path: path}
-                if (extra && typeof extra === "object") {
-                    for (var key in extra) {
-                        if (Object.prototype.hasOwnProperty.call(extra, key)) out[key] = extra[key]
-                    }
-                }
-                return out
-            })
-        }
-
-        if (node.type === "TEXT") {
-            return getTextSummaryAsync(node).then(function (ts) {
-                if (node.id != null) {
-                    cache.text[node.id] = ts.text != null ? String(ts.text) : ""
-                    cache.textMeta[node.id] = ts
-                }
-                ;(ts.fontFamilies || (ts.fontFamily ? [ts.fontFamily] : [])).forEach(function (f) {
-                    if (f) cache.usedFonts[usedFontListLabel(f)] = true
-                })
-                var textDisplay = ts.text.indexOf("\n") >= 0 || ts.text.length > 60 ? ts.textShort : ts.text
-                props.push(indent(depth + 1) + dumpPadKey("text") + '"' + textDisplay + '"')
-                var box = getAbs(node)
-                if (box) {
-                    ts.sizeW = r2(box.w)
-                    ts.sizeH = r2(box.h)
-                }
-                return addChildren({textMeta: ts})
-            })
-        }
-
-        if (hasImageFill(node)) {
-            var isSection = isRootChild && sectionIndex != null
-            if (isSection) {
-                props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(section, 코드 생성 시 fill만 사용)")
-                return addChildren()
-            }
-            var exportPromise = exportImagePreferSourceBytesAsync(node)
-            return exportPromise.then(function (dataUrl) {
-                if (node.id != null && dataUrl) cache.image[node.id] = dataUrl
-                var secNo = sectionIndex != null ? sectionIndex : 1
-                var path = getOrAssignImagePath(cache, node.id, dataUrl, secNo, { skipExport: isVideoNode(node) })
-                if (path) props.push(indent(depth + 1) + dumpPadKey("bgImage") + path)
-                return addChildren()
-            })
-        }
-
-        if (isVectorOnlyTree(node) && node.id != null) {
-            var vecLabel = isLineLikeNode(node) ? "(ap-line, CSS)" : node.type === "ELLIPSE" ? "(ap-ellipse, CSS)" : "(ap-image, SVG)"
-            props.push(indent(depth + 1) + dumpPadKey("vector") + vecLabel)
-            return addChildren()
-        }
-
-        return addChildren()
-    }
-
-    function walkChildrenAsync(node, depth, sectionNode, sectionIndex, path) {
-        if (!isContainer(node)) return Promise.resolve([])
-        path = path || []
-        var list = (node.children || []).filter(function (c) {
-            return c && isVisible(c)
-        })
-        var results = []
-        var i = 0
-        function next() {
-            if (i >= list.length) return Promise.resolve(results)
-            var child = list[i]
-            var childPath = path.concat([i])
-            i++
-            return walkAsync(child, depth + 1, false, sectionIndex != null ? sectionIndex : null, sectionNode, childPath)
-                .then(function (treeNode) {
-                    if (treeNode) results.push(treeNode)
-                    return next()
-                })
-                .catch(function (err) {
-                    results.push({label: indent(depth + 1) + dumpPadKey("SKIP") + (child.name || "?") + " — " + String(err), props: [], children: [], path: childPath})
-                    return next()
-                })
-        }
-        return next()
-    }
-
-    var totalSections = sectionNodes.length
-    var phase = options.phase || "desktop"
-    if (totalSections > 0) {
-        figma.ui.postMessage({type: "PROGRESS", phase: phase, current: 0, total: totalSections})
-    }
-
-    function runSectionsSequential(index) {
-        if (index >= sectionNodes.length) return Promise.resolve()
-        var node = sectionNodes[index]
-        if (!node) return runSectionsSequential(index + 1)
-        if (!isVisible(node)) return runSectionsSequential(index + 1)
-        var sectionNumber = index + 1
-        return walkAsync(node, 0, true, sectionNumber, node, [sectionNumber])
-            .then(function (treeNode) {
-                if (treeNode) sections.push({title: "Section " + sectionClassPrefix(sectionNumber), node: treeNode})
-                figma.ui.postMessage({type: "PROGRESS", phase: phase, current: sections.length, total: totalSections})
-            })
-            .then(function () {
-                return new Promise(function (r) {
-                    setTimeout(r, 0)
-                })
-            })
-            .then(function () {
-                return runSectionsSequential(index + 1)
-            })
-    }
-
-    var legend = ["", "  ─── LEGEND ───", "  ROOT = 선택 1개 | 직계 자식(보이는 레이어) 각각 = ap-section (ap-section--01..)", "  " + dumpPadKey("flex") + "AutoLayout 정보", "  " + dumpPadKey("layoutChild") + "width/height(fill|auto|Npx), align-self, flex-grow", "  " + dumpPadKey("bg") + "배경: image, color:#hex, border (둘 다 있으면 둘 다 표기, export는 image 우선)", "  " + dumpPadKey("bgImage") + "image일 때 내보낸 이미지 경로 (assets/images/...)", "  " + dumpPadKey("sectionRelative") + "해당 ap-section 기준 상대 좌표 (x,y,w,h)", ""]
-
-    function flattenNode(n) {
-        return [n.label].concat(n.props).concat(
-            (n.children || []).reduce(function (acc, ch) {
-                return acc.concat(flattenNode(ch))
-            }, []),
-        )
-    }
-    function flattenTree(dataTree) {
-        var out = dataTree.rootSummary.slice()
-        dataTree.sections.forEach(function (sec) {
-            out.push("")
-            out.push("  ═══ " + sec.title + " ═══")
-            out.push("")
-            out.push.apply(out, flattenNode(sec.node))
-        })
-        out.push("")
-        out.push.apply(out, dataTree.legend)
-        return out.join("\n")
-    }
-
-    return runSectionsSequential(0)
-        .then(function () {
-            var dataTree = {rootSummary: rootSummary, sections: sections, legend: legend}
-            var text = flattenTree(dataTree)
-            return buildCodeAsync(root, cache, sectionNodes, options.geoStructure || null, options.mobileRoot || null).then(function (result) {
-                var code = result && result.code != null ? result.code : typeof result === "string" ? result : ""
-                var exportedNodeIds = result && result.exportedNodeIds ? result.exportedNodeIds : {}
-                var ownImageNodeIds = result && result.ownImageNodeIds ? result.ownImageNodeIds : {}
-                var usedFonts = Object.keys(cache.usedFonts || {})
-                    .filter(Boolean)
-                    .sort()
-                _currentExportWidth = prevExportWidth
-                return {text: text, dataTree: dataTree, code: code, exportedNodeIds: exportedNodeIds, ownImageNodeIds: ownImageNodeIds, images: cache.imageList || [], vectorTypes: VECTOR_TYPES, usedFonts: usedFonts}
-            })
-        })
-        .catch(function (err) {
-            _currentExportWidth = prevExportWidth
-            throw err
-        })
-}
-
+/**
+ * 096-html-code-builder — 최종 HTML/CSS 생성(섹션·Swiper·노드 렌더)
+ *
+ * compressCssForStyleTag — <style> 안 CSS 압축(주석·공백 제거, } 단위 줄바꿈)
+ * compressEmbeddedStyleTagsInHtml — HTML 문자열 속 <style> 내용만 압축
+ * buildCodeAsync — article·섹션·지연 스타일·Swiper 자산 포함 전체 코드 조립(내부에 render* 다수)
+ */
 // ----- 9. HTML Renderers / Code Builder (node-id 기반 HTML·CSS) -----
 /** CMS <style> 블록용: 주석 제거·내부 공백 축약 + 닫는 } 마다 줄바꿈 (한 덩어리 한 줄 방지) */
 function compressCssForStyleTag(src) {
@@ -5459,6 +5392,250 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     })
 }
 
+
+/**
+ * 097-dump-tree-async
+ *
+ * 이름의 dump는 「인스펙트용 트리 텍스트」 산출 형식을 뜻함. 개발 전용 디버그가 아니라
+ * 분석/ZIP 경로에서 호출되는 제품 파이프라인의 한 축(비동기 트리 워크 + buildCodeAsync 연계).
+ *
+ * dumpTreeAsync — ROOT 기준 레이어 인스펙트 트리 텍스트(dataTree) 생성, buildCodeAsync 호출로 code·이미지·폰트 목록 반환.
+ *   내부 walkAsync 등으로 섹션별 덤프, phase(desktop/mobile)에 따라 캐시·export 폭 처리.
+ */
+function dumpTreeAsync(root, projectName, allowedFonts, options) {
+    options = options || {}
+    var prevExportWidth = _currentExportWidth
+    if (options.exportWidth != null) _currentExportWidth = Math.max(200, Number(options.exportWidth))
+
+    var cache = {
+        projectName: normalizeProjectName(projectName),
+        allowedFonts: Array.isArray(allowedFonts)
+            ? allowedFonts
+                  .map(function (f) {
+                      return normalizeFontFamilyForMatch(f)
+                  })
+                  .filter(Boolean)
+            : [],
+        imageSuffix: options.imageSuffix != null ? String(options.imageSuffix) : "",
+        /** 이전에 분석해 폰트 UI가 있음 → 빈 allowedFonts = 체크 전부 해제 = 텍스트도 전부 이미지 */
+        fontHtmlFilterActive: options.fontHtmlFilterActive === true,
+        usedFonts: {},
+        text: {},
+        textMeta: {},
+        image: {},
+        imageName: {},
+        imageList: [],
+        imgCountBySec: {},
+    }
+    if (options.mobileRoot && options.phase === "desktop") {
+        cache.responsiveTextInnerByNodeId = buildResponsiveTextInnerByNodeIdMap(root, options.mobileRoot)
+    }
+
+    var rootBox = getAbs(root)
+    var rootSummary = ["", "  ─── LAYER INSPECT ───", "  ROOT    " + oneLineBase(root)]
+    if (rootBox) rootSummary.push("  " + dumpPadKey("ROOT_BOX") + "x=" + rootBox.x + " y=" + rootBox.y + " w=" + rootBox.w + " h=" + rootBox.h)
+    rootSummary.push("")
+
+    var sectionNodes = getSectionNodes(root)
+    if (!sectionNodes || sectionNodes.length === 0) {
+        return Promise.reject(new Error("보이는 섹션이 없습니다. ROOT 프레임의 직계 자식 레이어가 최소 1개 보이도록 선택했는지 확인하세요."))
+    }
+    var sections = []
+
+    function walkAsync(node, depth, isRootChild, sectionIndex, sectionNode, path) {
+        if (!isVisible(node)) return Promise.resolve(null)
+        path = path || []
+        var label = indent(depth) + "• " + oneLineBase(node)
+        if (isRootChild && sectionIndex != null) label += '  → <section class="ap-section ap-section--' + sectionClassPrefix(sectionIndex) + '">'
+
+        var props = []
+        var box = getAbs(node)
+
+        if (sectionNode) {
+            var sectionBox = getAbs(sectionNode)
+            if (sectionBox && box) {
+                var relX = r2(box.x - sectionBox.x)
+                var relY = r2(box.y - sectionBox.y)
+                props.push(indent(depth + 1) + dumpPadKey("sectionRelative") + "x=" + relX + ", y=" + relY + ", w=" + box.w + ", h=" + box.h)
+            }
+        }
+
+        var fd = flexDetails(node)
+        if (fd) props.push(indent(depth + 1) + dumpPadKey("flex") + fd)
+
+        var lcd = layoutChildDetails(node)
+        if (lcd) props.push(indent(depth + 1) + dumpPadKey("layoutChild") + lcd)
+
+        var bg = bgDetails(node)
+        if (bg) props.push(indent(depth + 1) + dumpPadKey("bg") + bg)
+
+        if ("layoutPositioning" in node && node.layoutPositioning === "ABSOLUTE") {
+            var px = typeof node.x === "number" ? r2(node.x) : ""
+            var py = typeof node.y === "number" ? r2(node.y) : ""
+            if (px !== "" || py !== "") props.push(indent(depth + 1) + dumpPadKey("position") + "x=" + px + ", y=" + py)
+        }
+
+        function addChildren(extra) {
+            return walkChildrenAsync(node, depth, sectionNode, sectionIndex, path).then(function (children) {
+                var out = {label: label, props: props, children: children, path: path}
+                if (extra && typeof extra === "object") {
+                    for (var key in extra) {
+                        if (Object.prototype.hasOwnProperty.call(extra, key)) out[key] = extra[key]
+                    }
+                }
+                return out
+            })
+        }
+
+        if (node.type === "TEXT") {
+            return getTextSummaryAsync(node).then(function (ts) {
+                if (node.id != null) {
+                    cache.text[node.id] = ts.text != null ? String(ts.text) : ""
+                    cache.textMeta[node.id] = ts
+                }
+                ;(ts.fontFamilies || (ts.fontFamily ? [ts.fontFamily] : [])).forEach(function (f) {
+                    if (f) cache.usedFonts[usedFontListLabel(f)] = true
+                })
+                var textDisplay = ts.text.indexOf("\n") >= 0 || ts.text.length > 60 ? ts.textShort : ts.text
+                props.push(indent(depth + 1) + dumpPadKey("text") + '"' + textDisplay + '"')
+                var box = getAbs(node)
+                if (box) {
+                    ts.sizeW = r2(box.w)
+                    ts.sizeH = r2(box.h)
+                }
+                return addChildren({textMeta: ts})
+            })
+        }
+
+        if (hasImageFill(node)) {
+            var isSection = isRootChild && sectionIndex != null
+            if (isSection) {
+                props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(section, 코드 생성 시 fill만 사용)")
+                return addChildren()
+            }
+            var exportPromise = exportImagePreferSourceBytesAsync(node)
+            return exportPromise.then(function (dataUrl) {
+                if (node.id != null && dataUrl) cache.image[node.id] = dataUrl
+                var secNo = sectionIndex != null ? sectionIndex : 1
+                var path = getOrAssignImagePath(cache, node.id, dataUrl, secNo, { skipExport: isVideoNode(node) })
+                if (path) props.push(indent(depth + 1) + dumpPadKey("bgImage") + path)
+                return addChildren()
+            })
+        }
+
+        if (isVectorOnlyTree(node) && node.id != null) {
+            var vecLabel = isLineLikeNode(node) ? "(ap-line, CSS)" : node.type === "ELLIPSE" ? "(ap-ellipse, CSS)" : "(ap-image, SVG)"
+            props.push(indent(depth + 1) + dumpPadKey("vector") + vecLabel)
+            return addChildren()
+        }
+
+        return addChildren()
+    }
+
+    function walkChildrenAsync(node, depth, sectionNode, sectionIndex, path) {
+        if (!isContainer(node)) return Promise.resolve([])
+        path = path || []
+        var list = (node.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        var results = []
+        var i = 0
+        function next() {
+            if (i >= list.length) return Promise.resolve(results)
+            var child = list[i]
+            var childPath = path.concat([i])
+            i++
+            return walkAsync(child, depth + 1, false, sectionIndex != null ? sectionIndex : null, sectionNode, childPath)
+                .then(function (treeNode) {
+                    if (treeNode) results.push(treeNode)
+                    return next()
+                })
+                .catch(function (err) {
+                    results.push({label: indent(depth + 1) + dumpPadKey("SKIP") + (child.name || "?") + " — " + String(err), props: [], children: [], path: childPath})
+                    return next()
+                })
+        }
+        return next()
+    }
+
+    var totalSections = sectionNodes.length
+    var phase = options.phase || "desktop"
+    if (totalSections > 0) {
+        figma.ui.postMessage({type: "PROGRESS", phase: phase, current: 0, total: totalSections})
+    }
+
+    function runSectionsSequential(index) {
+        if (index >= sectionNodes.length) return Promise.resolve()
+        var node = sectionNodes[index]
+        if (!node) return runSectionsSequential(index + 1)
+        if (!isVisible(node)) return runSectionsSequential(index + 1)
+        var sectionNumber = index + 1
+        return walkAsync(node, 0, true, sectionNumber, node, [sectionNumber])
+            .then(function (treeNode) {
+                if (treeNode) sections.push({title: "Section " + sectionClassPrefix(sectionNumber), node: treeNode})
+                figma.ui.postMessage({type: "PROGRESS", phase: phase, current: sections.length, total: totalSections})
+            })
+            .then(function () {
+                return new Promise(function (r) {
+                    setTimeout(r, 0)
+                })
+            })
+            .then(function () {
+                return runSectionsSequential(index + 1)
+            })
+    }
+
+    var legend = ["", "  ─── LEGEND ───", "  ROOT = 선택 1개 | 직계 자식(보이는 레이어) 각각 = ap-section (ap-section--01..)", "  " + dumpPadKey("flex") + "AutoLayout 정보", "  " + dumpPadKey("layoutChild") + "width/height(fill|auto|Npx), align-self, flex-grow", "  " + dumpPadKey("bg") + "배경: image, color:#hex, border (둘 다 있으면 둘 다 표기, export는 image 우선)", "  " + dumpPadKey("bgImage") + "image일 때 내보낸 이미지 경로 (assets/images/...)", "  " + dumpPadKey("sectionRelative") + "해당 ap-section 기준 상대 좌표 (x,y,w,h)", ""]
+
+    function flattenNode(n) {
+        return [n.label].concat(n.props).concat(
+            (n.children || []).reduce(function (acc, ch) {
+                return acc.concat(flattenNode(ch))
+            }, []),
+        )
+    }
+    function flattenTree(dataTree) {
+        var out = dataTree.rootSummary.slice()
+        dataTree.sections.forEach(function (sec) {
+            out.push("")
+            out.push("  ═══ " + sec.title + " ═══")
+            out.push("")
+            out.push.apply(out, flattenNode(sec.node))
+        })
+        out.push("")
+        out.push.apply(out, dataTree.legend)
+        return out.join("\n")
+    }
+
+    return runSectionsSequential(0)
+        .then(function () {
+            var dataTree = {rootSummary: rootSummary, sections: sections, legend: legend}
+            var text = flattenTree(dataTree)
+            return buildCodeAsync(root, cache, sectionNodes, options.geoStructure || null, options.mobileRoot || null).then(function (result) {
+                var code = result && result.code != null ? result.code : typeof result === "string" ? result : ""
+                var exportedNodeIds = result && result.exportedNodeIds ? result.exportedNodeIds : {}
+                var ownImageNodeIds = result && result.ownImageNodeIds ? result.ownImageNodeIds : {}
+                var usedFonts = Object.keys(cache.usedFonts || {})
+                    .filter(Boolean)
+                    .sort()
+                _currentExportWidth = prevExportWidth
+                return {text: text, dataTree: dataTree, code: code, exportedNodeIds: exportedNodeIds, ownImageNodeIds: ownImageNodeIds, images: cache.imageList || [], vectorTypes: VECTOR_TYPES, usedFonts: usedFonts}
+            })
+        })
+        .catch(function (err) {
+            _currentExportWidth = prevExportWidth
+            throw err
+        })
+}
+
+/**
+ * 099-ui-router — ui.html ↔ 메인 스레드 메시지 라우팅
+ *
+ * figma.ui.onmessage — RUN_ANALYZE/RUN_DESKTOP/RUN_MOBILE/EXPORT_ZIP, API 키 저장·로드 등.
+ *   분석·ZIP 시 dumpTreeAsync, PC+MO 시 combinePcMoAsBreakpoint, 결과는 RESULT·RESULT_IMAGES_*·ZIP_* 로 UI 전달.
+ *
+ * 비대해지면 타입별 핸들러만 별 파일로 쪼개고, 여기서는 위임만 두는 편이 유지보수에 유리함.
+ */
 // ----- 1. UI Router (ui.html → code.js) -----
 figma.ui.onmessage = function (msg) {
     if (!msg) return
