@@ -3,6 +3,7 @@
  *
  * 080 getTextSummarySync 이후에 둠 (buildSectionSemanticClasses).
  * 의존: 010 BEM, 050 bounds, 070 노드 분류·isImageCandidate 등, 080 getTextSummarySync·폰트 허용 판별
+ * getApSectionImageSlotKeyFromSemantics / collectMoImageLookupMaps — 095 MO 이미지 크기(렌더 순서와 함께 사용)
  */
 /** 남은 텍스트에 title/subtitle 부여 시, 이 px 이하(fs)는 ap-section__desc 로만 분류 */
 var AP_SECTION_TITLE_MIN_FS = 26
@@ -16,6 +17,45 @@ function nodeHasApSectionImageSemantic(nodeId, opts) {
         if (/^ap-section__image(?:--[0-9]{2})?$/.test(String(sem[i] || ""))) return true
     }
     return false
+}
+
+/** HTML과 동일한 ap-section__image(--NN) 키 (applyApSectionImageRenderOrderFromIds 적용 후) */
+function getApSectionImageSlotKeyFromSemantics(semArr) {
+    if (!semArr || !semArr.length) return ""
+    for (var i = 0; i < semArr.length; i++) {
+        var c = String(semArr[i] || "")
+        if (/^ap-section__image(?:--[0-9]{2})?$/.test(c)) return c
+    }
+    return ""
+}
+
+/** MO 트리: 슬롯·sourceNodeId·id 로 이미지 노드 조회 (095 PC/MO size diff) */
+function collectMoImageLookupMaps(moSec, moSem) {
+    var bySlot = {}
+    var bySourcePcId = {}
+    var byId = {}
+    if (!moSec || !moSem) return { bySlot: bySlot, bySourcePcId: bySourcePcId, byId: byId }
+    function walk(n) {
+        if (!n || !isVisible(n)) return
+        var isImg = (isImageCandidate(n) || hasImageFill(n) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE"))
+        if (n.id && isImg) {
+            var sid = String(n.id)
+            var sem = moSem[sid] || []
+            var slot = getApSectionImageSlotKeyFromSemantics(sem)
+            if (slot) bySlot[slot] = n
+            byId[sid] = n
+            if (typeof n.getPluginData === "function") {
+                var pcSrc = n.getPluginData("sourceNodeId")
+                if (pcSrc != null && String(pcSrc).trim() !== "") {
+                    var k = String(pcSrc).trim()
+                    if (!bySourcePcId[k]) bySourcePcId[k] = n
+                }
+            }
+        }
+        if (isContainer(n)) for (var i = 0; i < n.children.length; i++) walk(n.children[i])
+    }
+    walk(moSec)
+    return { bySlot: bySlot, bySourcePcId: bySourcePcId, byId: byId }
 }
 
 /** 섹션 서브트리에서 .ap-image로 출력되는 노드들을 레이어 name 기준으로 수집 (MO 이미지 이름 매칭용) */

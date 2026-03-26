@@ -2649,6 +2649,7 @@ function getTextFontFamiliesSync(tn) {
  *
  * 080 getTextSummarySync 이후에 둠 (buildSectionSemanticClasses).
  * 의존: 010 BEM, 050 bounds, 070 노드 분류·isImageCandidate 등, 080 getTextSummarySync·폰트 허용 판별
+ * getApSectionImageSlotKeyFromSemantics / collectMoImageLookupMaps — 095 MO 이미지 크기(렌더 순서와 함께 사용)
  */
 /** 남은 텍스트에 title/subtitle 부여 시, 이 px 이하(fs)는 ap-section__desc 로만 분류 */
 var AP_SECTION_TITLE_MIN_FS = 26
@@ -2662,6 +2663,45 @@ function nodeHasApSectionImageSemantic(nodeId, opts) {
         if (/^ap-section__image(?:--[0-9]{2})?$/.test(String(sem[i] || ""))) return true
     }
     return false
+}
+
+/** HTML과 동일한 ap-section__image(--NN) 키 (applyApSectionImageRenderOrderFromIds 적용 후) */
+function getApSectionImageSlotKeyFromSemantics(semArr) {
+    if (!semArr || !semArr.length) return ""
+    for (var i = 0; i < semArr.length; i++) {
+        var c = String(semArr[i] || "")
+        if (/^ap-section__image(?:--[0-9]{2})?$/.test(c)) return c
+    }
+    return ""
+}
+
+/** MO 트리: 슬롯·sourceNodeId·id 로 이미지 노드 조회 (095 PC/MO size diff) */
+function collectMoImageLookupMaps(moSec, moSem) {
+    var bySlot = {}
+    var bySourcePcId = {}
+    var byId = {}
+    if (!moSec || !moSem) return { bySlot: bySlot, bySourcePcId: bySourcePcId, byId: byId }
+    function walk(n) {
+        if (!n || !isVisible(n)) return
+        var isImg = (isImageCandidate(n) || hasImageFill(n) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE"))
+        if (n.id && isImg) {
+            var sid = String(n.id)
+            var sem = moSem[sid] || []
+            var slot = getApSectionImageSlotKeyFromSemantics(sem)
+            if (slot) bySlot[slot] = n
+            byId[sid] = n
+            if (typeof n.getPluginData === "function") {
+                var pcSrc = n.getPluginData("sourceNodeId")
+                if (pcSrc != null && String(pcSrc).trim() !== "") {
+                    var k = String(pcSrc).trim()
+                    if (!bySourcePcId[k]) bySourcePcId[k] = n
+                }
+            }
+        }
+        if (isContainer(n)) for (var i = 0; i < n.children.length; i++) walk(n.children[i])
+    }
+    walk(moSec)
+    return { bySlot: bySlot, bySourcePcId: bySourcePcId, byId: byId }
 }
 
 /** 섹션 서브트리에서 .ap-image로 출력되는 노드들을 레이어 name 기준으로 수집 (MO 이미지 이름 매칭용) */
@@ -4388,7 +4428,7 @@ function getSectionNodes(root) {
 /**
  * 095-responsive-pcmo — PC HTML + @media로 MO 스타일·배경·picture 병합
  *
- * buildMobileOverrides — PC/MO 트리 visible 자식 인덱스 1:1 walk로 달라진 CSS만 @media에 출력
+ * buildMobileOverrides — 레이아웃 등은 인덱스 walk; 이미지 크기는 렌더순서(096)·슬롯·sourceNodeId 매칭
  * getSectionStructureMatch — 섹션별 구조 시그니처 일치 여부(하이브리드 경고용)
  * parseCodeIntoParts — 산출 HTML에서 base/section 스타일/article 분리
  * injectBgOverridesForMo — sectionStyles의 --bg-img를 MO용 _mo 경로로 덮어씀
@@ -4396,7 +4436,7 @@ function getSectionNodes(root) {
  * combinePcMoAsBreakpoint — 위 요소 합쳐 최종 HTML 문자열
  */
 // ----- 6. Section Utils (배경은 buildSectionBackgroundAsync) -----
-/** PC HTML 기준 MO 미디어쿼리 오버라이드 (visible 자식 인덱스 1:1 매칭, diff만 출력) */
+/** PC HTML 기준 MO 미디어쿼리 오버라이드 (프레임/텍스트는 인덱스 walk, 이미지는 렌더 순서 반영 시맨틱) */
 function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
     options = options || {}
     var exportedSet = options.exportedNodeIds || null
@@ -4405,10 +4445,6 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         if (!exportedSet || id == null) return true
         if (Object.keys(exportedSet).length === 0) return true
         return exportedSet[String(id)] === true
-    }
-    function hasOwnImageFigure(id) {
-        if (!ownImageSet || id == null) return true
-        return ownImageSet[String(id)] === true
     }
     /** @media 블록 안: 동일 셀렉터 선언을 한 규칙으로 합침 (diff·파일 길이·리뷰용) */
     var moMediaRuleList = []
@@ -4426,6 +4462,68 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         }
         moMediaRuleList.push({ sel: sel, decl: d })
     }
+    function parseApWhFromDecl(decl) {
+        var s = String(decl || "")
+        var wm = /--ap-w:([^;]+)/.exec(s)
+        var hm = /--ap-h:([^;]+)/.exec(s)
+        return { apW: wm ? wm[1].trim() : "", apH: hm ? hm[1].trim() : "" }
+    }
+    function resolveMoImageNodeForPc(d, slot, moLookup, imgByName) {
+        var m = null
+        var method = ""
+        if (moLookup.bySourcePcId[String(d.id)]) {
+            m = moLookup.bySourcePcId[String(d.id)]
+            method = "sourceNodeId"
+        } else if (slot && moLookup.bySlot[slot]) {
+            m = moLookup.bySlot[slot]
+            method = "semanticSlot"
+        } else if (moLookup.byId[String(d.id)]) {
+            m = moLookup.byId[String(d.id)]
+            method = "sameNodeId"
+        } else {
+            var nk = String(d.name || "").trim()
+            if (nk && imgByName[nk]) {
+                m = imgByName[nk]
+                method = "nameFallback"
+            }
+        }
+        return { m: m, method: method }
+    }
+    function pushImageMoSizeOverridesForSection(dRoot, secCls, deskOpts, deskSemMap, moLookup, imgByName) {
+        function walkD(n) {
+            if (!n || !isVisible(n)) return
+            var isImg = (isImageCandidate(n) || hasImageFill(n) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE"))
+            if (n.id && isImg && isExported(n.id) && nodeHasApSectionImageSemantic(n.id, deskOpts)) {
+                var sem = deskSemMap[String(n.id)] || []
+                var slot = getApSectionImageSlotKeyFromSemantics(sem)
+                var res = resolveMoImageNodeForPc(n, slot, moLookup, imgByName)
+                var m = res.m
+                var method = res.method
+                var innerSel = cssInnerSelForNode(String(n.id), deskOpts, false)
+                var fullSel = ".ap-section--" + secCls + " " + innerSel
+                if (m) {
+                    var decl = getImageSizeDeclDiff(n, m)
+                    var wh = parseApWhFromDecl(decl)
+                    if (decl) pushMoMoRule(fullSel, decl)
+                    console.log("[ap-mo-img]", {
+                        section: secCls,
+                        pcId: n.id,
+                        pcName: n.name,
+                        slot: slot,
+                        matchMethod: method,
+                        moId: m.id,
+                        moName: m.name,
+                        selector: fullSel,
+                        apW: wh.apW,
+                        apH: wh.apH,
+                        hasDecl: !!decl,
+                    })
+                } else console.log("[ap-mo-img] noMo", { section: secCls, pcId: n.id, pcName: n.name, slot: slot })
+            }
+            if (isContainer(n)) for (var ci = 0; ci < n.children.length; ci++) walkD(n.children[ci])
+        }
+        walkD(dRoot)
+    }
     var lines = []
     var bp = Number(breakpoint) || 750
     lines.push("")
@@ -4440,7 +4538,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         return lines.join("\n")
     }
 
-    function walkPair(dNode, mNode, mParent, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone, semMap, videoByName, videoOverrideDone) {
+    function walkPair(dNode, mNode, mParent, secClass, imageByName, textByName, textOverrideDone, semMap, videoByName, videoOverrideDone) {
         var moOpts = { sectionSemantics: semMap || {} }
         var dKids = (dNode.children || []).filter(function (c) {
             return c && isVisible(c)
@@ -4455,7 +4553,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             if (d.type !== m.type) continue
             if (!d.id) {
                 if (d.type === "FRAME" && isContainer(d))
-                    walkPair(d, m, m, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone, semMap, videoByName, videoOverrideDone)
+                    walkPair(d, m, m, secClass, imageByName, textByName, textOverrideDone, semMap, videoByName, videoOverrideDone)
                 continue
             }
             var sel = ""
@@ -4550,30 +4648,24 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var strokeDiff2 = buildStrokeDeclDiff(d, m)
                 if (strokeDiff2) declParts.push(strokeDiff2)
             }
+            /** 래스터 이미지 --ap-w/h 는 렌더 순서·슬롯 매칭(pass pushImageMoSizeOverridesForSection). 비디오·라인·타원만 인덱스 m */
             var sizePairVideo = isVideoNode(d) || isVideoNode(m)
-            if (
-                d.id &&
-                isExported(d.id) &&
-                (((isVectorOnlyTree(d) || hasImageFill(d) || isImageCandidate(d)) && hasOwnImageFigure(d.id)) || sizePairVideo)
-            ) {
+            if (d.id && isExported(d.id) && (sizePairVideo || isLineLikeNode(d) || d.type === "ELLIPSE")) {
                 var sizeDeclM = ""
                 if (isLineLikeNode(d)) sizeDeclM = buildLineVarsDeclDiff(d, m)
                 else if (d.type === "ELLIPSE") sizeDeclM = buildEllipseVarsDeclDiff(d, m)
                 else if (sizePairVideo) sizeDeclM = getVideoSizeDeclDiff(d, m)
-                else sizeDeclM = getImageSizeDeclDiff(d, m)
                 if (sizeDeclM) {
                     var leafSelM = cssInnerSelForNode(String(d.id), moOpts, false)
                     var fullSelM = ".ap-section--" + secClass + " " + leafSelM
                     if (sel && fullSelM === sel) declParts.push(sizeDeclM)
                     else pushMoMoRule(fullSelM, sizeDeclM)
                     if (sizePairVideo && videoOverrideDone && d.id != null) videoOverrideDone[String(d.id)] = true
-                    if (imageOverrideDone && d.id != null && !isLineLikeNode(d) && d.type !== "ELLIPSE" && !sizePairVideo)
-                        imageOverrideDone[String(d.id)] = true
                 }
             }
             if (sel && declParts.length && isExported(d.id)) pushMoMoRule(sel, declParts.join(";"))
             if (d.type === "FRAME" && isContainer(d))
-                walkPair(d, m, m, secClass, imageByName, imageOverrideDone, textByName, textOverrideDone, semMap, videoByName, videoOverrideDone)
+                walkPair(d, m, m, secClass, imageByName, textByName, textOverrideDone, semMap, videoByName, videoOverrideDone)
         }
     }
 
@@ -4599,7 +4691,6 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         var secImageByName = collectImageNodesByName(mSec)
         var secVideoByName = collectVideoNodesByName(mSec)
         var secTextByName = collectTextNodesByName(mSec)
-        var sectionImageOverrideDone = {}
         var sectionVideoOverrideDone = {}
         var sectionTextOverrideDone = {}
         var deskSem = buildSectionSemanticClasses(dSec, (options && options.geoStructure) || null)
@@ -4616,39 +4707,20 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         disambiguateSectionSemantics(dSec, deskSem)
         demoteNestedDuplicateSectionRoles(dSec, deskSem)
         disambiguateSectionSemantics(dSec, deskSem)
+        var pcOrder = options.pcSectionImageRenderOrderIds && options.pcSectionImageRenderOrderIds[s]
+        if (pcOrder && pcOrder.length) applyApSectionImageRenderOrderFromIds(deskSem, pcOrder)
         var deskMoOpts = { sectionSemantics: deskSem }
-        walkPair(
-            dSec,
-            mSec,
-            mSec,
-            secClass,
-            secImageByName,
-            sectionImageOverrideDone,
-            secTextByName,
-            sectionTextOverrideDone,
-            deskSem,
-            secVideoByName,
-            sectionVideoOverrideDone
-        )
-        // 이미지: 인덱스로 매칭 안 된 경우에만 레이어 name 기준으로 MO 매칭
-        function pushImageOverridesByName(dNode, secCls, imgByName, overrideDone) {
-            if (!dNode || !isVisible(dNode)) return
-            var isImg = (isImageCandidate(dNode) || hasImageFill(dNode) || (isVectorOnlyTree(dNode) && !isLineLikeNode(dNode) && dNode.type !== "ELLIPSE"))
-            if (dNode.id && isImg && isExported(dNode.id) && hasOwnImageFigure(dNode.id) && !overrideDone[String(dNode.id)]) {
-                var key = String(dNode.name || "").trim()
-                var mImg = key !== "" && imgByName ? imgByName[key] : null
-                if (mImg) {
-                    var decl = getImageSizeDeclDiff(dNode, mImg)
-                    if (decl)
-                        pushMoMoRule(
-                            ".ap-section--" + secCls + " " + cssInnerSelForNode(String(dNode.id), deskMoOpts, false),
-                            decl
-                        )
-                }
-            }
-            if (isContainer(dNode)) for (var j = 0; j < dNode.children.length; j++) pushImageOverridesByName(dNode.children[j], secCls, imgByName, overrideDone)
-        }
-        pushImageOverridesByName(dSec, secClass, secImageByName, sectionImageOverrideDone)
+        var mSem = buildSectionSemanticClasses(mSec, (options && options.geoStructure) || null)
+        promoteRasterTextNodesToImageSemantics(mSec, mSem, allowedMo, !fontMoActive)
+        demoteNestedDuplicateSectionRoles(mSec, mSem)
+        disambiguateSectionSemantics(mSec, mSem)
+        demoteNestedDuplicateSectionRoles(mSec, mSem)
+        disambiguateSectionSemantics(mSec, mSem)
+        var moOrder = options.moSectionImageRenderOrderIds && options.moSectionImageRenderOrderIds[s]
+        if (moOrder && moOrder.length) applyApSectionImageRenderOrderFromIds(mSem, moOrder)
+        var moLookup = collectMoImageLookupMaps(mSec, mSem)
+        walkPair(dSec, mSec, mSec, secClass, secImageByName, secTextByName, sectionTextOverrideDone, deskSem, secVideoByName, sectionVideoOverrideDone)
+        pushImageMoSizeOverridesForSection(dSec, secClass, deskMoOpts, deskSem, moLookup, secImageByName)
         // code-video: 인덱스 매칭이 어긋난 경우 레이어 name 기준으로 MO 비디오 aspect-ratio 등
         function pushVideoOverridesByName(dNode, secCls, vidByName, overrideDone) {
             if (!dNode || !isVisible(dNode)) return
@@ -5044,6 +5116,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     var sectionCount = isContainer(root) ? root.children.length : 0
     var sectionIndex = 0
     var hasSlideSection = false
+    /** 섹션별 HTML 렌더 순서 <img> 노드 id (applyApSectionImageRenderOrderFromIds와 동일) — 095 MO 이미지 diff에 전달 */
+    var sectionImageRenderOrderIds = []
 
     function selInSection(secClass, innerSel) {
         // 쉼표로 구분된 복합 선택자 각각에 prefix 적용
@@ -5678,6 +5752,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             return collectImageFigureNodeIdsForSectionAsync(sectionNode, bg, slideData, cache, secNo, collectRopts)
                 .then(function (orderedIds) {
                     applyApSectionImageRenderOrderFromIds(sectionSemantics, orderedIds)
+                    sectionImageRenderOrderIds[secNo - 1] = (orderedIds || []).map(function (id) {
+                        return String(id)
+                    })
                     return prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo)
                 })
                 .then(function () {
@@ -5974,7 +6051,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             code = swiperCss + "\n" + code + "\n" + swiperScript
         }
 
-        return {code: code, exportedNodeIds: exportedNodeIds, ownImageNodeIds: ownImageNodeIds}
+        return {
+            code: code,
+            exportedNodeIds: exportedNodeIds,
+            ownImageNodeIds: ownImageNodeIds,
+            sectionImageRenderOrderIds: sectionImageRenderOrderIds,
+        }
     })
 }
 
@@ -6204,7 +6286,17 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                     .filter(Boolean)
                     .sort()
                 _currentExportWidth = prevExportWidth
-                return {text: text, dataTree: dataTree, code: code, exportedNodeIds: exportedNodeIds, ownImageNodeIds: ownImageNodeIds, images: cache.imageList || [], vectorTypes: VECTOR_TYPES, usedFonts: usedFonts}
+                return {
+                    text: text,
+                    dataTree: dataTree,
+                    code: code,
+                    exportedNodeIds: exportedNodeIds,
+                    ownImageNodeIds: ownImageNodeIds,
+                    sectionImageRenderOrderIds: result && result.sectionImageRenderOrderIds ? result.sectionImageRenderOrderIds : [],
+                    images: cache.imageList || [],
+                    vectorTypes: VECTOR_TYPES,
+                    usedFonts: usedFonts,
+                }
             })
         })
         .catch(function (err) {
@@ -6325,6 +6417,8 @@ figma.ui.onmessage = function (msg) {
                             geoStructure: msg.geoStructure || null,
                             allowedFonts: allowedFontsMo,
                             fontHtmlFilterActive: fontHtmlFilterActiveMo,
+                            pcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds,
+                            moSectionImageRenderOrderIds: moPayload.sectionImageRenderOrderIds,
                         })
                         var separateViews = false
                         var images = (payload.images || []).concat(moPayload.images || [])
@@ -6438,6 +6532,8 @@ figma.ui.onmessage = function (msg) {
                                 ownImageNodeIds: payload.ownImageNodeIds,
                                 allowedFonts: allowedFonts2,
                                 fontHtmlFilterActive: fontHtmlFilterActiveZip,
+                                pcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds,
+                                moSectionImageRenderOrderIds: moPayload.sectionImageRenderOrderIds,
                             })
 
                             images = (images || []).concat(moPayload.images || [])

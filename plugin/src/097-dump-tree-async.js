@@ -223,7 +223,17 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                     .filter(Boolean)
                     .sort()
                 _currentExportWidth = prevExportWidth
-                return {text: text, dataTree: dataTree, code: code, exportedNodeIds: exportedNodeIds, ownImageNodeIds: ownImageNodeIds, images: cache.imageList || [], vectorTypes: VECTOR_TYPES, usedFonts: usedFonts}
+                return {
+                    text: text,
+                    dataTree: dataTree,
+                    code: code,
+                    exportedNodeIds: exportedNodeIds,
+                    ownImageNodeIds: ownImageNodeIds,
+                    sectionImageRenderOrderIds: result && result.sectionImageRenderOrderIds ? result.sectionImageRenderOrderIds : [],
+                    images: cache.imageList || [],
+                    vectorTypes: VECTOR_TYPES,
+                    usedFonts: usedFonts,
+                }
             })
         })
         .catch(function (err) {

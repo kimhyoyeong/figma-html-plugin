@@ -153,6 +153,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     var sectionCount = isContainer(root) ? root.children.length : 0
     var sectionIndex = 0
     var hasSlideSection = false
+    /** 섹션별 HTML 렌더 순서 <img> 노드 id (applyApSectionImageRenderOrderFromIds와 동일) — 095 MO 이미지 diff에 전달 */
+    var sectionImageRenderOrderIds = []
 
     function selInSection(secClass, innerSel) {
         // 쉼표로 구분된 복합 선택자 각각에 prefix 적용
@@ -787,6 +789,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             return collectImageFigureNodeIdsForSectionAsync(sectionNode, bg, slideData, cache, secNo, collectRopts)
                 .then(function (orderedIds) {
                     applyApSectionImageRenderOrderFromIds(sectionSemantics, orderedIds)
+                    sectionImageRenderOrderIds[secNo - 1] = (orderedIds || []).map(function (id) {
+                        return String(id)
+                    })
                     return prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo)
                 })
                 .then(function () {
@@ -1083,7 +1088,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             code = swiperCss + "\n" + code + "\n" + swiperScript
         }
 
-        return {code: code, exportedNodeIds: exportedNodeIds, ownImageNodeIds: ownImageNodeIds}
+        return {
+            code: code,
+            exportedNodeIds: exportedNodeIds,
+            ownImageNodeIds: ownImageNodeIds,
+            sectionImageRenderOrderIds: sectionImageRenderOrderIds,
+        }
     })
 }
 

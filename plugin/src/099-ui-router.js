@@ -110,6 +110,8 @@ figma.ui.onmessage = function (msg) {
                             geoStructure: msg.geoStructure || null,
                             allowedFonts: allowedFontsMo,
                             fontHtmlFilterActive: fontHtmlFilterActiveMo,
+                            pcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds,
+                            moSectionImageRenderOrderIds: moPayload.sectionImageRenderOrderIds,
                         })
                         var separateViews = false
                         var images = (payload.images || []).concat(moPayload.images || [])
@@ -223,6 +225,8 @@ figma.ui.onmessage = function (msg) {
                                 ownImageNodeIds: payload.ownImageNodeIds,
                                 allowedFonts: allowedFonts2,
                                 fontHtmlFilterActive: fontHtmlFilterActiveZip,
+                                pcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds,
+                                moSectionImageRenderOrderIds: moPayload.sectionImageRenderOrderIds,
                             })
 
                             images = (images || []).concat(moPayload.images || [])
