@@ -2951,6 +2951,38 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
  * promoteRaster 이후 무접미사 image 가 생겨도 기존 --01… 과 충돌하지 않음.
  * 1개면 접미사 없음, 2개 이상이면 전부 --01, --02…
  */
+/**
+ * HTML에 실제로 그려지는 <img> 도출 순서(렌더 순서)로 ap-section__image / ap-section__image--NN 부여.
+ * 에셋 파일명 imgNN(083 해시·섹션 카운터)과 독립 — orderedImageIds 에 없는 노드의 image 시맨틱은 제거.
+ */
+function applyApSectionImageRenderOrderFromIds(sectionSemantics, orderedImageIds) {
+    if (!sectionSemantics || !orderedImageIds) return
+    var set = {}
+    for (var si = 0; si < orderedImageIds.length; si++) {
+        set[String(orderedImageIds[si])] = true
+    }
+    for (var nid in sectionSemantics) {
+        if (!Object.prototype.hasOwnProperty.call(sectionSemantics, nid)) continue
+        if (set[nid]) continue
+        var arr0 = sectionSemantics[nid] || []
+        sectionSemantics[nid] = arr0.filter(function (c) {
+            return !/^ap-section__image(?:--[0-9]{2})?$/.test(String(c || ""))
+        })
+    }
+    var n = orderedImageIds.length
+    if (n === 0) return
+    for (var j = 0; j < n; j++) {
+        var idStr = String(orderedImageIds[j])
+        var cls = n === 1 ? apSectionBem("image") : apSectionBem("image") + "--" + pad2(j + 1)
+        var arr = sectionSemantics[idStr] ? sectionSemantics[idStr].slice() : []
+        arr = arr.filter(function (c) {
+            return !/^ap-section__image(?:--[0-9]{2})?$/.test(String(c || ""))
+        })
+        arr.push(cls)
+        sectionSemantics[idStr] = arr
+    }
+}
+
 function renumberApSectionElemGlobally(sectionNode, map, elemPart) {
     if (!sectionNode || !map) return
     var base = "ap-section__" + elemPart
@@ -3594,6 +3626,8 @@ function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapper
 /**
  * 083-assets-cache — ZIP 에셋 파일명·프로젝트 슬러그·이미지 경로 할당
  *
+ * page_*_imgNN 파일 번호·해시 디듀프는 여기(에셋 단계). ap-section__image--NN BEM 번호는 084/096 렌더 순서와 별개.
+ *
  * 의존: 010 pad2
  */
 // ----- Asset paths (cache.imageName, imageList, svgByHash) -----
@@ -3697,6 +3731,300 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
     return pathOut
 }
 
+
+/**
+ * 084-image-render-order — 렌더 순서와 동일한 <img> 노드 id 수집·선행 export(에셋 경로/해시 디듀프는 083)
+ *
+ * buildCodeAsync에서 마크업 전에 호출: ap-section__image 번호는 렌더 순서, 파일명 imgNN은 해시·할당 순(별개).
+ */
+/** 섹션 서브트리에서 nodeId에 해당하는 SceneNode 탐색 */
+function findNodeByIdInSubtree(root, targetId) {
+    if (!root || targetId == null) return null
+    var want = String(targetId)
+    var found = null
+    function walk(n) {
+        if (!n || found) return
+        if (String(n.id) === want) {
+            found = n
+            return
+        }
+        if (isContainer(n) && n.children) {
+            for (var i = 0; i < n.children.length; i++) walk(n.children[i])
+        }
+    }
+    walk(root)
+    return found
+}
+
+/**
+ * renderNodeAsync 분기와 동일 순서로, 최종 <img> 한 장이 나가는 노드 id를 누적 (DFS·자식 순서 일치).
+ * @param {object} ropts includeHidden, allowedFonts, fontHtmlUnrestricted, sectionSemantics
+ */
+function collectImageFigureNodeIdsRenderNodeAsync(node, parent, cache, secNo, ropts) {
+    if (!node) return Promise.resolve([])
+    if (!(ropts && ropts.includeHidden) && !isVisible(node)) return Promise.resolve([])
+
+    if (node.type === "TEXT") {
+        return getTextSummaryAsync(node).then(function (ts) {
+            var families = ts.fontFamilies && ts.fontFamilies.length ? ts.fontFamilies : ts.fontFamily ? [ts.fontFamily] : []
+            if (textFamiliesAllowedAsHtml(families, ropts && ropts.allowedFonts ? ropts.allowedFonts : [], ropts && ropts.fontHtmlUnrestricted)) {
+                return []
+            }
+            return node.id != null ? [String(node.id)] : []
+        })
+    }
+
+    if (isVideoNode(node)) return Promise.resolve([])
+
+    if (isVectorOnlyTree(node)) {
+        if (isLineLikeNode(node)) return Promise.resolve([])
+        if (node.type === "ELLIPSE") return Promise.resolve([])
+        return node.id != null ? Promise.resolve([String(node.id)]) : Promise.resolve([])
+    }
+
+    if (shouldExportAsSingleRasterImage(node)) {
+        if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node)) {
+            var childrenImgGrp = node.children || []
+            var acc = []
+            var ix = 0
+            function nextSplit() {
+                if (ix >= childrenImgGrp.length) return Promise.resolve(acc)
+                var cImg = childrenImgGrp[ix++]
+                if (!cImg || (!(ropts && ropts.includeHidden) && !isVisible(cImg))) return nextSplit()
+                return collectImageFigureNodeIdsRenderNodeAsync(cImg, node, cache, secNo, ropts).then(function (part) {
+                    acc = acc.concat(part)
+                    return nextSplit()
+                })
+            }
+            return nextSplit()
+        }
+        return node.id != null ? Promise.resolve([String(node.id)]) : Promise.resolve([])
+    }
+
+    if (node.type === "FRAME" && isContainer(node)) {
+        return collectImageFigureNodeIdsFrameChildrenAsync(node, parent, cache, secNo, ropts)
+    }
+
+    if (isContainer(node)) {
+        return collectImageFigureNodeIdsGenericContainerAsync(node, parent, cache, secNo, ropts)
+    }
+
+    return Promise.resolve([])
+}
+
+function collectImageFigureNodeIdsFrameChildrenAsync(node, parent, cache, secNo, ropts) {
+    return buildBackgroundDeclAsync(node, false, cache, secNo).then(function () {
+        var children = node.children || []
+        var i = 0
+        var acc = []
+        function nextChild() {
+            if (i >= children.length) return Promise.resolve(acc)
+            var ch = children[i++]
+            if (!ch || !isVisible(ch)) return nextChild()
+
+            if (ch.type === "FRAME" && isContainer(ch)) {
+                return collectImageFigureNodeIdsRenderNodeAsync(ch, node, cache, secNo, ropts).then(function (part) {
+                    acc = acc.concat(part)
+                    return nextChild()
+                })
+            }
+
+            var chAbs = isAbsoluteLike(ch, node)
+            if (!chAbs && (ch.type === "LINE" || ch.type === "ELLIPSE" || isLineLikeNode(ch))) {
+                return collectImageFigureNodeIdsRenderNodeAsync(ch, node, cache, secNo, ropts).then(function (part) {
+                    acc = acc.concat(part)
+                    return nextChild()
+                })
+            }
+
+            var isChContainer = isContainer(ch)
+            return Promise.all([
+                buildBackgroundDeclAsync(ch, false, cache, secNo, {
+                    skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch),
+                    skipSolidFill: isVectorOnlyTree(ch),
+                }),
+                !chAbs ? Promise.resolve("") : Promise.resolve(buildAbsDecl(ch, node) || ""),
+            ]).then(function () {
+                if (isChContainer) {
+                    return collectImageFigureNodeIdsRenderNodeAsync(ch, node, cache, secNo, ropts).then(function (part) {
+                        acc = acc.concat(part)
+                        return nextChild()
+                    })
+                }
+                return collectImageFigureNodeIdsRenderNodeAsync(ch, node, cache, secNo, ropts).then(function (part) {
+                    acc = acc.concat(part)
+                    return nextChild()
+                })
+            })
+        }
+        return nextChild()
+    })
+}
+
+function collectImageFigureNodeIdsGenericContainerAsync(node, parent, cache, secNo, ropts) {
+    var abs2 = isAbsoluteLike(node, parent)
+    var flex = isFlex(node)
+    var useFlex = useApFlexClass(node, abs2, flex)
+    return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl2) {
+        var declParts2Visual = []
+        if (bgDecl2) declParts2Visual.push(bgDecl2)
+        var strokeDecl2 = buildStrokeDecl(node)
+        if (strokeDecl2) declParts2Visual.push(strokeDecl2)
+        if (abs2) {
+            var absDecl3 = buildAbsDecl(node, parent)
+            if (absDecl3) declParts2Visual.push(absDecl3)
+        }
+        if (!useFlex && !abs2 && containerNeedsRelativeForAbsoluteChildren(node)) declParts2Visual.push("position:relative")
+        if (useFlex) {
+            var lv3 = getLayoutVars(node)
+            var flexDecl3 = buildFlexVarsDecl(lv3)
+            if (flexDecl3) declParts2Visual.push(flexDecl3)
+        }
+        var fillWidthDecl2 = getFillFlexStartWidthDecl(node, parent)
+        if (fillWidthDecl2 && !nodeHasApSectionImageSemantic(node.id, ropts)) declParts2Visual.push(fillWidthDecl2)
+        var declParts2Flex = []
+        var declParts2 = declParts2Visual.concat(declParts2Flex)
+        var children2 = node.children || []
+        var visibleChildren = children2.filter(function (c) {
+            return c && (ropts && ropts.includeHidden ? true : isVisible(c))
+        })
+        var singleChild = visibleChildren.length === 1 ? visibleChildren[0] : null
+        var groupHasAttrs = declParts2.length > 0
+        var skipGroupWrapper = singleChild && !groupHasAttrs && !isFlex(node)
+
+        if (skipGroupWrapper) {
+            return collectImageFigureNodeIdsRenderNodeAsync(singleChild, node, cache, secNo, ropts)
+        }
+        var acc = []
+        var j = 0
+        function next2() {
+            if (j >= children2.length) return Promise.resolve(acc)
+            var ch2 = children2[j++]
+            if (!ch2 || (!(ropts && ropts.includeHidden) && !isVisible(ch2))) return next2()
+            return collectImageFigureNodeIdsRenderNodeAsync(ch2, node, cache, secNo, ropts).then(function (part) {
+                acc = acc.concat(part)
+                return next2()
+            })
+        }
+        return next2()
+    })
+}
+
+function collectImageFigureNodeIdsSectionChildAsync(ch, sectionNode, bg, cache, secNo, ropts) {
+    if (!ch || (bg.bgChildId && ch.id === bg.bgChildId)) return Promise.resolve([])
+    if (!(ropts && ropts.includeHidden) && !isVisible(ch)) return Promise.resolve([])
+    if (ch.type === "FRAME" && isContainer(ch)) {
+        return collectImageFigureNodeIdsRenderNodeAsync(ch, sectionNode, cache, secNo, ropts)
+    }
+    var chAbsVirtual = isAbsoluteLike(ch, sectionNode)
+    if (!chAbsVirtual && (ch.type === "LINE" || ch.type === "ELLIPSE" || isLineLikeNode(ch))) {
+        return collectImageFigureNodeIdsRenderNodeAsync(ch, sectionNode, cache, secNo, ropts)
+    }
+    return Promise.all([
+        buildBackgroundDeclAsync(ch, false, cache, secNo, {
+            skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch),
+            skipSolidFill: isVectorOnlyTree(ch),
+        }),
+        isAbsoluteLike(ch, sectionNode) ? Promise.resolve(buildAbsDecl(ch, sectionNode) || "") : Promise.resolve(""),
+    ]).then(function () {
+        return collectImageFigureNodeIdsRenderNodeAsync(ch, sectionNode, cache, secNo, ropts)
+    })
+}
+
+/**
+ * pass1(비슬라이드 자식) + pass2(swiper-slide) 순서로 섹션 HTML과 동일한 이미지 노드 순서
+ */
+function collectImageFigureNodeIdsForSectionAsync(sectionNode, bg, slideData, cache, secNo, ropts) {
+    var acc1 = []
+    var kids = sectionNode.children || []
+    var i = 0
+
+    function isSlideContainerNodeInSection(child) {
+        if (!slideData || !child) return false
+        if (slideData.parent && child.id === slideData.parent.id) return true
+        if (isSlideNode(child)) return true
+        return false
+    }
+
+    function pass1Next() {
+        if (i >= kids.length) return Promise.resolve(acc1)
+        var ch = kids[i++]
+        if (!ch || !isVisible(ch)) return pass1Next()
+        if (bg.bgChildId && ch.id === bg.bgChildId) return pass1Next()
+        if (isSlideContainerNodeInSection(ch)) return pass1Next()
+
+        return collectImageFigureNodeIdsSectionChildAsync(ch, sectionNode, bg, cache, secNo, ropts).then(function (part) {
+            acc1 = acc1.concat(part)
+            return pass1Next()
+        })
+    }
+
+    return pass1Next().then(function () {
+        if (!slideData) return acc1
+        var slideItems = collectSwiperSlideItemNodes(sectionNode, bg.bgChildId)
+        var slideParent = slideData.parent || sectionNode
+        var acc2 = []
+        var si = 0
+        function slideNext() {
+            if (si >= slideItems.length) return Promise.resolve(acc1.concat(acc2))
+            var ch = slideItems[si++]
+            return collectImageFigureNodeIdsSectionChildAsync(ch, slideParent, bg, cache, secNo, ropts).then(function (part) {
+                acc2 = acc2.concat(part)
+                return slideNext()
+            })
+        }
+        return slideNext()
+    })
+}
+
+function prefetchOneImageNodeAsync(node, cache, secNo) {
+    if (!node || node.id == null) return Promise.resolve()
+    if (node.type === "TEXT") {
+        return exportNodeImageAsync(node).then(function (dataUrl) {
+            if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
+            if (cache && dataUrl) {
+                getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
+                    skipExport: isVideoNode(node),
+                    imageHash: getPrimaryImageFillHash(node),
+                })
+            }
+        })
+    }
+    if (isVectorOnlyTree(node) && !isLineLikeNode(node) && node.type !== "ELLIPSE") {
+        return exportNodeSvgAsync(node).then(function (dataUrl) {
+            if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
+            if (cache && dataUrl) {
+                getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
+                    skipExport: isVideoNode(node),
+                    imageHash: getPrimaryImageFillHash(node),
+                })
+            }
+        })
+    }
+    return exportImagePreferSourceBytesAsync(node).then(function (dataUrl) {
+        if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
+        if (cache && dataUrl) {
+            getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
+                skipExport: isVideoNode(node),
+                imageHash: getPrimaryImageFillHash(node),
+            })
+        }
+    })
+}
+
+/** 렌더 순서대로 이미지 바이너리·경로(083) 선할당 — 마크업 단계는 캐시 우선 */
+function prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo) {
+    if (!orderedIds || !orderedIds.length) return Promise.resolve()
+    var ix = 0
+    function next() {
+        if (ix >= orderedIds.length) return Promise.resolve()
+        var nid = orderedIds[ix++]
+        var node = findNodeByIdInSubtree(sectionNode, nid)
+        if (!node) return next()
+        return prefetchOneImageNodeAsync(node, cache, secNo).then(next)
+    }
+    return next()
+}
 
 /**
  * 085-section-background — 노드 fill 배경 선언 + 섹션 루트 풀블리드 이미지 승격
@@ -4645,6 +4973,32 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                 }
 
+                if (cache && cache.image && node.id != null && cache.image[node.id]) {
+                    var dataUrlPre = cache.image[node.id]
+                    var pathPre = cache
+                        ? getOrAssignImagePath(cache, node.id, dataUrlPre, secNo, {
+                              skipExport: isVideoNode(node),
+                              imageHash: getPrimaryImageFillHash(node),
+                          })
+                        : dataUrlPre
+                    var altTextPre = getImageAltText(node)
+                    if (id) ctx.ownImageNodeIds[id] = true
+                    var rasterOptsPre = optsWithRasterTextAsImageSemantics(id, opts)
+                    var imgWrapClsPre = apNodeClassList(("ap-image" + (textAbs ? " ap-abs" : "")).trim(), id, rasterOptsPre)
+                    if (textAbs && id) {
+                        var traDeclPre = buildAbsDeclTextRaster(node, parent)
+                        if (traDeclPre) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, rasterOptsPre, false)), traDeclPre)
+                    }
+                    pushDeferredImageImgSizeVars(ctx, secClass, id, node, rasterOptsPre, textAbs)
+                    return Promise.resolve(
+                        wrapIfBtn(
+                            node,
+                            indent(depth) + '<div class="' + imgWrapClsPre + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (pathPre || "") + '" alt="' + altTextPre + '" /></div>',
+                            depth
+                        )
+                    )
+                }
+
                 return exportNodeImageAsync(node)
                     .then(function (dataUrl) {
                         if (!dataUrl) {
@@ -4716,6 +5070,25 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             return Promise.resolve(wrapIfBtn(node, indent(depth) + ellipseHtml, depth))
         }
         var svgImgAbs = isAbsoluteLike(node, parent)
+        if (cache && cache.image && node.id != null && cache.image[node.id]) {
+            var dataUrlSv = cache.image[node.id]
+            var pathSv = cache
+                ? getOrAssignImagePath(cache, node.id, dataUrlSv || "", secNo, {
+                      skipExport: isVideoNode(node),
+                      imageHash: getPrimaryImageFillHash(node),
+                  })
+                : dataUrlSv || ""
+            if (svgImgAbs && id) {
+                var svgAbsDeclC = buildAbsDecl(node, parent)
+                if (svgAbsDeclC) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), svgAbsDeclC)
+            }
+            var altTextSv = getImageAltText(node)
+            if (id) ctx.ownImageNodeIds[id] = true
+            var svgImgClsC = apNodeClassList(("ap-image" + (svgImgAbs ? " ap-abs" : "")).trim(), id, opts)
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, svgImgAbs)
+            var htmlSv = indent(depth) + '<div class="' + svgImgClsC + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (pathSv || "") + '" alt="' + altTextSv + '" /></div>'
+            return Promise.resolve(wrapIfBtn(node, htmlSv, depth))
+        }
         return exportNodeSvgAsync(node).then(function (dataUrl) {
             if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
             var path = cache
@@ -4787,6 +5160,25 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             })
         }
         var imgAbs = isAbsoluteLike(node, parent)
+        if (cache && cache.image && node.id != null && cache.image[node.id]) {
+            var dataUrlImg = cache.image[node.id]
+            var pathImg = cache
+                ? getOrAssignImagePath(cache, node.id, dataUrlImg || "", secNo, {
+                      skipExport: isVideoNode(node),
+                      imageHash: getPrimaryImageFillHash(node),
+                  })
+                : dataUrlImg || ""
+            if (imgAbs && id) {
+                var imgAbsDeclC = buildAbsDecl(node, parent)
+                if (imgAbsDeclC) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), imgAbsDeclC)
+            }
+            var altTextImg = getImageAltText(node)
+            if (id) ctx.ownImageNodeIds[id] = true
+            var figureClsC = apNodeClassList("ap-image" + (imgAbs ? " ap-abs" : ""), id, opts)
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs)
+            var figureHtmlC = '<div class="' + figureClsC + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (pathImg || "") + '" alt="' + altTextImg + '" /></div>'
+            return Promise.resolve(wrapIfBtn(node, indent(depth) + figureHtmlC, depth))
+        }
         return exportImagePreferSourceBytesAsync(node).then(function (dataUrl) {
             if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
             var path = cache
@@ -5156,13 +5548,25 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             disambiguateSectionSemantics(sectionNode, sectionSemantics)
             demoteNestedDuplicateSectionRoles(sectionNode, sectionSemantics)
             disambiguateSectionSemantics(sectionNode, sectionSemantics)
+            var slideData = getSlideItems(sectionNode)
+            var collectRopts = {
+                includeHidden: true,
+                allowedFonts: allowedFontsForHtml,
+                fontHtmlUnrestricted: fontHtmlUnrestricted,
+                sectionSemantics: sectionSemantics,
+            }
+            return collectImageFigureNodeIdsForSectionAsync(sectionNode, bg, slideData, cache, secNo, collectRopts)
+                .then(function (orderedIds) {
+                    applyApSectionImageRenderOrderFromIds(sectionSemantics, orderedIds)
+                    return prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo)
+                })
+                .then(function () {
             var sectionRenderOpts = {
                 includeHidden: true,
                 sectionSemantics: sectionSemantics,
                 mobileRoot: mobileRoot || null,
             }
             var sectionDeclParts = []
-            var slideData = getSlideItems(sectionNode)
 
             var box = getAbs(sectionNode)
             if (slideData) {
@@ -5356,6 +5760,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     contentLines.push("    </section>")
                     contentLines.push("")
                     return nextSection()
+                })
                 })
         })
     }
@@ -5581,7 +5986,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
             var exportPromise = exportImagePreferSourceBytesAsync(node)
             return exportPromise.then(function (dataUrl) {
                 if (node.id != null && dataUrl) cache.image[node.id] = dataUrl
-                /** 경로·imgNN은 buildCodeAsync만 담당 → 번호 연속, 미사용 슬롯 없음 */
+                /** assets 경로·imgNN(083), BEM 이미지 접미사(렌더 순서)는 buildCodeAsync */
                 props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(HTML 생성 시 assets 경로)")
                 return addChildren()
             })

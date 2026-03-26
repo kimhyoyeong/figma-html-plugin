@@ -358,6 +358,38 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
  * promoteRaster 이후 무접미사 image 가 생겨도 기존 --01… 과 충돌하지 않음.
  * 1개면 접미사 없음, 2개 이상이면 전부 --01, --02…
  */
+/**
+ * HTML에 실제로 그려지는 <img> 도출 순서(렌더 순서)로 ap-section__image / ap-section__image--NN 부여.
+ * 에셋 파일명 imgNN(083 해시·섹션 카운터)과 독립 — orderedImageIds 에 없는 노드의 image 시맨틱은 제거.
+ */
+function applyApSectionImageRenderOrderFromIds(sectionSemantics, orderedImageIds) {
+    if (!sectionSemantics || !orderedImageIds) return
+    var set = {}
+    for (var si = 0; si < orderedImageIds.length; si++) {
+        set[String(orderedImageIds[si])] = true
+    }
+    for (var nid in sectionSemantics) {
+        if (!Object.prototype.hasOwnProperty.call(sectionSemantics, nid)) continue
+        if (set[nid]) continue
+        var arr0 = sectionSemantics[nid] || []
+        sectionSemantics[nid] = arr0.filter(function (c) {
+            return !/^ap-section__image(?:--[0-9]{2})?$/.test(String(c || ""))
+        })
+    }
+    var n = orderedImageIds.length
+    if (n === 0) return
+    for (var j = 0; j < n; j++) {
+        var idStr = String(orderedImageIds[j])
+        var cls = n === 1 ? apSectionBem("image") : apSectionBem("image") + "--" + pad2(j + 1)
+        var arr = sectionSemantics[idStr] ? sectionSemantics[idStr].slice() : []
+        arr = arr.filter(function (c) {
+            return !/^ap-section__image(?:--[0-9]{2})?$/.test(String(c || ""))
+        })
+        arr.push(cls)
+        sectionSemantics[idStr] = arr
+    }
+}
+
 function renumberApSectionElemGlobally(sectionNode, map, elemPart) {
     if (!sectionNode || !map) return
     var base = "ap-section__" + elemPart

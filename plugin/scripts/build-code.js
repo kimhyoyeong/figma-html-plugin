@@ -53,6 +53,7 @@ var PART_FILES = [
     "081-section-semantics.js",
     "082-deferred-css.js",
     "083-assets-cache.js",
+    "084-image-render-order.js",
     "085-section-background.js",
     "090-tree-inspect.js",
     "095-responsive-pcmo.js",

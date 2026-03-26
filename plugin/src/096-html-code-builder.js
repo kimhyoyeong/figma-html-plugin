@@ -226,6 +226,32 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                 }
 
+                if (cache && cache.image && node.id != null && cache.image[node.id]) {
+                    var dataUrlPre = cache.image[node.id]
+                    var pathPre = cache
+                        ? getOrAssignImagePath(cache, node.id, dataUrlPre, secNo, {
+                              skipExport: isVideoNode(node),
+                              imageHash: getPrimaryImageFillHash(node),
+                          })
+                        : dataUrlPre
+                    var altTextPre = getImageAltText(node)
+                    if (id) ctx.ownImageNodeIds[id] = true
+                    var rasterOptsPre = optsWithRasterTextAsImageSemantics(id, opts)
+                    var imgWrapClsPre = apNodeClassList(("ap-image" + (textAbs ? " ap-abs" : "")).trim(), id, rasterOptsPre)
+                    if (textAbs && id) {
+                        var traDeclPre = buildAbsDeclTextRaster(node, parent)
+                        if (traDeclPre) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, rasterOptsPre, false)), traDeclPre)
+                    }
+                    pushDeferredImageImgSizeVars(ctx, secClass, id, node, rasterOptsPre, textAbs)
+                    return Promise.resolve(
+                        wrapIfBtn(
+                            node,
+                            indent(depth) + '<div class="' + imgWrapClsPre + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (pathPre || "") + '" alt="' + altTextPre + '" /></div>',
+                            depth
+                        )
+                    )
+                }
+
                 return exportNodeImageAsync(node)
                     .then(function (dataUrl) {
                         if (!dataUrl) {
@@ -297,6 +323,25 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             return Promise.resolve(wrapIfBtn(node, indent(depth) + ellipseHtml, depth))
         }
         var svgImgAbs = isAbsoluteLike(node, parent)
+        if (cache && cache.image && node.id != null && cache.image[node.id]) {
+            var dataUrlSv = cache.image[node.id]
+            var pathSv = cache
+                ? getOrAssignImagePath(cache, node.id, dataUrlSv || "", secNo, {
+                      skipExport: isVideoNode(node),
+                      imageHash: getPrimaryImageFillHash(node),
+                  })
+                : dataUrlSv || ""
+            if (svgImgAbs && id) {
+                var svgAbsDeclC = buildAbsDecl(node, parent)
+                if (svgAbsDeclC) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), svgAbsDeclC)
+            }
+            var altTextSv = getImageAltText(node)
+            if (id) ctx.ownImageNodeIds[id] = true
+            var svgImgClsC = apNodeClassList(("ap-image" + (svgImgAbs ? " ap-abs" : "")).trim(), id, opts)
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, svgImgAbs)
+            var htmlSv = indent(depth) + '<div class="' + svgImgClsC + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (pathSv || "") + '" alt="' + altTextSv + '" /></div>'
+            return Promise.resolve(wrapIfBtn(node, htmlSv, depth))
+        }
         return exportNodeSvgAsync(node).then(function (dataUrl) {
             if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
             var path = cache
@@ -368,6 +413,25 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             })
         }
         var imgAbs = isAbsoluteLike(node, parent)
+        if (cache && cache.image && node.id != null && cache.image[node.id]) {
+            var dataUrlImg = cache.image[node.id]
+            var pathImg = cache
+                ? getOrAssignImagePath(cache, node.id, dataUrlImg || "", secNo, {
+                      skipExport: isVideoNode(node),
+                      imageHash: getPrimaryImageFillHash(node),
+                  })
+                : dataUrlImg || ""
+            if (imgAbs && id) {
+                var imgAbsDeclC = buildAbsDecl(node, parent)
+                if (imgAbsDeclC) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), imgAbsDeclC)
+            }
+            var altTextImg = getImageAltText(node)
+            if (id) ctx.ownImageNodeIds[id] = true
+            var figureClsC = apNodeClassList("ap-image" + (imgAbs ? " ap-abs" : ""), id, opts)
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs)
+            var figureHtmlC = '<div class="' + figureClsC + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (pathImg || "") + '" alt="' + altTextImg + '" /></div>'
+            return Promise.resolve(wrapIfBtn(node, indent(depth) + figureHtmlC, depth))
+        }
         return exportImagePreferSourceBytesAsync(node).then(function (dataUrl) {
             if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
             var path = cache
@@ -737,13 +801,25 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             disambiguateSectionSemantics(sectionNode, sectionSemantics)
             demoteNestedDuplicateSectionRoles(sectionNode, sectionSemantics)
             disambiguateSectionSemantics(sectionNode, sectionSemantics)
+            var slideData = getSlideItems(sectionNode)
+            var collectRopts = {
+                includeHidden: true,
+                allowedFonts: allowedFontsForHtml,
+                fontHtmlUnrestricted: fontHtmlUnrestricted,
+                sectionSemantics: sectionSemantics,
+            }
+            return collectImageFigureNodeIdsForSectionAsync(sectionNode, bg, slideData, cache, secNo, collectRopts)
+                .then(function (orderedIds) {
+                    applyApSectionImageRenderOrderFromIds(sectionSemantics, orderedIds)
+                    return prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo)
+                })
+                .then(function () {
             var sectionRenderOpts = {
                 includeHidden: true,
                 sectionSemantics: sectionSemantics,
                 mobileRoot: mobileRoot || null,
             }
             var sectionDeclParts = []
-            var slideData = getSlideItems(sectionNode)
 
             var box = getAbs(sectionNode)
             if (slideData) {
@@ -937,6 +1013,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     contentLines.push("    </section>")
                     contentLines.push("")
                     return nextSection()
+                })
                 })
         })
     }

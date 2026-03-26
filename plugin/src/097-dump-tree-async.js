@@ -121,7 +121,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
             var exportPromise = exportImagePreferSourceBytesAsync(node)
             return exportPromise.then(function (dataUrl) {
                 if (node.id != null && dataUrl) cache.image[node.id] = dataUrl
-                /** 경로·imgNN은 buildCodeAsync만 담당 → 번호 연속, 미사용 슬롯 없음 */
+                /** assets 경로·imgNN(083), BEM 이미지 접미사(렌더 순서)는 buildCodeAsync */
                 props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(HTML 생성 시 assets 경로)")
                 return addChildren()
             })

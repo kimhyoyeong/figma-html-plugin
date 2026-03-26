@@ -1,6 +1,8 @@
 /**
  * 083-assets-cache — ZIP 에셋 파일명·프로젝트 슬러그·이미지 경로 할당
  *
+ * page_*_imgNN 파일 번호·해시 디듀프는 여기(에셋 단계). ap-section__image--NN BEM 번호는 084/096 렌더 순서와 별개.
+ *
  * 의존: 010 pad2
  */
 // ----- Asset paths (cache.imageName, imageList, svgByHash) -----
