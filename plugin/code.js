@@ -1229,6 +1229,19 @@ function hasImageFill(node) {
     return false
 }
 
+/** 첫 번째 보이는 IMAGE fill의 imageHash (동일 피그마 소스 → 같은 imgNN·파일 하나) */
+function getPrimaryImageFillHash(node) {
+    try {
+        var fills = node.fills
+        if (!fills || fills === figma.mixed) return ""
+        for (var i = 0; i < fills.length; i++) {
+            var f = fills[i]
+            if (f && f.visible !== false && f.type === "IMAGE" && f.imageHash) return String(f.imageHash)
+        }
+    } catch (e) {}
+    return ""
+}
+
 
 /** section이 캔버스형 레이아웃이면 min-height 필요 */
 function needsMinHeight(sectionNode) {
@@ -1374,7 +1387,7 @@ function buildStrokeDeclDiff(dNode, mNode) {
 }
 
 
-﻿/**
+/**
  * 070-image-export — 이미지 바이너리 판별·PNG/JPG 휴리스틱·export·노드 분류·nodeSel
  *
  * 시맨틱 BEM·inner 셀렉터·이름 기반 수집은 081. 지연 CSS·이미지 크기 var는 082.
@@ -3578,7 +3591,7 @@ function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapper
     pushDeferredStyle(ctx, sel, decl)
 }
 
-﻿/**
+/**
  * 083-assets-cache — ZIP 에셋 파일명·프로젝트 슬러그·이미지 경로 할당
  *
  * 의존: 010 pad2
@@ -3593,6 +3606,15 @@ function normalizeProjectName(s) {
     return s || "project"
 }
 
+/** 동일 경로는 imageList에 한 번만 (dump walk + build 이중 호출·재사용 안전) */
+function ensureImageInListOnce(cache, name, dataUrl) {
+    if (!cache || !cache.imageList || !name || !dataUrl) return
+    for (var i = 0; i < cache.imageList.length; i++) {
+        if (cache.imageList[i].name === name) return
+    }
+    cache.imageList.push({name: name, dataUrl: dataUrl})
+}
+
 /** 문자열 해시 (동일 SVG 내용 → 동일 파일 재사용용) */
 function simpleHash(str) {
     if (str == null || str.length === 0) return "0"
@@ -3604,7 +3626,7 @@ function simpleHash(str) {
     return (h >>> 0).toString(36)
 }
 
-/** nodeId당 1회 할당. page_{project}_sec{01}_img{01}.{ext} (SVG는 내용 해시로 동일 벡터 공유) */
+/** nodeId당 1회 할당. page_{project}_sec{01}_img{01}.{ext} — dump walk는 호출하지 않음(build만 호출 → imgNN 연속) (SVG·imageHash·raster bytes 공유) */
 function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
     opts = opts || {}
     if (!cache) return ""
@@ -3616,11 +3638,28 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
     if (key == null) return ""
 
     var isSvg = dataUrl && dataUrl.indexOf("image/svg+xml") >= 0
+    var secEarly = Number(secNo) || 1
+    var figmaImgHash = !opts || opts.imageHash == null || String(opts.imageHash) === "" ? "" : String(opts.imageHash)
+    var phKey = !isSvg && figmaImgHash ? secEarly + ":" + figmaImgHash : ""
     var svgHash = isSvg && dataUrl ? simpleHash(dataUrl) : null
     if (isSvg && !cache.svgByHash) cache.svgByHash = {}
     if (svgHash && cache.svgByHash[svgHash]) {
         cache.imageName[key] = cache.svgByHash[svgHash].name
-        return cache.imageName[key]
+    }
+
+    /** 동일 피그마 IMAGE 소스(imageHash) — PC/MO export 픽셀이 달라도 같은 imgNN·파일 하나 */
+    if (!cache.imageName[key] && phKey) {
+        if (!cache.pathByImageHash) cache.pathByImageHash = {}
+        if (cache.pathByImageHash[phKey]) {
+            cache.imageName[key] = cache.pathByImageHash[phKey]
+        }
+    }
+
+    /** 동일 PNG/JPG/WebP export 결과 → 노드가 달라도 파일 하나 (피그마에서 같은 이미지를 여러 레이어에 쓴 경우) */
+    var rasterHash = !isSvg && dataUrl ? simpleHash(dataUrl) : null
+    if (rasterHash && !cache.rasterByHash) cache.rasterByHash = {}
+    if (!cache.imageName[key] && rasterHash && cache.rasterByHash[rasterHash]) {
+        cache.imageName[key] = cache.rasterByHash[rasterHash].name
     }
 
     if (!cache.imageName[key]) {
@@ -3630,23 +3669,32 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
             else if (dataUrl.indexOf("image/svg+xml") >= 0) ext = ".svg"
         }
 
-        var sec = Number(secNo) || 1
-        var n = (cache.imgCountBySec[sec] || 0) + 1
-        cache.imgCountBySec[sec] = n
+        var n = (cache.imgCountBySec[secEarly] || 0) + 1
+        cache.imgCountBySec[secEarly] = n
 
         var project = normalizeProjectName(cache.projectName)
         var suffix = cache.imageSuffix != null && cache.imageSuffix !== "" ? String(cache.imageSuffix) : ""
-        var fileName = "page_" + project + "_sec" + pad2(sec) + "_img" + pad2(n) + suffix + ext
+        var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + suffix + ext
 
         cache.imageName[key] = ASSETS_IMAGES_PREFIX + fileName
         var isSvgMo = dataUrl && cache.imageSuffix === "_mo" && dataUrl.indexOf("image/svg+xml") >= 0
         var skipExport = opts.skipExport || isSvgMo
         if (dataUrl && !skipExport) {
-            cache.imageList.push({name: cache.imageName[key], dataUrl: dataUrl})
             if (svgHash && cache.svgByHash) cache.svgByHash[svgHash] = { name: cache.imageName[key], dataUrl: dataUrl }
+            if (rasterHash && cache.rasterByHash) cache.rasterByHash[rasterHash] = { name: cache.imageName[key], dataUrl: dataUrl }
+        }
+        if (phKey) {
+            if (!cache.pathByImageHash) cache.pathByImageHash = {}
+            cache.pathByImageHash[phKey] = cache.imageName[key]
         }
     }
-    return cache.imageName[key]
+
+    var pathOut = cache.imageName[key] || ""
+    var skipExportFinal = opts.skipExport || !!(dataUrl && cache.imageSuffix === "_mo" && dataUrl.indexOf("image/svg+xml") >= 0)
+    if (pathOut && dataUrl && !skipExportFinal) {
+        ensureImageInListOnce(cache, pathOut, dataUrl)
+    }
+    return pathOut
 }
 
 
@@ -3693,7 +3741,12 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
         .then(function (dataUrl) {
             if (node.id != null && dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
 
-            var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, { skipExport: isVideoNode(node) }) : ""
+            var path = cache
+                ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
+                      skipExport: isVideoNode(node),
+                      imageHash: getPrimaryImageFillHash(node),
+                  })
+                : ""
             var imgUrl = (path && path.length) ? path : dataUrl
             if (imgUrl && dataUrl) {
                 var overlay = ""
@@ -3764,7 +3817,12 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
       return dataUrlPromise
           .then(function (dataUrl) {
               if (fullBleedChild.id != null && dataUrl && cache && cache.image) cache.image[fullBleedChild.id] = dataUrl
-              var path = cache ? getOrAssignImagePath(cache, fullBleedChild.id, dataUrl, secNo, { skipExport: isVideoNode(fullBleedChild) }) : ""
+              var path = cache
+                  ? getOrAssignImagePath(cache, fullBleedChild.id, dataUrl, secNo, {
+                        skipExport: isVideoNode(fullBleedChild),
+                        imageHash: getPrimaryImageFillHash(fullBleedChild),
+                    })
+                  : ""
               if (path && dataUrl) {
                   var merged = decl ? decl + ";--bg-img:url(" + path + ")" : "--bg-img:url(" + path + ")"
                   return {decl: merged, bgChildId: fullBleedChild.id}
@@ -4594,7 +4652,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                             return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                         }
                         if (node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-                        var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, { skipExport: isVideoNode(node) }) : dataUrl
+                        var path = cache
+                            ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
+                                  skipExport: isVideoNode(node),
+                                  imageHash: getPrimaryImageFillHash(node),
+                              })
+                            : dataUrl
                         var altText = getImageAltText(node)
                         if (id) ctx.ownImageNodeIds[id] = true
                         var rasterOpts = optsWithRasterTextAsImageSemantics(id, opts)
@@ -4655,7 +4718,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var svgImgAbs = isAbsoluteLike(node, parent)
         return exportNodeSvgAsync(node).then(function (dataUrl) {
             if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-            var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, { skipExport: isVideoNode(node) }) : dataUrl || ""
+            var path = cache
+                ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, {
+                      skipExport: isVideoNode(node),
+                      imageHash: getPrimaryImageFillHash(node),
+                  })
+                : dataUrl || ""
             if (svgImgAbs && id) {
                 var svgAbsDecl = buildAbsDecl(node, parent)
                 if (svgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), svgAbsDecl)
@@ -4721,7 +4789,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var imgAbs = isAbsoluteLike(node, parent)
         return exportImagePreferSourceBytesAsync(node).then(function (dataUrl) {
             if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-            var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, { skipExport: isVideoNode(node) }) : dataUrl || ""
+            var path = cache
+                ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, {
+                      skipExport: isVideoNode(node),
+                      imageHash: getPrimaryImageFillHash(node),
+                  })
+                : dataUrl || ""
             if (imgAbs && id) {
                 var imgAbsDecl = buildAbsDecl(node, parent)
                 if (imgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), imgAbsDecl)
@@ -5508,9 +5581,8 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
             var exportPromise = exportImagePreferSourceBytesAsync(node)
             return exportPromise.then(function (dataUrl) {
                 if (node.id != null && dataUrl) cache.image[node.id] = dataUrl
-                var secNo = sectionIndex != null ? sectionIndex : 1
-                var path = getOrAssignImagePath(cache, node.id, dataUrl, secNo, { skipExport: isVideoNode(node) })
-                if (path) props.push(indent(depth + 1) + dumpPadKey("bgImage") + path)
+                /** 경로·imgNN은 buildCodeAsync만 담당 → 번호 연속, 미사용 슬롯 없음 */
+                props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(HTML 생성 시 assets 경로)")
                 return addChildren()
             })
         }

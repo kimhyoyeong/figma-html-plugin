@@ -41,7 +41,12 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
         .then(function (dataUrl) {
             if (node.id != null && dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
 
-            var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, { skipExport: isVideoNode(node) }) : ""
+            var path = cache
+                ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
+                      skipExport: isVideoNode(node),
+                      imageHash: getPrimaryImageFillHash(node),
+                  })
+                : ""
             var imgUrl = (path && path.length) ? path : dataUrl
             if (imgUrl && dataUrl) {
                 var overlay = ""
@@ -112,7 +117,12 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
       return dataUrlPromise
           .then(function (dataUrl) {
               if (fullBleedChild.id != null && dataUrl && cache && cache.image) cache.image[fullBleedChild.id] = dataUrl
-              var path = cache ? getOrAssignImagePath(cache, fullBleedChild.id, dataUrl, secNo, { skipExport: isVideoNode(fullBleedChild) }) : ""
+              var path = cache
+                  ? getOrAssignImagePath(cache, fullBleedChild.id, dataUrl, secNo, {
+                        skipExport: isVideoNode(fullBleedChild),
+                        imageHash: getPrimaryImageFillHash(fullBleedChild),
+                    })
+                  : ""
               if (path && dataUrl) {
                   var merged = decl ? decl + ";--bg-img:url(" + path + ")" : "--bg-img:url(" + path + ")"
                   return {decl: merged, bgChildId: fullBleedChild.id}

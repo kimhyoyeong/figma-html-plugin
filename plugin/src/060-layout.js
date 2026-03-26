@@ -335,6 +335,19 @@ function hasImageFill(node) {
     return false
 }
 
+/** 첫 번째 보이는 IMAGE fill의 imageHash (동일 피그마 소스 → 같은 imgNN·파일 하나) */
+function getPrimaryImageFillHash(node) {
+    try {
+        var fills = node.fills
+        if (!fills || fills === figma.mixed) return ""
+        for (var i = 0; i < fills.length; i++) {
+            var f = fills[i]
+            if (f && f.visible !== false && f.type === "IMAGE" && f.imageHash) return String(f.imageHash)
+        }
+    } catch (e) {}
+    return ""
+}
+
 
 /** section이 캔버스형 레이아웃이면 min-height 필요 */
 function needsMinHeight(sectionNode) {

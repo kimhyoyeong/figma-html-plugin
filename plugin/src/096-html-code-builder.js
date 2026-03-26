@@ -233,7 +233,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                             return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                         }
                         if (node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-                        var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, { skipExport: isVideoNode(node) }) : dataUrl
+                        var path = cache
+                            ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
+                                  skipExport: isVideoNode(node),
+                                  imageHash: getPrimaryImageFillHash(node),
+                              })
+                            : dataUrl
                         var altText = getImageAltText(node)
                         if (id) ctx.ownImageNodeIds[id] = true
                         var rasterOpts = optsWithRasterTextAsImageSemantics(id, opts)
@@ -294,7 +299,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var svgImgAbs = isAbsoluteLike(node, parent)
         return exportNodeSvgAsync(node).then(function (dataUrl) {
             if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-            var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, { skipExport: isVideoNode(node) }) : dataUrl || ""
+            var path = cache
+                ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, {
+                      skipExport: isVideoNode(node),
+                      imageHash: getPrimaryImageFillHash(node),
+                  })
+                : dataUrl || ""
             if (svgImgAbs && id) {
                 var svgAbsDecl = buildAbsDecl(node, parent)
                 if (svgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), svgAbsDecl)
@@ -360,7 +370,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var imgAbs = isAbsoluteLike(node, parent)
         return exportImagePreferSourceBytesAsync(node).then(function (dataUrl) {
             if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-            var path = cache ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, { skipExport: isVideoNode(node) }) : dataUrl || ""
+            var path = cache
+                ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, {
+                      skipExport: isVideoNode(node),
+                      imageHash: getPrimaryImageFillHash(node),
+                  })
+                : dataUrl || ""
             if (imgAbs && id) {
                 var imgAbsDecl = buildAbsDecl(node, parent)
                 if (imgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), imgAbsDecl)

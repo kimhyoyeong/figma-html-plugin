@@ -2244,7 +2244,7 @@
       return out.replace(attrRe, "$1(max-width:0px)$3");
     }
 
-    function getPreviewHtml(forExport, forceViewportWidth, previewStripMoMq) {
+    function getPreviewHtml(forExport, forceViewportWidth, previewStripMoMq, previewRole) {
       var raw = stripEmbeddedAuditReport(($("#codeOut") && $("#codeOut").value) || "");
       if (!raw.trim()) return "";
 
@@ -2287,8 +2287,108 @@
         ? '<meta name="viewport" content="width=' + forceViewportWidth + ', initial-scale=1">'
         : '<meta name="viewport" content="width=device-width, initial-scale=1">';
       var inner = (prefixBeforeStyle ? prefixBeforeStyle + "\n" : "") + style + "\n\n" + body;
+      if (!forExport && previewRole) {
+        var frameCls = previewRole === "mo" ? "preview-frame preview-frame--mo" : "preview-frame preview-frame--pc";
+        inner = '<div class="' + frameCls + '">' + inner + "</div>";
+      }
       return '<!DOCTYPE html><html><head><meta charset="utf-8">' + viewport + baseStyle + "</head><body>" + inner + "</body></html>";
     }
+
+    var PREVIEW_SWIPER_FIX_DEBOUNCE_MS = 140;
+
+    function apParseSlideViewAttr(el, name) {
+      var v = parseFloat(el.getAttribute(name) || "1");
+      if (!isFinite(v) || v <= 0) return 1;
+      return v;
+    }
+
+    function apAdjustPreviewSlidesPerView(frameEl, spv) {
+      var w = frameEl.clientWidth || 0;
+      if (w <= 0) return spv;
+      var minSlidePx = 120;
+      var maxByWidth = w / minSlidePx;
+      return Math.min(spv, Math.max(0.25, maxByWidth));
+    }
+
+    function apRunPreviewSwiperFixInIframe(iframe) {
+      if (!iframe) return;
+      var doc = iframe.contentDocument;
+      var win = iframe.contentWindow;
+      if (!doc || !win || typeof win.Swiper !== "function") return;
+
+      doc.querySelectorAll(".swiper").forEach(function (el) {
+        var frameEl = el.closest(".preview-frame");
+        if (!frameEl) return;
+        var isMo = frameEl.classList.contains("preview-frame--mo");
+        var isPc = frameEl.classList.contains("preview-frame--pc");
+        if (!isMo && !isPc) return;
+
+        var base = isMo ? apParseSlideViewAttr(el, "data-slide-view-mo") : apParseSlideViewAttr(el, "data-slide-view");
+        var spv = apAdjustPreviewSlidesPerView(frameEl, base);
+
+        if (el.swiper) {
+          try {
+            el.swiper.destroy(true, true);
+          } catch (e) {}
+        }
+
+        try {
+          new win.Swiper(el, {
+            slidesPerView: spv,
+            watchOverflow: true,
+            pagination: {
+              el: el.querySelector(".swiper-pagination"),
+              clickable: true
+            },
+            navigation: {
+              nextEl: el.querySelector(".swiper-button-next"),
+              prevEl: el.querySelector(".swiper-button-prev")
+            }
+          });
+        } catch (e) {}
+      });
+    }
+
+    function apSchedulePreviewSwiperFix(iframe) {
+      if (!iframe) return;
+      if (iframe._apPreviewSwiperFixTimer) clearTimeout(iframe._apPreviewSwiperFixTimer);
+      iframe._apPreviewSwiperFixTimer = setTimeout(function () {
+        iframe._apPreviewSwiperFixTimer = null;
+        apRunPreviewSwiperFixInIframe(iframe);
+      }, PREVIEW_SWIPER_FIX_DEBOUNCE_MS);
+    }
+
+    function apGetPreviewIframes() {
+      return [
+        document.getElementById("previewFrame"),
+        document.getElementById("previewFramePc"),
+        document.getElementById("previewFrameMo")
+      ].filter(Boolean);
+    }
+
+    function apScheduleAllPreviewSwiperFix() {
+      apGetPreviewIframes().forEach(apSchedulePreviewSwiperFix);
+    }
+
+    (function apInitPreviewSwiperFixBridge() {
+      if (window._apPreviewSwiperFixInited) return;
+      window._apPreviewSwiperFixInited = true;
+
+      apGetPreviewIframes().forEach(function (iframe) {
+        iframe.addEventListener("load", function () {
+          apSchedulePreviewSwiperFix(iframe);
+        });
+        try {
+          var ro = new ResizeObserver(function () {
+            apSchedulePreviewSwiperFix(iframe);
+          });
+          ro.observe(iframe);
+          iframe._apPreviewSwiperResizeObserver = ro;
+        } catch (e) {}
+      });
+
+      window.addEventListener("resize", apScheduleAllPreviewSwiperFix);
+    })();
 
     function syncPreviewChromeToState() {
       if (isHybridPreviewSplit()) return;
@@ -2350,8 +2450,8 @@
       }
 
       if (split) {
-        var htmlPc = getPreviewHtml(false, PREVIEW_PC_LAYOUT_WIDTH, true);
-        var htmlMo = getPreviewHtml(false, previewMoViewportCssPx(), false);
+        var htmlPc = getPreviewHtml(false, PREVIEW_PC_LAYOUT_WIDTH, true, "pc");
+        var htmlMo = getPreviewHtml(false, previewMoViewportCssPx(), false, "mo");
         tryAssignIframeContent(framePc, htmlPc || emptyMsg, "pc");
         tryAssignIframeContent(frameMo, htmlMo || emptyMsg, "mo");
         return;
@@ -2359,16 +2459,18 @@
 
       var layoutViewport = PREVIEW_PC_LAYOUT_WIDTH;
       var stripMoMq = true;
+      var singleRole = "pc";
       if (previewViewMode === "mo" && mobileDataTree) {
         stripMoMq = false;
         layoutViewport = previewMoViewportCssPx();
+        singleRole = "mo";
         frame.style.width = layoutViewport + "px";
         frame.style.maxWidth = "100%";
       } else {
         frame.style.width = "";
         frame.style.maxWidth = "";
       }
-      var html = getPreviewHtml(false, layoutViewport, stripMoMq);
+      var html = getPreviewHtml(false, layoutViewport, stripMoMq, singleRole);
       tryAssignIframeContent(frame, html || emptyMsg, "single");
     }
 

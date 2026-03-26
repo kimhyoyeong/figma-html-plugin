@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 070-image-export — 이미지 바이너리 판별·PNG/JPG 휴리스틱·export·노드 분류·nodeSel
  *
  * 시맨틱 BEM·inner 셀렉터·이름 기반 수집은 081. 지연 CSS·이미지 크기 var는 082.

@@ -121,9 +121,8 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
             var exportPromise = exportImagePreferSourceBytesAsync(node)
             return exportPromise.then(function (dataUrl) {
                 if (node.id != null && dataUrl) cache.image[node.id] = dataUrl
-                var secNo = sectionIndex != null ? sectionIndex : 1
-                var path = getOrAssignImagePath(cache, node.id, dataUrl, secNo, { skipExport: isVideoNode(node) })
-                if (path) props.push(indent(depth + 1) + dumpPadKey("bgImage") + path)
+                /** 경로·imgNN은 buildCodeAsync만 담당 → 번호 연속, 미사용 슬롯 없음 */
+                props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(HTML 생성 시 assets 경로)")
                 return addChildren()
             })
         }
