@@ -2894,6 +2894,11 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
     /** walkStructure 가 먼지 부여한 content 등과 충돌하지 않게: .ap-image 로 나가는 노드는 시맨틱을 image 하나로만 둠 */
     function tagImageNode(n) {
         if (!n || !n.id) return
+        /** 이름이 video인 레이어는 render에서 플레이스홀더로 나감 — IMAGE fill 있어도 image 시맨틱만 주면 apply가 image를 지운 뒤 빈 map이 됨 */
+        if (isVideoNode(n)) {
+            map[String(n.id)] = [apSectionBem("video")]
+            return
+        }
         map[String(n.id)] = [apSectionBem("image")]
     }
     function walkImg(n) {

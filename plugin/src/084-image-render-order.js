@@ -1,0 +1,293 @@
+/**
+ * 084-image-render-order — 렌더 순서와 동일한 <img> 노드 id 수집·선행 export(에셋 경로/해시 디듀프는 083)
+ *
+ * buildCodeAsync에서 마크업 전에 호출: ap-section__image 번호는 렌더 순서, 파일명 imgNN은 해시·할당 순(별개).
+ */
+/** 섹션 서브트리에서 nodeId에 해당하는 SceneNode 탐색 */
+function findNodeByIdInSubtree(root, targetId) {
+    if (!root || targetId == null) return null
+    var want = String(targetId)
+    var found = null
+    function walk(n) {
+        if (!n || found) return
+        if (String(n.id) === want) {
+            found = n
+            return
+        }
+        if (isContainer(n) && n.children) {
+            for (var i = 0; i < n.children.length; i++) walk(n.children[i])
+        }
+    }
+    walk(root)
+    return found
+}
+
+/**
+ * renderNodeAsync 분기와 동일 순서로, 최종 <img> 한 장이 나가는 노드 id를 누적 (DFS·자식 순서 일치).
+ * @param {object} ropts includeHidden, allowedFonts, fontHtmlUnrestricted, sectionSemantics
+ */
+function collectImageFigureNodeIdsRenderNodeAsync(node, parent, cache, secNo, ropts) {
+    if (!node) return Promise.resolve([])
+    if (!(ropts && ropts.includeHidden) && !isVisible(node)) return Promise.resolve([])
+
+    if (node.type === "TEXT") {
+        return getTextSummaryAsync(node).then(function (ts) {
+            var families = ts.fontFamilies && ts.fontFamilies.length ? ts.fontFamilies : ts.fontFamily ? [ts.fontFamily] : []
+            if (textFamiliesAllowedAsHtml(families, ropts && ropts.allowedFonts ? ropts.allowedFonts : [], ropts && ropts.fontHtmlUnrestricted)) {
+                return []
+            }
+            return node.id != null ? [String(node.id)] : []
+        })
+    }
+
+    if (isVideoNode(node)) return Promise.resolve([])
+
+    if (isVectorOnlyTree(node)) {
+        if (isLineLikeNode(node)) return Promise.resolve([])
+        if (node.type === "ELLIPSE") return Promise.resolve([])
+        return node.id != null ? Promise.resolve([String(node.id)]) : Promise.resolve([])
+    }
+
+    if (shouldExportAsSingleRasterImage(node)) {
+        if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node)) {
+            var childrenImgGrp = node.children || []
+            var acc = []
+            var ix = 0
+            function nextSplit() {
+                if (ix >= childrenImgGrp.length) return Promise.resolve(acc)
+                var cImg = childrenImgGrp[ix++]
+                if (!cImg || (!(ropts && ropts.includeHidden) && !isVisible(cImg))) return nextSplit()
+                return collectImageFigureNodeIdsRenderNodeAsync(cImg, node, cache, secNo, ropts).then(function (part) {
+                    acc = acc.concat(part)
+                    return nextSplit()
+                })
+            }
+            return nextSplit()
+        }
+        return node.id != null ? Promise.resolve([String(node.id)]) : Promise.resolve([])
+    }
+
+    if (node.type === "FRAME" && isContainer(node)) {
+        return collectImageFigureNodeIdsFrameChildrenAsync(node, parent, cache, secNo, ropts)
+    }
+
+    if (isContainer(node)) {
+        return collectImageFigureNodeIdsGenericContainerAsync(node, parent, cache, secNo, ropts)
+    }
+
+    return Promise.resolve([])
+}
+
+function collectImageFigureNodeIdsFrameChildrenAsync(node, parent, cache, secNo, ropts) {
+    return buildBackgroundDeclAsync(node, false, cache, secNo).then(function () {
+        var children = node.children || []
+        var i = 0
+        var acc = []
+        function nextChild() {
+            if (i >= children.length) return Promise.resolve(acc)
+            var ch = children[i++]
+            if (!ch || !isVisible(ch)) return nextChild()
+
+            if (ch.type === "FRAME" && isContainer(ch)) {
+                return collectImageFigureNodeIdsRenderNodeAsync(ch, node, cache, secNo, ropts).then(function (part) {
+                    acc = acc.concat(part)
+                    return nextChild()
+                })
+            }
+
+            var chAbs = isAbsoluteLike(ch, node)
+            if (!chAbs && (ch.type === "LINE" || ch.type === "ELLIPSE" || isLineLikeNode(ch))) {
+                return collectImageFigureNodeIdsRenderNodeAsync(ch, node, cache, secNo, ropts).then(function (part) {
+                    acc = acc.concat(part)
+                    return nextChild()
+                })
+            }
+
+            var isChContainer = isContainer(ch)
+            return Promise.all([
+                buildBackgroundDeclAsync(ch, false, cache, secNo, {
+                    skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch),
+                    skipSolidFill: isVectorOnlyTree(ch),
+                }),
+                !chAbs ? Promise.resolve("") : Promise.resolve(buildAbsDecl(ch, node) || ""),
+            ]).then(function () {
+                if (isChContainer) {
+                    return collectImageFigureNodeIdsRenderNodeAsync(ch, node, cache, secNo, ropts).then(function (part) {
+                        acc = acc.concat(part)
+                        return nextChild()
+                    })
+                }
+                return collectImageFigureNodeIdsRenderNodeAsync(ch, node, cache, secNo, ropts).then(function (part) {
+                    acc = acc.concat(part)
+                    return nextChild()
+                })
+            })
+        }
+        return nextChild()
+    })
+}
+
+function collectImageFigureNodeIdsGenericContainerAsync(node, parent, cache, secNo, ropts) {
+    var abs2 = isAbsoluteLike(node, parent)
+    var flex = isFlex(node)
+    var useFlex = useApFlexClass(node, abs2, flex)
+    return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl2) {
+        var declParts2Visual = []
+        if (bgDecl2) declParts2Visual.push(bgDecl2)
+        var strokeDecl2 = buildStrokeDecl(node)
+        if (strokeDecl2) declParts2Visual.push(strokeDecl2)
+        if (abs2) {
+            var absDecl3 = buildAbsDecl(node, parent)
+            if (absDecl3) declParts2Visual.push(absDecl3)
+        }
+        if (!useFlex && !abs2 && containerNeedsRelativeForAbsoluteChildren(node)) declParts2Visual.push("position:relative")
+        if (useFlex) {
+            var lv3 = getLayoutVars(node)
+            var flexDecl3 = buildFlexVarsDecl(lv3)
+            if (flexDecl3) declParts2Visual.push(flexDecl3)
+        }
+        var fillWidthDecl2 = getFillFlexStartWidthDecl(node, parent)
+        if (fillWidthDecl2 && !nodeHasApSectionImageSemantic(node.id, ropts)) declParts2Visual.push(fillWidthDecl2)
+        var declParts2Flex = []
+        var declParts2 = declParts2Visual.concat(declParts2Flex)
+        var children2 = node.children || []
+        var visibleChildren = children2.filter(function (c) {
+            return c && (ropts && ropts.includeHidden ? true : isVisible(c))
+        })
+        var singleChild = visibleChildren.length === 1 ? visibleChildren[0] : null
+        var groupHasAttrs = declParts2.length > 0
+        var skipGroupWrapper = singleChild && !groupHasAttrs && !isFlex(node)
+
+        if (skipGroupWrapper) {
+            return collectImageFigureNodeIdsRenderNodeAsync(singleChild, node, cache, secNo, ropts)
+        }
+        var acc = []
+        var j = 0
+        function next2() {
+            if (j >= children2.length) return Promise.resolve(acc)
+            var ch2 = children2[j++]
+            if (!ch2 || (!(ropts && ropts.includeHidden) && !isVisible(ch2))) return next2()
+            return collectImageFigureNodeIdsRenderNodeAsync(ch2, node, cache, secNo, ropts).then(function (part) {
+                acc = acc.concat(part)
+                return next2()
+            })
+        }
+        return next2()
+    })
+}
+
+function collectImageFigureNodeIdsSectionChildAsync(ch, sectionNode, bg, cache, secNo, ropts) {
+    if (!ch || (bg.bgChildId && ch.id === bg.bgChildId)) return Promise.resolve([])
+    if (!(ropts && ropts.includeHidden) && !isVisible(ch)) return Promise.resolve([])
+    if (ch.type === "FRAME" && isContainer(ch)) {
+        return collectImageFigureNodeIdsRenderNodeAsync(ch, sectionNode, cache, secNo, ropts)
+    }
+    var chAbsVirtual = isAbsoluteLike(ch, sectionNode)
+    if (!chAbsVirtual && (ch.type === "LINE" || ch.type === "ELLIPSE" || isLineLikeNode(ch))) {
+        return collectImageFigureNodeIdsRenderNodeAsync(ch, sectionNode, cache, secNo, ropts)
+    }
+    return Promise.all([
+        buildBackgroundDeclAsync(ch, false, cache, secNo, {
+            skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch),
+            skipSolidFill: isVectorOnlyTree(ch),
+        }),
+        isAbsoluteLike(ch, sectionNode) ? Promise.resolve(buildAbsDecl(ch, sectionNode) || "") : Promise.resolve(""),
+    ]).then(function () {
+        return collectImageFigureNodeIdsRenderNodeAsync(ch, sectionNode, cache, secNo, ropts)
+    })
+}
+
+/**
+ * pass1(비슬라이드 자식) + pass2(swiper-slide) 순서로 섹션 HTML과 동일한 이미지 노드 순서
+ */
+function collectImageFigureNodeIdsForSectionAsync(sectionNode, bg, slideData, cache, secNo, ropts) {
+    var acc1 = []
+    var kids = sectionNode.children || []
+    var i = 0
+
+    function isSlideContainerNodeInSection(child) {
+        if (!slideData || !child) return false
+        if (slideData.parent && child.id === slideData.parent.id) return true
+        if (isSlideNode(child)) return true
+        return false
+    }
+
+    function pass1Next() {
+        if (i >= kids.length) return Promise.resolve(acc1)
+        var ch = kids[i++]
+        if (!ch || !isVisible(ch)) return pass1Next()
+        if (bg.bgChildId && ch.id === bg.bgChildId) return pass1Next()
+        if (isSlideContainerNodeInSection(ch)) return pass1Next()
+
+        return collectImageFigureNodeIdsSectionChildAsync(ch, sectionNode, bg, cache, secNo, ropts).then(function (part) {
+            acc1 = acc1.concat(part)
+            return pass1Next()
+        })
+    }
+
+    return pass1Next().then(function () {
+        if (!slideData) return acc1
+        var slideItems = collectSwiperSlideItemNodes(sectionNode, bg.bgChildId)
+        var slideParent = slideData.parent || sectionNode
+        var acc2 = []
+        var si = 0
+        function slideNext() {
+            if (si >= slideItems.length) return Promise.resolve(acc1.concat(acc2))
+            var ch = slideItems[si++]
+            return collectImageFigureNodeIdsSectionChildAsync(ch, slideParent, bg, cache, secNo, ropts).then(function (part) {
+                acc2 = acc2.concat(part)
+                return slideNext()
+            })
+        }
+        return slideNext()
+    })
+}
+
+function prefetchOneImageNodeAsync(node, cache, secNo) {
+    if (!node || node.id == null) return Promise.resolve()
+    if (node.type === "TEXT") {
+        return exportNodeImageAsync(node).then(function (dataUrl) {
+            if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
+            if (cache && dataUrl) {
+                getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
+                    skipExport: isVideoNode(node),
+                    imageHash: getPrimaryImageFillHash(node),
+                })
+            }
+        })
+    }
+    if (isVectorOnlyTree(node) && !isLineLikeNode(node) && node.type !== "ELLIPSE") {
+        return exportNodeSvgAsync(node).then(function (dataUrl) {
+            if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
+            if (cache && dataUrl) {
+                getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
+                    skipExport: isVideoNode(node),
+                    imageHash: getPrimaryImageFillHash(node),
+                })
+            }
+        })
+    }
+    return exportImagePreferSourceBytesAsync(node).then(function (dataUrl) {
+        if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
+        if (cache && dataUrl) {
+            getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
+                skipExport: isVideoNode(node),
+                imageHash: getPrimaryImageFillHash(node),
+            })
+        }
+    })
+}
+
+/** 렌더 순서대로 이미지 바이너리·경로(083) 선할당 — 마크업 단계는 캐시 우선 */
+function prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo) {
+    if (!orderedIds || !orderedIds.length) return Promise.resolve()
+    var ix = 0
+    function next() {
+        if (ix >= orderedIds.length) return Promise.resolve()
+        var nid = orderedIds[ix++]
+        var node = findNodeByIdInSubtree(sectionNode, nid)
+        if (!node) return next()
+        return prefetchOneImageNodeAsync(node, cache, secNo).then(next)
+    }
+    return next()
+}
