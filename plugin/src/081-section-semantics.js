@@ -4,6 +4,8 @@
  * 080 getTextSummarySync 이후에 둠 (buildSectionSemanticClasses).
  * 의존: 010 BEM, 050 bounds, 070 노드 분류·isImageCandidate 등, 080 getTextSummarySync·폰트 허용 판별
  */
+/** 남은 텍스트에 title/subtitle 부여 시, 이 px 이하(fs)는 ap-section__desc 로만 분류 */
+var AP_SECTION_TITLE_MIN_FS = 26
 // ----- Section semantics (id → ap-section__* , MO 이름 매칭용 수집) -----
 /** ap-section__image(+접미사) 시맨틱 — 크기는 --ap-w/--ap-h·.ap-image img 규칙으로 두고 flex fill width:100% 제외 */
 function nodeHasApSectionImageSemantic(nodeId, opts) {
@@ -49,20 +51,11 @@ function collectTextNodesByName(root) {
     return map
 }
 
-/** section 기준 깊이 → 구조 역할. 10단계 넘으면 part로 통일 */
-var SECTION_STRUCTURE_LEVELS = [
-    "container",
-    "content",
-    "group",
-    "block",
-    "item",
-    "part",
-    "slot",
-    "cell",
-    "unit",
-]
-
-var AP_SECTION_ROLE_ORDER = [
+/**
+ * ap-section 구조 역할 사다리(바깥→안).
+ * walkStructure 깊이 매핑·getNextSectionRole(중복 역할 demote)가 같은 순서를 씀. 깊이 초과 시 part.
+ */
+var AP_SECTION_STRUCTURE_ROLES = [
     "container",
     "content",
     "group",
@@ -85,10 +78,11 @@ function getApSectionRoleSuffix(cls) {
 }
 
 function getNextSectionRole(role) {
-    var idx = AP_SECTION_ROLE_ORDER.indexOf(String(role || ""))
+    var ladder = AP_SECTION_STRUCTURE_ROLES
+    var idx = ladder.indexOf(String(role || ""))
     if (idx < 0) return "part"
-    if (idx >= AP_SECTION_ROLE_ORDER.length - 1) return AP_SECTION_ROLE_ORDER[AP_SECTION_ROLE_ORDER.length - 1]
-    return AP_SECTION_ROLE_ORDER[idx + 1]
+    if (idx >= ladder.length - 1) return ladder[ladder.length - 1]
+    return ladder[idx + 1]
 }
 
 function replaceSectionRoleClass(arr, fromRole, toRole) {
@@ -197,7 +191,7 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
     function walkStructure(n, depthFromSection) {
         if (!n || !isVisible(n)) return
         if (n.id && isSemanticWrapperFrame(n)) {
-            var role = SECTION_STRUCTURE_LEVELS[depthFromSection - 1] || "part"
+            var role = AP_SECTION_STRUCTURE_ROLES[depthFromSection - 1] || "part"
             add(n.id, apSectionBem(role))
         }
         if (isContainer(n)) {
