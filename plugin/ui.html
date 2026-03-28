@@ -33,25 +33,126 @@
       --ap-warning: #fbbf24;
       --ap-warning-dim: rgba(251, 191, 36, 0.14);
       --ap-info: #93c5fd;
-      --ap-radius: 12px;
-      --ap-radius-sm: 8px;
+      --ap-radius: 14px;
+      --ap-radius-sm: 10px;
+      --ap-sidebar-w: clamp(260px, 28vw, 320px);
+      --ap-fs: 14px;
+      --ap-fs-sm: 13px;
+      --ap-fs-lg: 15px;
+      --ap-fs-title: 1.35rem;
     }
 
-/* --- Base · 헤더 · 탭 · 패널 공통 --- */
+/* --- 앱 셸 · 사이드바 · 메인 --- */
     body {
       margin: 0;
-      font: 12px/1.5 "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font: var(--ap-fs) / 1.5 "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: var(--ap-bg);
       color: var(--ap-text);
       -webkit-font-smoothing: antialiased;
     }
 
-    header {
+    .appShell {
       display: flex;
-      gap: 10px;
-      align-items: center;
-      padding: 12px 14px;
+      height: 100vh;
+      max-height: 100vh;
+      overflow: hidden;
+      box-sizing: border-box;
+    }
+
+    .appSidebar {
+      flex: 0 0 var(--ap-sidebar-w);
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 20px 18px 16px;
+      border-right: 1px solid var(--ap-border-subtle);
+      background: var(--ap-surface);
+      box-sizing: border-box;
+      gap: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+
+    .appBrand {
+      margin-bottom: 20px;
+      padding-bottom: 18px;
       border-bottom: 1px solid var(--ap-border-subtle);
+    }
+
+    .appTitle {
+      margin: 0 0 8px 0;
+      font-size: var(--ap-fs-title);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.2;
+      color: var(--ap-text);
+    }
+
+    .appSubtitle {
+      margin: 0;
+      font-size: var(--ap-fs-sm);
+      line-height: 1.55;
+      color: var(--ap-muted);
+    }
+
+    .appSideSection {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .appSideSectionTitle {
+      margin: 0 0 4px 0;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ap-muted);
+    }
+
+    .appFieldLabel {
+      font-size: var(--ap-fs-sm);
+      font-weight: 600;
+      color: var(--ap-text-secondary);
+      margin-top: 4px;
+    }
+
+    .appHelp {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--ap-muted);
+    }
+
+    .btnRun {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 14px 20px;
+      font-size: var(--ap-fs-lg);
+      font-weight: 800;
+      border-radius: var(--ap-radius-sm);
+    }
+
+    .appSidebarFoot {
+      margin-top: auto;
+      padding-top: 16px;
+      border-top: 1px solid var(--ap-border-subtle);
+    }
+
+    .appSidebar .dataToolbarStatus {
+      margin-left: 0;
+      width: 100%;
+      box-sizing: border-box;
+      text-align: center;
+      justify-content: center;
+    }
+
+    .appMain {
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
       background: var(--ap-bg);
     }
 
@@ -59,10 +160,11 @@
       border: 1px solid #7a66d4;
       background: linear-gradient(180deg, #b0a0ff 0%, #9b87f5 100%);
       color: #0a0b0f;
-      padding: 8px 14px;
+      padding: 10px 18px;
       border-radius: var(--ap-radius-sm);
       cursor: pointer;
       font-weight: 700;
+      font-size: var(--ap-fs-sm);
       letter-spacing: 0.01em;
       box-shadow: 0 1px 0 rgba(255, 255, 255, 0.14) inset, 0 1px 3px rgba(0, 0, 0, 0.35);
     }
@@ -90,30 +192,29 @@
       cursor: not-allowed;
     }
 
-    .wrap {
-      display: flex;
-      flex-direction: column;
-      height: calc(100vh - 60px);
-      min-height: 0;
-    }
-
     .tabs {
       display: flex;
       flex-shrink: 0;
       align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 16px 20px;
       border-bottom: 1px solid var(--ap-border-subtle);
       background: var(--ap-bg);
     }
 
+    .tabs .tabSpacer {
+      flex: 1;
+      min-width: 8px;
+    }
+
     .tabs button {
-      padding: 8px 16px;
+      padding: 10px 20px;
       border: 1px solid transparent;
       border-radius: 999px;
       background: var(--ap-surface-raised);
       cursor: pointer;
-      font-size: 12px;
+      font-size: var(--ap-fs-sm);
       font-weight: 600;
       color: var(--ap-text-secondary);
     }
@@ -148,10 +249,10 @@
       min-height: 0;
       border: 0;
       outline: 0;
-      padding: 12px 14px;
+      padding: 16px 18px;
       resize: none;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      font-size: 11px;
+      font-size: 12px;
       line-height: 1.55;
       background: var(--ap-input);
       color: var(--ap-text);
@@ -165,7 +266,9 @@
     .hint {
       margin-left: auto;
       color: var(--ap-muted);
-      font-size: 11px;
+      font-size: var(--ap-fs-sm);
+      max-width: 42em;
+      line-height: 1.45;
     }
 
     .mobileOpt {
@@ -185,11 +288,16 @@
       border: 1px solid var(--ap-input-border);
       background: var(--ap-input);
       color: var(--ap-text);
-      padding: 7px 11px;
+      padding: 10px 14px;
       border-radius: var(--ap-radius-sm);
       outline: 0;
-      font-size: 12px;
+      font-size: var(--ap-fs-sm);
       width: 180px;
+      box-sizing: border-box;
+    }
+
+    .field--full {
+      width: 100%;
     }
 
     .field::placeholder {
@@ -203,9 +311,10 @@
     }
 
     .fontRow {
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--ap-border-subtle);
-      background: var(--ap-surface);
+      padding: 12px 0 0;
+      margin-top: 12px;
+      border-top: 1px solid var(--ap-border-subtle);
+      background: transparent;
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -213,11 +322,12 @@
     }
 
     .fontRowLabel {
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 600;
       color: var(--ap-text-secondary);
       flex-shrink: 0;
       letter-spacing: 0.02em;
+      width: 100%;
     }
 
     .fontCheckboxes {
@@ -231,8 +341,8 @@
     .fontCheckboxes label {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      font-size: 11px;
+      gap: 6px;
+      font-size: var(--ap-fs-sm);
       color: var(--ap-text);
       cursor: pointer;
       white-space: nowrap;
@@ -244,6 +354,37 @@
     }
 
     /* --- 레이어 탭(툴바 · 트리 · 상세) — data-tab은 "data" 유지 --- */
+    .mainViewHead {
+      flex-shrink: 0;
+      padding: 14px 20px 10px;
+      border-bottom: 1px solid var(--ap-border-subtle);
+      background: var(--ap-bg);
+    }
+
+    .mainViewTitle {
+      margin: 0 0 6px 0;
+      font-size: 1.05rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--ap-text);
+    }
+
+    .mainViewDesc {
+      margin: 0;
+      font-size: var(--ap-fs-sm);
+      line-height: 1.45;
+      color: var(--ap-muted);
+      max-width: 48em;
+    }
+
+    .previewToolbarTitle {
+      font-size: var(--ap-fs-lg);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--ap-text);
+      margin-right: 8px;
+    }
+
     .dataWrap {
       flex: 1;
       min-height: 0;
@@ -253,7 +394,7 @@
 
     .dataToolbar {
       flex-shrink: 0;
-      padding: 10px 14px;
+      padding: 14px 20px;
       border-bottom: 1px solid var(--ap-border-subtle);
       display: flex;
       flex-wrap: wrap;
@@ -297,13 +438,16 @@
 
     .dataToolbarStatus {
       margin-left: auto;
-      padding: 6px 11px;
+      padding: 8px 14px;
       border-radius: 999px;
       color: var(--ap-info);
-      font-size: 12px;
+      font-size: var(--ap-fs-sm);
       font-weight: 600;
       background: rgba(147, 197, 253, 0.1);
       border: 1px solid rgba(147, 197, 253, 0.22);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
 
     .dataToolbarStatus.waiting {
@@ -351,8 +495,8 @@
       min-height: 0;
       display: grid;
       grid-template-columns: 1.15fr 0.85fr;
-      gap: 12px;
-      padding: 12px 14px;
+      gap: 16px;
+      padding: 16px 20px 20px;
       box-sizing: border-box;
       background: var(--ap-bg);
     }
@@ -370,33 +514,33 @@
 
     .boxHd {
       flex-shrink: 0;
-      padding: 10px 12px;
+      padding: 14px 16px;
       border-bottom: 1px solid var(--ap-border-subtle);
       display: flex;
-      gap: 8px;
+      gap: 10px;
       align-items: center;
       background: var(--ap-surface-raised);
-      font-size: 11px;
+      font-size: var(--ap-fs-sm);
       color: var(--ap-muted);
     }
 
     .boxHd b {
       color: var(--ap-text);
       font-weight: 700;
-      font-size: 12px;
-      letter-spacing: -0.01em;
+      font-size: var(--ap-fs-lg);
+      letter-spacing: -0.02em;
     }
 
     .boxBd {
       flex: 1;
       min-height: 0;
       overflow: auto;
-      padding: 10px;
+      padding: 14px 16px;
     }
 
     .tree {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 11px;
+      font-size: 12px;
       line-height: 1.55;
     }
 
@@ -454,8 +598,8 @@
     }
 
     .badge {
-      font-size: 10px;
-      padding: 2px 7px;
+      font-size: 11px;
+      padding: 3px 8px;
       border: 1px solid var(--ap-input-border);
       border-radius: 999px;
       color: var(--ap-text-secondary);
@@ -602,7 +746,7 @@
 
     .detail {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 11px;
+      font-size: 12px;
       line-height: 1.6;
       padding: 2px 0;
     }
@@ -614,9 +758,9 @@
     }
 
     .detail h3 {
-      margin: 0 0 8px 0;
+      margin: 0 0 10px 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 14px;
+      font-size: 1.05rem;
       font-weight: 700;
       color: var(--ap-text);
       letter-spacing: -0.02em;
@@ -641,14 +785,14 @@
 
     .detail .row {
       display: grid;
-      grid-template-columns: 120px 1fr;
-      gap: 10px 14px;
+      grid-template-columns: 130px 1fr;
+      gap: 10px 16px;
       align-items: start;
-      padding: 8px 10px;
-      margin: 0 -10px;
-      border-radius: 6px;
+      padding: 10px 12px;
+      margin: 0 -12px;
+      border-radius: 8px;
       border-bottom: 1px solid var(--ap-border-subtle);
-      font-size: 11px;
+      font-size: var(--ap-fs-sm);
     }
 
     .detail .row:nth-child(even) {
@@ -695,19 +839,19 @@
     /* --- 미리보기 패널 --- */
     .previewToolbar {
       display: flex;
-      gap: 6px;
+      gap: 10px;
       align-items: center;
       flex-shrink: 0;
-      padding: 8px 12px;
+      padding: 14px 20px;
       border-bottom: 1px solid var(--ap-border-subtle);
       background: var(--ap-surface);
     }
 
     .previewToolbar .viewBtn {
-      padding: 6px 14px;
+      padding: 8px 18px;
       border-radius: var(--ap-radius-sm);
       cursor: pointer;
-      font-size: 12px;
+      font-size: var(--ap-fs-sm);
       font-weight: 600;
       border: 1px solid var(--ap-border);
       background: var(--ap-surface-raised);
@@ -775,10 +919,10 @@
 
     .previewPaneLabel {
       flex-shrink: 0;
-      font-size: 11px;
+      font-size: var(--ap-fs-sm);
       font-weight: 700;
       color: var(--ap-muted);
-      padding: 0 0 6px 2px;
+      padding: 0 0 8px 2px;
       letter-spacing: 0.02em;
     }
 
@@ -793,7 +937,7 @@
     }
 
     .previewToolbarDualHint {
-      font-size: 11px;
+      font-size: var(--ap-fs-sm);
       font-weight: 600;
       color: #c4b5fd;
       margin-left: 4px;
@@ -818,10 +962,10 @@
 
     .codeToolbarRow {
       flex-shrink: 0;
-      padding: 8px 12px 0;
+      padding: 12px 20px 0;
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 12px;
       align-items: center;
     }
 
@@ -831,25 +975,27 @@
 
     .aiRefineBar {
       flex-shrink: 0;
-      padding: 8px 12px;
+      padding: 14px 20px;
       border-bottom: 1px solid var(--ap-border-subtle);
       background: var(--ap-surface);
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
     }
 
     .aiRefineRow {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 10px;
       align-items: center;
     }
 
     .aiRefineLabel {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--ap-text);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ap-muted);
     }
 
     .aiRefineSep {
@@ -884,14 +1030,16 @@
 
     #aiRefineStatus {
       margin-left: 0;
-      font-size: 11px;
+      font-size: var(--ap-fs-sm);
+      max-width: min(100%, 22rem);
+      line-height: 1.4;
     }
 
     #aiAuditReport {
       display: none;
-      max-height: 360px;
+      max-height: min(360px, 38vh);
       overflow: auto;
-      font-size: 10px;
+      font-size: 11px;
       line-height: 1.45;
       border: 1px solid var(--ap-border-subtle);
       border-radius: var(--ap-radius-sm);
@@ -900,8 +1048,23 @@
       color: var(--ap-text);
     }
 
-    #aiAuditReport.is-visible {
+    #aiAuditReport.is-visible,
+    #aiPreviewCheckReport.is-visible {
       display: block;
+    }
+
+    #aiPreviewCheckReport {
+      display: none;
+      max-height: min(280px, 32vh);
+      overflow: auto;
+      font-size: 11px;
+      line-height: 1.45;
+      border: 1px solid var(--ap-border-subtle);
+      border-radius: var(--ap-radius-sm);
+      padding: 10px;
+      margin-top: 8px;
+      background: var(--ap-input);
+      color: var(--ap-text);
     }
 
     #aiAuditReport.ap-apply-mode {
@@ -1025,28 +1188,46 @@
 </head>
 
 <body>
-  <header>
-    <button id="runAnalyze" type="button">분석</button>
+  <div class="appShell">
+    <aside class="appSidebar" aria-label="분석·프로젝트">
+      <div class="appBrand">
+        <h1 class="appTitle">Figma → HTML</h1>
+        <p class="appSubtitle">ROOT 프레임을 선택한 뒤 분석합니다. 코드·미리보기·ZIP보내기까지 한 패널에서 처리합니다.</p>
+      </div>
 
-    <input id="projectName" class="field" placeholder="project (ex: signia_serum)" />
-    <span class="hint" id="rootHint">ROOT 1개: PC 한 벌 · ROOT 2개: PC+MO(가로 큰 쪽=PC) @media 오버라이드</span>
-  </header>
-  <div id="fontRow" class="fontRow is-collapsed">
-    <span class="fontRowLabel">폰트 (체크 = 텍스트로 처리, 미체크 = 이미지로 처리)</span>
-    <div id="fontCheckboxes" class="fontCheckboxes"></div>
-  </div>
+      <section class="appSideSection">
+        <h2 class="appSideSectionTitle">분석</h2>
+        <button id="runAnalyze" type="button" class="btnRun">분석 실행</button>
+        <label class="appFieldLabel" for="projectName">프로젝트 이름</label>
+        <input id="projectName" class="field field--full" type="text" placeholder="예: signia_serum" autocomplete="off" />
+        <p class="appHelp" id="rootHint">ROOT 1개: PC 한 벌 · ROOT 2개: PC+MO(가로 큰 쪽=PC) @media 오버라이드</p>
+      </section>
 
-  <div class="wrap">
+      <div id="fontRow" class="fontRow is-collapsed">
+        <span class="fontRowLabel">폰트 (체크 = 텍스트 · 미체크 = 이미지)</span>
+        <div id="fontCheckboxes" class="fontCheckboxes"></div>
+      </div>
+
+      <div class="appSidebarFoot">
+        <span class="dataToolbarStatus waiting" id="dataStatus">분석 대기 중…</span>
+      </div>
+    </aside>
+
+    <div class="appMain">
     <div class="tabs">
       <button type="button" class="tab active" data-tab="data">레이어</button>
       <button type="button" class="tab" data-tab="code">코드·AI</button>
       <button type="button" class="tab" data-tab="preview">미리보기</button>
-      <span class="dataToolbarStatus waiting" id="dataStatus">분석 대기 중…</span>
+      <span class="tabSpacer" aria-hidden="true"></span>
     </div>
 
     <!-- ===== DATA ===== -->
     <div id="panel-data" class="panel active">
       <div class="dataWrap">
+        <div class="mainViewHead">
+          <h2 class="mainViewTitle">레이어 인스펙터</h2>
+          <p class="mainViewDesc">ROOT 직계 자식마다 섹션이 생깁니다. 트리에서 항목을 누르면 오른쪽에 Figma 속성이 표시됩니다.</p>
+        </div>
         <div class="dataToolbar">
           <div class="dataToolbarGroup actions">
             <button type="button" id="openAll" class="gray">모두 펼치기</button>
@@ -1058,7 +1239,7 @@
           <!-- left: tree -->
           <div class="box">
             <div class="boxHd">
-              <b>Tree</b>
+              <b>레이어 트리</b>
               <span class="muted" id="treeMeta">-</span>
             </div>
             <div class="boxBd">
@@ -1070,7 +1251,7 @@
           <!-- right: detail -->
           <div class="box">
             <div class="boxHd">
-              <b>Detail</b>
+              <b>노드 상세</b>
               <span class="muted" id="selPill">선택 없음</span>
             </div>
             <div class="boxBd">
@@ -1086,6 +1267,10 @@
     <!-- ===== CODE ===== -->
     <div id="panel-code" class="panel">
       <div class="codePanelCol">
+        <div class="mainViewHead">
+          <h2 class="mainViewTitle">생성 코드 &amp; AI</h2>
+          <p class="mainViewDesc">보낸 HTML/CSS를 수정하거나, AI로 검수·미리보기 점검·alt/헤딩 반영을 실행합니다. Export ZIP은 상단 버튼을 사용하세요.</p>
+        </div>
         <div class="codeToolbarRow">
           <button type="button" id="exportZip" class="gray">Export ZIP</button>
           <span class="hint hint--flush">_cms.html + assets/images/page_{project}_secXX_imgYY</span>
@@ -1096,6 +1281,7 @@
             <span class="aiRefineLabel">AI</span>
             <button type="button" id="btnAiAudit" class="gray" title="SEO·접근성·시멘틱·alt·헤딩 검수 리포트">분석</button>
             <button type="button" id="btnApplyAltProposals" class="gray" title="마지막 분석의 alt를 그대로 적용·헤딩은 동일 분석 headingAudit에 맞춰 패치">반영</button>
+            <button type="button" id="btnAiPreviewCheck" class="gray" title="코드·레이어 요약만 사용 · 미리보기와 어긋날 수 있는 점 점검(이미지·캡처 없음)">미리보기 점검</button>
             <span class="aiRefineSep">|</span>
             <select id="aiProvider" class="field field--provider">
               <option value="openai">OpenAI</option>
@@ -1106,6 +1292,7 @@
             <span id="aiRefineStatus" class="hint"></span>
           </div>
           <div id="aiAuditReport"></div>
+          <div id="aiPreviewCheckReport"></div>
           <!--<div class="aiRefineFootnote">
             <b>분석</b> = SEO · 접근성 · 시멘틱 마크업 · alt · 헤딩 검수 리포트 /
             <b>반영</b> = 마지막 분석의 alt 제안을 그대로 적용 · 헤딩은 동일 분석의 <code>headingAudit</code>에 맞춰 패치 생성
@@ -1119,6 +1306,7 @@
     <!-- ===== PREVIEW ===== -->
     <div id="panel-preview" class="panel">
       <div class="previewToolbar">
+        <span class="previewToolbarTitle">미리보기</span>
         <button type="button" class="viewBtn u-hidden" id="previewViewPc" data-view="pc">PC</button>
         <button type="button" class="viewBtn u-hidden" id="previewViewMo" data-view="mo">MO</button>
         <span id="previewToolbarDualHint" class="previewToolbarDualHint u-hidden">PC · MO 동시 미리보기</span>
@@ -1139,6 +1327,7 @@
           </div>
         </div>
       </div>
+    </div>
     </div>
   </div>
 
@@ -1569,6 +1758,37 @@
       },
       required: ["altProposals", "headingPatches"]
     };
+
+    /** 1단계: 코드·레이어 텍스트만으로 미리보기와 어긋날 수 있는지 점검(비전·캡처 없음) */
+    var AP_GEMINI_PREVIEW_CHECK_JSON_SCHEMA = {
+      type: "object",
+      properties: {
+        summary: {
+          type: "object",
+          properties: {
+            overall: { type: "string", enum: ["pass", "warn", "fail"] },
+            score: { type: "number" },
+            oneLine: { type: "string" }
+          },
+          required: ["overall", "score", "oneLine"]
+        },
+        issues: { type: "array", items: AP_GEMINI_ISSUE_ITEM_SCHEMA },
+        suggestions: { type: "array", items: { type: "string" } }
+      },
+      required: ["summary", "issues", "suggestions"]
+    };
+
+    var AP_AI_PREVIEW_CHECK_SYSTEM = [
+      "당신은 Figma→HTML보내기 플러그인의 점검 도우미다.",
+      "입력: (1) PC 레이어 트리 텍스트 요약 — 타입·이름·일부 스타일 속성만 있으며 픽셀·스크린샷은 없다. (2) 같은 페이지의 HTML/CSS.",
+      "미리보기 iframe은 이 HTML/CSS를 그대로 렌더한다. 비전 없이 텍스트만으로 추론한다.",
+      "다룰 것: 레이어 요약과 마크업/CSS가 논리적으로 맞지 않아 **미리보기에서 깨지거나 의도와 다르게 보일** 수 있는 경우 — 예: 누락된 이미지 경로, 섹션·텍스트 블록 불일치, flex/width/position으로 인한 오버플로 가능성, 배경 이미지·picture 규칙과 충돌, 중복·빈 섹션, 명백한 단위/값 오류.",
+      "다루지 말 것: SEO·법적 문구·브랜드 톤 등 이 단계 범위 밖 조언. 픽셀 단위 디자인 일치 주장(캡처 없음).",
+      "issues[].severity: high=깨짐·콘텐츠 누락, medium=레이아웃 위험, low=개선.",
+      "selectorHint: CSS 선택자 또는 class 힌트. 없으면 빈 문자열.",
+      "문제 없으면 issues는 빈 배열, summary.overall=pass, score 8~10.",
+      "응답은 스키마 JSON만."
+    ].join("\n");
 
     // 멀티모달 user: {{MAX_EDGE}}, {{API_DETAIL}}, {{VISION_MAX}}, {{TRUNCATED}}
     var AP_AI_VISION_USER_APPEND_INTRO_LINES = [
@@ -2826,8 +3046,10 @@
     function setAiButtonsBusy(busy) {
       var a = $("#btnAiAudit");
       var b = $("#btnApplyAltProposals");
+      var c = $("#btnAiPreviewCheck");
       if (a) a.disabled = !!busy;
       if (b) b.disabled = !!busy;
+      if (c) c.disabled = !!busy;
     }
 
     /** 분석 리포트 score를 0~10 눈금으로 맞춤(모델이 70 등으로 줄 때 대비). 반영 가산은 이 값 기준. */
@@ -2959,6 +3181,11 @@
         rep.innerHTML = "";
         rep.classList.remove("is-visible");
         rep.classList.remove("ap-apply-mode");
+      }
+      var prevRep = $("#aiPreviewCheckReport");
+      if (prevRep) {
+        prevRep.innerHTML = "";
+        prevRep.classList.remove("is-visible");
       }
       setAiStatus("");
     }
@@ -4374,6 +4601,189 @@
       el.classList.toggle("ap-apply-mode", !!(obj && obj._apApplyMode));
     }
 
+    /**
+     * PC 레이어 dataTree → AI용 텍스트 요약(깊이·길이 제한으로 토큰 절감).
+     * @param {object|null} dt
+     * @param {number} [maxLen]
+     */
+    function serializeDataTreeForPreviewCheck(dt, maxLen) {
+      maxLen = maxLen || 10000;
+      var lines = [];
+      var used = 0;
+      function push(s) {
+        var t = String(s) + "\n";
+        if (used + t.length > maxLen) {
+          if (used < maxLen) {
+            lines.push("(…이하 트리 요약 생략 — 토큰 상한)");
+            used = maxLen;
+          }
+          return false;
+        }
+        lines.push(String(s));
+        used += t.length;
+        return true;
+      }
+      if (!dt || !dt.sections || !dt.sections.length) {
+        return "(레이어 트리 없음: Figma에서 분석 실행 후 레이어 탭에 트리가 있으면 더 정확합니다. 지금은 HTML/CSS만으로 점검합니다.)";
+      }
+      push("sections=" + dt.sections.length);
+      dt.sections.forEach(function (sec) {
+        if (!push("## " + String(sec.title || "Section"))) return;
+        function walk(node, depth) {
+          if (depth > 6 || used >= maxLen) return;
+          var meta = parseMetaFromLabel(node.label || "");
+          var ind = new Array(Math.min(depth, 6) + 1).join("  ");
+          var line =
+            ind +
+            "- " +
+            meta.type +
+            ' "' +
+            String(meta.name || "").slice(0, 96) +
+            '"' +
+            (meta.flags && meta.flags.length ? " [" + meta.flags.join(",") + "]" : "");
+          if (!push(line)) return;
+          var props = node.props || [];
+          for (var pi = 0; pi < props.length && pi < 8; pi++) {
+            var p = String(props[pi]);
+            if (p.length > 140) p = p.slice(0, 137) + "…";
+            if (!push(ind + "    · " + p)) return;
+          }
+          if (node.textMeta) {
+            var tm = node.textMeta;
+            var bits = [];
+            if (tm.fs !== undefined && tm.fs !== "") bits.push("fs:" + tm.fs);
+            if (tm.ta !== undefined && tm.ta !== "") bits.push("ta:" + tm.ta);
+            if (tm.fw !== undefined && tm.fw !== "") bits.push("fw:" + tm.fw);
+            if (bits.length) push(ind + "    · textMeta " + bits.join(" "));
+          }
+          var kids = node.children || [];
+          var cap = depth >= 4 ? 12 : 28;
+          for (var i = 0; i < kids.length && i < cap; i++) walk(kids[i], depth + 1);
+          if (kids.length > cap) push(ind + "  … 자식 " + (kids.length - cap) + "개 생략");
+        }
+        walk(sec.node, 0);
+      });
+      return lines.join("\n");
+    }
+
+    function buildPreviewCheckReportHtml(obj) {
+      obj = obj || {};
+      function esc(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+      function sevBadge(sev) {
+        var cls = "background:#20252f;color:#adb5bd;border:1px solid #343a48;";
+        if (sev === "high") cls = "background:rgba(245,101,101,0.15);color:#fca5a5;border:1px solid rgba(245,101,101,0.4);";
+        else if (sev === "medium") cls = "background:rgba(251,191,36,0.12);color:#fcd34d;border:1px solid rgba(251,191,36,0.35);";
+        else if (sev === "low") cls = "background:rgba(52,211,153,0.12);color:#6ee7b7;border:1px solid rgba(52,211,153,0.35);";
+        return '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;' + cls + '">' + esc(sev || "info") + "</span>";
+      }
+      var summary = obj.summary || {};
+      var overall = String(summary.overall || "warn");
+      var badgeStyle = "background:rgba(251,191,36,0.12);color:#fcd34d;border:1px solid rgba(251,191,36,0.35);";
+      if (overall === "pass") badgeStyle = "background:rgba(52,211,153,0.12);color:#6ee7b7;border:1px solid rgba(52,211,153,0.35);";
+      else if (overall === "fail") badgeStyle = "background:rgba(245,101,101,0.15);color:#fca5a5;border:1px solid rgba(245,101,101,0.4);";
+      var issues = Array.isArray(obj.issues) ? obj.issues : [];
+      var suggestions = Array.isArray(obj.suggestions) ? obj.suggestions : [];
+      var html = "";
+      html += '<div class="ap-diff-block" style="margin-bottom:10px;">';
+      html += "<strong>미리보기 점검(코드·레이어)</strong>";
+      html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0;">';
+      html += '<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;' + badgeStyle + '">' + esc(overall) + "</span>";
+      if (summary.score != null) {
+        html += '<span style="font-size:11px;color:#9aa3b5;">score: <b style="color:#f0f2f6;">' + esc(String(summary.score)) + "</b></span>";
+      }
+      html += "</div>";
+      if (summary.oneLine) {
+        html += '<div style="font-size:11px;line-height:1.5;color:#e2e8f0;">' + esc(summary.oneLine) + "</div>";
+      }
+      html += "</div>";
+      if (issues.length) {
+        html += '<strong style="display:block;margin-bottom:8px;color:#c4b5fd;">이슈</strong>';
+        issues.forEach(function (it) {
+          html +=
+            '<div style="padding:10px;border:1px solid rgba(255,255,255,0.11);border-radius:8px;background:#171a22;margin-bottom:8px;">' +
+            '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">' +
+            sevBadge(it.severity) +
+            '<code style="font-size:10px;background:#12141a;padding:1px 6px;border-radius:4px;border:1px solid #2c3140;color:#e2e8f0;">' +
+            esc(it.type || "") +
+            "</code>" +
+            '<span style="font-size:10px;color:#9aa3b5;">' +
+            esc(it.target || "") +
+            "</span></div>";
+          if (it.selectorHint) {
+            html += '<div style="font-size:10px;color:#9aa3b5;margin-bottom:6px;">selector: <code>' + esc(it.selectorHint) + "</code></div>";
+          }
+          if (it.problem) html += '<div style="margin-bottom:4px;"><b>문제</b> · ' + esc(it.problem) + "</div>";
+          if (it.why) html += '<div style="margin-bottom:4px;"><b>이유</b> · ' + esc(it.why) + "</div>";
+          if (it.fix) html += '<div><b>수정 힌트</b> · ' + esc(it.fix) + "</div>";
+          html += "</div>";
+        });
+      }
+      if (suggestions.length) {
+        html += '<strong style="display:block;margin:12px 0 6px;color:#c4b5fd;">추가 제안</strong><ul style="margin:0;padding-left:18px;">';
+        suggestions.forEach(function (x) {
+          html += "<li>" + esc(x) + "</li>";
+        });
+        html += "</ul>";
+      }
+      html += '<p style="margin:10px 0 0;font-size:9px;color:#9aa3b3;opacity:0.9;">비전·캡처 없음 · 텍스트 추론만. 실제 픽셀은 미리보기에서 직접 확인하세요.</p>';
+      return html;
+    }
+
+    function renderPreviewCheckReport(obj) {
+      var el = $("#aiPreviewCheckReport");
+      if (!el) return;
+      var inner = buildPreviewCheckReportHtml(obj);
+      el.innerHTML = inner;
+      el.classList.toggle("is-visible", !!String(inner || "").trim());
+    }
+
+    function runAiPreviewCheck() {
+      if (!ensureApiKeyExists()) return;
+      if (!ensureCodeExists()) return;
+      var code = stripEmbeddedAuditReport(getCodeValue());
+      var cms = extractCmsPartForAudit(code);
+      if (!String(cms || "").trim()) cms = code;
+      var layerSummary = serializeDataTreeForPreviewCheck(dataTree, 10000);
+      var userPrefix =
+        "아래 블록은 Figma PC 레이어 트리 텍스트 요약이다(이름·타입·일부 속성만, 이미지 픽셀 없음).\n\n<<<LAYER_SUMMARY>>>\n" +
+        layerSummary +
+        "\n<<<END_LAYER_SUMMARY>>>\n\n이어지는 본문은 플러그인이 생성한 HTML/CSS다. 미리보기 iframe은 이 코드를 그대로 렌더한다.\n\n";
+      var userSuffix =
+        "\n\n위 레이어 요약과 HTML/CSS를 비교해, 미리보기에서 깨지거나 디자인 의도와 어긋날 수 있는 점만 JSON 스키마에 맞게 답하라. 픽셀 일치는 주장하지 말 것.";
+
+      setAiButtonsBusy(true);
+      setAiStatus("미리보기 점검(코드·레이어) 실행 중…");
+
+      runAiJsonApi(
+        cms,
+        AP_AI_PREVIEW_CHECK_SYSTEM,
+        userPrefix,
+        userSuffix,
+        null,
+        { responseJsonSchema: AP_GEMINI_PREVIEW_CHECK_JSON_SCHEMA, maxOutputTokens: 8192 }
+      )
+        .then(function (obj) {
+          if (obj && obj.summary && obj.summary.score != null) {
+            var ten = scoreToTenScale(obj.summary.score);
+            if (ten != null) obj.summary.score = roundScoreTen(ten);
+          }
+          renderPreviewCheckReport(obj);
+          setAiStatus("미리보기 점검 완료");
+        })
+        .catch(function (e) {
+          setAiStatus("미리보기 점검 실패: " + friendlyAiApiErrorMessage(e));
+        })
+        .then(function () {
+          setAiButtonsBusy(false);
+        });
+    }
+
     function runAiAudit() {
       if (!ensureApiKeyExists()) return;
       if (!ensureCodeExists()) return;
@@ -4454,6 +4864,9 @@
 
     var btnAiAudit = $("#btnAiAudit");
     if (btnAiAudit) btnAiAudit.onclick = runAiAudit;
+
+    var btnAiPreviewCheck = $("#btnAiPreviewCheck");
+    if (btnAiPreviewCheck) btnAiPreviewCheck.onclick = runAiPreviewCheck;
 
     var btnApplyAlt = $("#btnApplyAltProposals");
     if (btnApplyAlt) {
