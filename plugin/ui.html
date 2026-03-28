@@ -1048,23 +1048,8 @@
       color: var(--ap-text);
     }
 
-    #aiAuditReport.is-visible,
-    #aiPreviewCheckReport.is-visible {
+    #aiAuditReport.is-visible {
       display: block;
-    }
-
-    #aiPreviewCheckReport {
-      display: none;
-      max-height: min(280px, 32vh);
-      overflow: auto;
-      font-size: 11px;
-      line-height: 1.45;
-      border: 1px solid var(--ap-border-subtle);
-      border-radius: var(--ap-radius-sm);
-      padding: 10px;
-      margin-top: 8px;
-      background: var(--ap-input);
-      color: var(--ap-text);
     }
 
     #aiAuditReport.ap-apply-mode {
@@ -1269,7 +1254,7 @@
       <div class="codePanelCol">
         <div class="mainViewHead">
           <h2 class="mainViewTitle">생성 코드 &amp; AI</h2>
-          <p class="mainViewDesc">보낸 HTML/CSS를 수정하거나, AI로 검수·미리보기 점검·alt/헤딩 반영을 실행합니다. Export ZIP은 상단 버튼을 사용하세요.</p>
+          <p class="mainViewDesc">보낸 HTML/CSS를 수정하거나, AI로 검수·alt/헤딩 반영을 실행합니다. Export ZIP은 상단 버튼을 사용하세요.</p>
         </div>
         <div class="codeToolbarRow">
           <button type="button" id="exportZip" class="gray">Export ZIP</button>
@@ -1281,7 +1266,6 @@
             <span class="aiRefineLabel">AI</span>
             <button type="button" id="btnAiAudit" class="gray" title="SEO·접근성·시멘틱·alt·헤딩 검수 리포트">분석</button>
             <button type="button" id="btnApplyAltProposals" class="gray" title="마지막 분석의 alt를 그대로 적용·헤딩은 동일 분석 headingAudit에 맞춰 패치">반영</button>
-            <button type="button" id="btnAiPreviewCheck" class="gray" title="코드·레이어 요약만 사용 · 미리보기와 어긋날 수 있는 점 점검(이미지·캡처 없음)">미리보기 점검</button>
             <span class="aiRefineSep">|</span>
             <select id="aiProvider" class="field field--provider">
               <option value="openai">OpenAI</option>
@@ -1292,7 +1276,6 @@
             <span id="aiRefineStatus" class="hint"></span>
           </div>
           <div id="aiAuditReport"></div>
-          <div id="aiPreviewCheckReport"></div>
           <!--<div class="aiRefineFootnote">
             <b>분석</b> = SEO · 접근성 · 시멘틱 마크업 · alt · 헤딩 검수 리포트 /
             <b>반영</b> = 마지막 분석의 alt 제안을 그대로 적용 · 헤딩은 동일 분석의 <code>headingAudit</code>에 맞춰 패치 생성
@@ -1759,37 +1742,6 @@
       required: ["altProposals", "headingPatches"]
     };
 
-    /** 1단계: 코드·레이어 텍스트만으로 미리보기와 어긋날 수 있는지 점검(비전·캡처 없음) */
-    var AP_GEMINI_PREVIEW_CHECK_JSON_SCHEMA = {
-      type: "object",
-      properties: {
-        summary: {
-          type: "object",
-          properties: {
-            overall: { type: "string", enum: ["pass", "warn", "fail"] },
-            score: { type: "number" },
-            oneLine: { type: "string" }
-          },
-          required: ["overall", "score", "oneLine"]
-        },
-        issues: { type: "array", items: AP_GEMINI_ISSUE_ITEM_SCHEMA },
-        suggestions: { type: "array", items: { type: "string" } }
-      },
-      required: ["summary", "issues", "suggestions"]
-    };
-
-    var AP_AI_PREVIEW_CHECK_SYSTEM = [
-      "당신은 Figma→HTML보내기 플러그인의 점검 도우미다.",
-      "입력: (1) PC 레이어 트리 텍스트 요약 — 타입·이름·일부 스타일 속성만 있으며 픽셀·스크린샷은 없다. (2) 같은 페이지의 HTML/CSS.",
-      "미리보기 iframe은 이 HTML/CSS를 그대로 렌더한다. 비전 없이 텍스트만으로 추론한다.",
-      "다룰 것: 레이어 요약과 마크업/CSS가 논리적으로 맞지 않아 **미리보기에서 깨지거나 의도와 다르게 보일** 수 있는 경우 — 예: 누락된 이미지 경로, 섹션·텍스트 블록 불일치, flex/width/position으로 인한 오버플로 가능성, 배경 이미지·picture 규칙과 충돌, 중복·빈 섹션, 명백한 단위/값 오류.",
-      "다루지 말 것: SEO·법적 문구·브랜드 톤 등 이 단계 범위 밖 조언. 픽셀 단위 디자인 일치 주장(캡처 없음).",
-      "issues[].severity: high=깨짐·콘텐츠 누락, medium=레이아웃 위험, low=개선.",
-      "selectorHint: CSS 선택자 또는 class 힌트. 없으면 빈 문자열.",
-      "문제 없으면 issues는 빈 배열, summary.overall=pass, score 8~10.",
-      "응답은 스키마 JSON만."
-    ].join("\n");
-
     // 멀티모달 user: {{MAX_EDGE}}, {{API_DETAIL}}, {{VISION_MAX}}, {{TRUNCATED}}
     var AP_AI_VISION_USER_APPEND_INTRO_LINES = [
       "",
@@ -1884,7 +1836,8 @@
     var previewIngestId = null;
     var previewImagesCommittedIngestId = null;
     var zipImagesBuffer = [];
-    var resultImagesBuffer = [];
+    /** ingestId별 청크 버퍼 — RESULT보다 CHUNK가 먼저 오면 기존 로직은 청크를 버림 */
+    var resultImagesByIngest = Object.create(null);
     var previewImagesReady = true;
     var zipImagesCode = "";
     var payloadText = "";
@@ -2077,7 +2030,14 @@
         if (!lateResultAfterImages) {
           previewIngestId = msg.ingestId != null ? msg.ingestId : null;
           previewImagesCommittedIngestId = null;
-          resultImagesBuffer = [];
+          if (msg.ingestId != null) {
+            var ingestKey = String(msg.ingestId);
+            Object.keys(resultImagesByIngest).forEach(function (k) {
+              if (k !== ingestKey) delete resultImagesByIngest[k];
+            });
+          } else {
+            resultImagesByIngest = Object.create(null);
+          }
           previewImagesReady = nImgExpect <= 0;
           if (nImgExpect <= 0) {
             previewImages = msg.images || [];
@@ -2085,6 +2045,8 @@
           } else {
             previewImages = [];
           }
+        } else {
+          refreshPreview();
         }
 
         renderDataTree(dataTree);
@@ -2101,14 +2063,17 @@
       }
 
       if (msg.type === "RESULT_IMAGES_CHUNK") {
-        if (previewIngestId != null && msg.ingestId != null && msg.ingestId !== previewIngestId) return;
-        if (previewIngestId != null && msg.ingestId == null) return;
-        resultImagesBuffer.push({ name: msg.name || ("img_" + (msg.index ?? 0) + ".png"), dataUrl: msg.dataUrl || "" });
+        var chunkId = msg.ingestId != null ? String(msg.ingestId) : "_noid";
+        if (!resultImagesByIngest[chunkId]) resultImagesByIngest[chunkId] = [];
+        resultImagesByIngest[chunkId].push({
+          name: msg.name || ("img_" + (msg.index ?? 0) + ".png"),
+          dataUrl: msg.dataUrl || "",
+        });
       }
       if (msg.type === "RESULT_IMAGES_END") {
-        if (previewIngestId != null && msg.ingestId != null && msg.ingestId !== previewIngestId) return;
-        previewImages = resultImagesBuffer.slice();
-        resultImagesBuffer = [];
+        var endIngestKey = msg.ingestId != null ? String(msg.ingestId) : "_noid";
+        previewImages = (resultImagesByIngest[endIngestKey] || []).slice();
+        delete resultImagesByIngest[endIngestKey];
         previewImagesReady = true;
         if (msg.ingestId != null) previewImagesCommittedIngestId = msg.ingestId;
         refreshPreview();
@@ -2206,6 +2171,7 @@
         lastMoBreakpoint = null;
         previewIngestId = null;
         previewImagesCommittedIngestId = null;
+        resultImagesByIngest = Object.create(null);
         separateViews = false;
         hybridMismatchSecs = [];
         selectedNode = null;
@@ -2580,6 +2546,46 @@
       var raw = stripEmbeddedAuditReport(($("#codeOut") && $("#codeOut").value) || "");
       if (!raw.trim()) return "";
 
+      if (!forExport && previewImages.length) {
+        var pathToDataUrl = {};
+        /** 확장자만 다른 경우(CSS .jpg · 실제 export .png 등) 미리보기 매칭 */
+        var stemToDataUrl = {};
+        previewImages.forEach(function (item) {
+          if (!item || !item.name) return;
+          var du = item.dataUrl;
+          var key = String(item.name).replace(/^\.\//, "");
+          pathToDataUrl[key] = du;
+          pathToDataUrl[key.toLowerCase()] = du;
+          var stem = key.replace(/\.(png|jpe?g|svg)$/i, "");
+          if (stem && stem !== key) {
+            stemToDataUrl[stem] = du;
+            stemToDataUrl[stem.toLowerCase()] = du;
+          }
+        });
+        var imgRe =
+          /\b((?:\.\/)?assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(_mo)?\.(?:png|jpg|jpeg|svg))\b/gi;
+        function normApPath(p) {
+          return String(p || "").replace(/^\.\//, "");
+        }
+        function replacePath(m) {
+          var norm = normApPath(m);
+          var data = pathToDataUrl[norm] || pathToDataUrl[norm.toLowerCase()];
+          if (data) return data;
+          if (/_mo\.(png|jpg|jpeg|svg)$/i.test(norm)) {
+            var pcPath = norm.replace(/_mo\.(png|jpg|jpeg|svg)$/i, ".$1");
+            data = pathToDataUrl[pcPath] || pathToDataUrl[pcPath.toLowerCase()];
+            if (data) return data;
+            var stemPc = pcPath.replace(/\.(png|jpe?g|svg)$/i, "");
+            data = stemToDataUrl[stemPc] || stemToDataUrl[stemPc.toLowerCase()];
+            if (data) return data;
+          }
+          var stem = norm.replace(/\.(png|jpe?g|svg)$/i, "");
+          data = stemToDataUrl[stem] || stemToDataUrl[stem.toLowerCase()];
+          return data || m;
+        }
+        raw = raw.replace(imgRe, replacePath);
+      }
+
       // <style> 앞부분(<!--CMS-->, Swiper <link> 등)은 제거 후 style 뒤에 붙이면 순서가 뒤바뀌므로 유지
       var styleIdx = raw.indexOf("<style>");
       var prefixBeforeStyle = styleIdx > 0 ? raw.substring(0, styleIdx).trim() : "";
@@ -2592,26 +2598,6 @@
       if (!forExport && previewStripMoMq && typeof lastMoBreakpoint === "number" && lastMoBreakpoint > 0) {
         style = suppressHybridMoMediaAtBreakpoint(style, lastMoBreakpoint);
         body = suppressHybridMoMediaAtBreakpoint(body, lastMoBreakpoint);
-      }
-
-      if (!forExport && previewImages.length) {
-        var pathToDataUrl = {};
-        previewImages.forEach(function (item) {
-          pathToDataUrl[item.name] = item.dataUrl;
-          if (item.name && item.name.toLowerCase) pathToDataUrl[item.name.toLowerCase()] = item.dataUrl;
-        });
-        var imgRe = /\b(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(_mo)?\.(?:png|jpg|jpeg|svg))\b/gi;
-        function replacePath(m) {
-          var data = pathToDataUrl[m] || pathToDataUrl[m.toLowerCase()];
-          if (data) return data;
-          if (/_mo\.(png|jpg|jpeg|svg)$/i.test(m)) {
-            var pcPath = m.replace(/_mo\.(png|jpg|jpeg|svg)$/i, ".$1");
-            return pathToDataUrl[pcPath] || pathToDataUrl[pcPath.toLowerCase()] || m;
-          }
-          return m;
-        }
-        body = body.replace(imgRe, replacePath);
-        style = style.replace(imgRe, replacePath);
       }
 
       var baseStyle = "<style>body{margin:0;min-height:100vh;background:#f5f5f5;}</style>";
@@ -3046,10 +3032,8 @@
     function setAiButtonsBusy(busy) {
       var a = $("#btnAiAudit");
       var b = $("#btnApplyAltProposals");
-      var c = $("#btnAiPreviewCheck");
       if (a) a.disabled = !!busy;
       if (b) b.disabled = !!busy;
-      if (c) c.disabled = !!busy;
     }
 
     /** 분석 리포트 score를 0~10 눈금으로 맞춤(모델이 70 등으로 줄 때 대비). 반영 가산은 이 값 기준. */
@@ -3181,11 +3165,6 @@
         rep.innerHTML = "";
         rep.classList.remove("is-visible");
         rep.classList.remove("ap-apply-mode");
-      }
-      var prevRep = $("#aiPreviewCheckReport");
-      if (prevRep) {
-        prevRep.innerHTML = "";
-        prevRep.classList.remove("is-visible");
       }
       setAiStatus("");
     }
@@ -3399,7 +3378,11 @@
 
     /** 미리보기·ZIP과 동일 규칙으로 assets 경로 → dataUrl (파일명 단독 매칭용 인덱스 포함, 동명이 파일 충돌 시 무시) */
     function buildPathToDataUrlMapFromPreview(previewList) {
-      var pathToDataUrl = { __apBasename: Object.create(null) };
+      var pathToDataUrl = {
+        __apBasename: Object.create(null),
+        __apStem: Object.create(null),
+        __apBasenameStem: Object.create(null)
+      };
       (previewList || []).forEach(function (item) {
         if (!item) return;
         var n = item.name != null ? String(item.name) : "";
@@ -3407,12 +3390,21 @@
         if (!n || !du) return;
         pathToDataUrl[n] = du;
         pathToDataUrl[n.toLowerCase()] = du;
+        var norm = n.replace(/\\/g, "/");
+        var stemFull = norm.replace(/\.(png|jpe?g|svg)$/i, "").toLowerCase();
+        var prevStem = pathToDataUrl.__apStem[stemFull];
+        if (prevStem && prevStem !== du) pathToDataUrl.__apStem[stemFull] = "__MULTI__";
+        else if (!prevStem) pathToDataUrl.__apStem[stemFull] = du;
         var base = n.split(/[/\\]/).pop();
         if (!base) return;
         var pcBn = toPcAssetPath(base).toLowerCase();
         var prev = pathToDataUrl.__apBasename[pcBn];
         if (prev && prev !== du) pathToDataUrl.__apBasename[pcBn] = "__MULTI__";
         else if (!prev) pathToDataUrl.__apBasename[pcBn] = du;
+        var stemBn = pcBn.replace(/\.(png|jpe?g|svg)$/i, "").toLowerCase();
+        var prevBs = pathToDataUrl.__apBasenameStem[stemBn];
+        if (prevBs && prevBs !== du) pathToDataUrl.__apBasenameStem[stemBn] = "__MULTI__";
+        else if (!prevBs) pathToDataUrl.__apBasenameStem[stemBn] = du;
       });
       return pathToDataUrl;
     }
@@ -3443,14 +3435,26 @@
       var rel = extractAssetPathFromImgSrc(src);
       if (rel) {
         var pcPath = toPcAssetPath(rel);
-        return pathToDataUrl[pcPath] || pathToDataUrl[pcPath.toLowerCase()] || "";
+        var hit = pathToDataUrl[pcPath] || pathToDataUrl[pcPath.toLowerCase()];
+        if (hit) return hit;
+        var stemR = pcPath.replace(/\\/g, "/").replace(/\.(png|jpe?g|svg)$/i, "").toLowerCase();
+        var sm = pathToDataUrl.__apStem;
+        if (sm) {
+          hit = sm[stemR];
+          if (hit && hit !== "__MULTI__") return hit;
+        }
+        return "";
       }
       var fm = String(src || "").match(/([^/?#]+\.(?:png|jpg|jpeg|svg))(?:\?|#|$)/i);
       if (!fm) return "";
       var pcBn = toPcAssetPath(fm[1]).toLowerCase();
       var bnMap = pathToDataUrl.__apBasename;
-      if (!bnMap) return "";
-      var du = bnMap[pcBn];
+      var du = bnMap ? bnMap[pcBn] : "";
+      if (du && du !== "__MULTI__") return du;
+      var stemBn = pcBn.replace(/\.(png|jpe?g|svg)$/i, "").toLowerCase();
+      var bsm = pathToDataUrl.__apBasenameStem;
+      if (!bsm) return "";
+      du = bsm[stemBn];
       if (!du || du === "__MULTI__") return "";
       return du;
     }
@@ -4601,189 +4605,6 @@
       el.classList.toggle("ap-apply-mode", !!(obj && obj._apApplyMode));
     }
 
-    /**
-     * PC 레이어 dataTree → AI용 텍스트 요약(깊이·길이 제한으로 토큰 절감).
-     * @param {object|null} dt
-     * @param {number} [maxLen]
-     */
-    function serializeDataTreeForPreviewCheck(dt, maxLen) {
-      maxLen = maxLen || 10000;
-      var lines = [];
-      var used = 0;
-      function push(s) {
-        var t = String(s) + "\n";
-        if (used + t.length > maxLen) {
-          if (used < maxLen) {
-            lines.push("(…이하 트리 요약 생략 — 토큰 상한)");
-            used = maxLen;
-          }
-          return false;
-        }
-        lines.push(String(s));
-        used += t.length;
-        return true;
-      }
-      if (!dt || !dt.sections || !dt.sections.length) {
-        return "(레이어 트리 없음: Figma에서 분석 실행 후 레이어 탭에 트리가 있으면 더 정확합니다. 지금은 HTML/CSS만으로 점검합니다.)";
-      }
-      push("sections=" + dt.sections.length);
-      dt.sections.forEach(function (sec) {
-        if (!push("## " + String(sec.title || "Section"))) return;
-        function walk(node, depth) {
-          if (depth > 6 || used >= maxLen) return;
-          var meta = parseMetaFromLabel(node.label || "");
-          var ind = new Array(Math.min(depth, 6) + 1).join("  ");
-          var line =
-            ind +
-            "- " +
-            meta.type +
-            ' "' +
-            String(meta.name || "").slice(0, 96) +
-            '"' +
-            (meta.flags && meta.flags.length ? " [" + meta.flags.join(",") + "]" : "");
-          if (!push(line)) return;
-          var props = node.props || [];
-          for (var pi = 0; pi < props.length && pi < 8; pi++) {
-            var p = String(props[pi]);
-            if (p.length > 140) p = p.slice(0, 137) + "…";
-            if (!push(ind + "    · " + p)) return;
-          }
-          if (node.textMeta) {
-            var tm = node.textMeta;
-            var bits = [];
-            if (tm.fs !== undefined && tm.fs !== "") bits.push("fs:" + tm.fs);
-            if (tm.ta !== undefined && tm.ta !== "") bits.push("ta:" + tm.ta);
-            if (tm.fw !== undefined && tm.fw !== "") bits.push("fw:" + tm.fw);
-            if (bits.length) push(ind + "    · textMeta " + bits.join(" "));
-          }
-          var kids = node.children || [];
-          var cap = depth >= 4 ? 12 : 28;
-          for (var i = 0; i < kids.length && i < cap; i++) walk(kids[i], depth + 1);
-          if (kids.length > cap) push(ind + "  … 자식 " + (kids.length - cap) + "개 생략");
-        }
-        walk(sec.node, 0);
-      });
-      return lines.join("\n");
-    }
-
-    function buildPreviewCheckReportHtml(obj) {
-      obj = obj || {};
-      function esc(s) {
-        return String(s == null ? "" : s)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;");
-      }
-      function sevBadge(sev) {
-        var cls = "background:#20252f;color:#adb5bd;border:1px solid #343a48;";
-        if (sev === "high") cls = "background:rgba(245,101,101,0.15);color:#fca5a5;border:1px solid rgba(245,101,101,0.4);";
-        else if (sev === "medium") cls = "background:rgba(251,191,36,0.12);color:#fcd34d;border:1px solid rgba(251,191,36,0.35);";
-        else if (sev === "low") cls = "background:rgba(52,211,153,0.12);color:#6ee7b7;border:1px solid rgba(52,211,153,0.35);";
-        return '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;' + cls + '">' + esc(sev || "info") + "</span>";
-      }
-      var summary = obj.summary || {};
-      var overall = String(summary.overall || "warn");
-      var badgeStyle = "background:rgba(251,191,36,0.12);color:#fcd34d;border:1px solid rgba(251,191,36,0.35);";
-      if (overall === "pass") badgeStyle = "background:rgba(52,211,153,0.12);color:#6ee7b7;border:1px solid rgba(52,211,153,0.35);";
-      else if (overall === "fail") badgeStyle = "background:rgba(245,101,101,0.15);color:#fca5a5;border:1px solid rgba(245,101,101,0.4);";
-      var issues = Array.isArray(obj.issues) ? obj.issues : [];
-      var suggestions = Array.isArray(obj.suggestions) ? obj.suggestions : [];
-      var html = "";
-      html += '<div class="ap-diff-block" style="margin-bottom:10px;">';
-      html += "<strong>미리보기 점검(코드·레이어)</strong>";
-      html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0;">';
-      html += '<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;' + badgeStyle + '">' + esc(overall) + "</span>";
-      if (summary.score != null) {
-        html += '<span style="font-size:11px;color:#9aa3b5;">score: <b style="color:#f0f2f6;">' + esc(String(summary.score)) + "</b></span>";
-      }
-      html += "</div>";
-      if (summary.oneLine) {
-        html += '<div style="font-size:11px;line-height:1.5;color:#e2e8f0;">' + esc(summary.oneLine) + "</div>";
-      }
-      html += "</div>";
-      if (issues.length) {
-        html += '<strong style="display:block;margin-bottom:8px;color:#c4b5fd;">이슈</strong>';
-        issues.forEach(function (it) {
-          html +=
-            '<div style="padding:10px;border:1px solid rgba(255,255,255,0.11);border-radius:8px;background:#171a22;margin-bottom:8px;">' +
-            '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">' +
-            sevBadge(it.severity) +
-            '<code style="font-size:10px;background:#12141a;padding:1px 6px;border-radius:4px;border:1px solid #2c3140;color:#e2e8f0;">' +
-            esc(it.type || "") +
-            "</code>" +
-            '<span style="font-size:10px;color:#9aa3b5;">' +
-            esc(it.target || "") +
-            "</span></div>";
-          if (it.selectorHint) {
-            html += '<div style="font-size:10px;color:#9aa3b5;margin-bottom:6px;">selector: <code>' + esc(it.selectorHint) + "</code></div>";
-          }
-          if (it.problem) html += '<div style="margin-bottom:4px;"><b>문제</b> · ' + esc(it.problem) + "</div>";
-          if (it.why) html += '<div style="margin-bottom:4px;"><b>이유</b> · ' + esc(it.why) + "</div>";
-          if (it.fix) html += '<div><b>수정 힌트</b> · ' + esc(it.fix) + "</div>";
-          html += "</div>";
-        });
-      }
-      if (suggestions.length) {
-        html += '<strong style="display:block;margin:12px 0 6px;color:#c4b5fd;">추가 제안</strong><ul style="margin:0;padding-left:18px;">';
-        suggestions.forEach(function (x) {
-          html += "<li>" + esc(x) + "</li>";
-        });
-        html += "</ul>";
-      }
-      html += '<p style="margin:10px 0 0;font-size:9px;color:#9aa3b3;opacity:0.9;">비전·캡처 없음 · 텍스트 추론만. 실제 픽셀은 미리보기에서 직접 확인하세요.</p>';
-      return html;
-    }
-
-    function renderPreviewCheckReport(obj) {
-      var el = $("#aiPreviewCheckReport");
-      if (!el) return;
-      var inner = buildPreviewCheckReportHtml(obj);
-      el.innerHTML = inner;
-      el.classList.toggle("is-visible", !!String(inner || "").trim());
-    }
-
-    function runAiPreviewCheck() {
-      if (!ensureApiKeyExists()) return;
-      if (!ensureCodeExists()) return;
-      var code = stripEmbeddedAuditReport(getCodeValue());
-      var cms = extractCmsPartForAudit(code);
-      if (!String(cms || "").trim()) cms = code;
-      var layerSummary = serializeDataTreeForPreviewCheck(dataTree, 10000);
-      var userPrefix =
-        "아래 블록은 Figma PC 레이어 트리 텍스트 요약이다(이름·타입·일부 속성만, 이미지 픽셀 없음).\n\n<<<LAYER_SUMMARY>>>\n" +
-        layerSummary +
-        "\n<<<END_LAYER_SUMMARY>>>\n\n이어지는 본문은 플러그인이 생성한 HTML/CSS다. 미리보기 iframe은 이 코드를 그대로 렌더한다.\n\n";
-      var userSuffix =
-        "\n\n위 레이어 요약과 HTML/CSS를 비교해, 미리보기에서 깨지거나 디자인 의도와 어긋날 수 있는 점만 JSON 스키마에 맞게 답하라. 픽셀 일치는 주장하지 말 것.";
-
-      setAiButtonsBusy(true);
-      setAiStatus("미리보기 점검(코드·레이어) 실행 중…");
-
-      runAiJsonApi(
-        cms,
-        AP_AI_PREVIEW_CHECK_SYSTEM,
-        userPrefix,
-        userSuffix,
-        null,
-        { responseJsonSchema: AP_GEMINI_PREVIEW_CHECK_JSON_SCHEMA, maxOutputTokens: 8192 }
-      )
-        .then(function (obj) {
-          if (obj && obj.summary && obj.summary.score != null) {
-            var ten = scoreToTenScale(obj.summary.score);
-            if (ten != null) obj.summary.score = roundScoreTen(ten);
-          }
-          renderPreviewCheckReport(obj);
-          setAiStatus("미리보기 점검 완료");
-        })
-        .catch(function (e) {
-          setAiStatus("미리보기 점검 실패: " + friendlyAiApiErrorMessage(e));
-        })
-        .then(function () {
-          setAiButtonsBusy(false);
-        });
-    }
-
     function runAiAudit() {
       if (!ensureApiKeyExists()) return;
       if (!ensureCodeExists()) return;
@@ -4864,9 +4685,6 @@
 
     var btnAiAudit = $("#btnAiAudit");
     if (btnAiAudit) btnAiAudit.onclick = runAiAudit;
-
-    var btnAiPreviewCheck = $("#btnAiPreviewCheck");
-    if (btnAiPreviewCheck) btnAiPreviewCheck.onclick = runAiPreviewCheck;
 
     var btnApplyAlt = $("#btnApplyAltProposals");
     if (btnApplyAlt) {

@@ -3805,6 +3805,23 @@ function ensureImageInListOnce(cache, name, dataUrl) {
     cache.imageList.push({name: name, dataUrl: dataUrl})
 }
 
+/** data: URL MIME → 에셋 확장자 (path 캐시 재사용 시 실제 export와 불일치 방지) */
+function getDataUrlExt(dataUrl) {
+    if (!dataUrl) return ".jpg"
+    if (dataUrl.indexOf("image/svg+xml") >= 0) return ".svg"
+    if (dataUrl.indexOf("image/png") >= 0) return ".png"
+    if (dataUrl.indexOf("image/jpeg") >= 0) return ".jpg"
+    return ".jpg"
+}
+
+/** assets 경로 문자열에서 래스터/SVG 확장자만 추출 (.jpeg → .jpg) */
+function pathExtFromAssetPath(path) {
+    var m = String(path || "").match(/\.(png|jpe?g|svg)$/i)
+    if (!m) return ""
+    var ext = m[0].toLowerCase()
+    return ext === ".jpeg" ? ".jpg" : ext
+}
+
 /** 문자열 해시 (동일 SVG 내용 → 동일 파일 재사용용) */
 function simpleHash(str) {
     if (str == null || str.length === 0) return "0"
@@ -3837,11 +3854,16 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
         cache.imageName[key] = cache.svgByHash[svgHash].name
     }
 
-    /** 동일 피그마 IMAGE 소스(imageHash) — PC/MO export 픽셀이 달라도 같은 imgNN·파일 하나 */
+    /** 동일 피그마 IMAGE 소스(imageHash) — PC/MO export 픽셀이 달라도 같은 imgNN·파일 하나 (확장자는 현재 dataUrl과 일치할 때만 재사용) */
     if (!cache.imageName[key] && phKey) {
         if (!cache.pathByImageHash) cache.pathByImageHash = {}
-        if (cache.pathByImageHash[phKey]) {
-            cache.imageName[key] = cache.pathByImageHash[phKey]
+        var reusedPh = cache.pathByImageHash[phKey] || ""
+        if (reusedPh) {
+            var curExt = getDataUrlExt(dataUrl)
+            var reusedExt = pathExtFromAssetPath(reusedPh)
+            if (reusedExt && reusedExt === curExt) {
+                cache.imageName[key] = reusedPh
+            }
         }
     }
 
@@ -3849,16 +3871,17 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
     var rasterHash = !isSvg && dataUrl ? simpleHash(dataUrl) : null
     if (rasterHash && !cache.rasterByHash) cache.rasterByHash = {}
     if (!cache.imageName[key] && rasterHash && cache.rasterByHash[rasterHash]) {
-        cache.imageName[key] = cache.rasterByHash[rasterHash].name
+        var reusedRaster = cache.rasterByHash[rasterHash].name || ""
+        var curExtR = getDataUrlExt(dataUrl)
+        var reusedExtR = pathExtFromAssetPath(reusedRaster)
+        if (reusedExtR && reusedExtR === curExtR) {
+            cache.imageName[key] = reusedRaster
+        }
     }
 
     if (!cache.imageName[key]) {
         if (!dataUrl || !String(dataUrl).trim()) return ""
-        var ext = ".jpg"
-        if (dataUrl) {
-            if (dataUrl.indexOf("image/png") >= 0) ext = ".png"
-            else if (dataUrl.indexOf("image/svg+xml") >= 0) ext = ".svg"
-        }
+        var ext = getDataUrlExt(dataUrl)
 
         var n = (cache.imgCountBySec[secEarly] || 0) + 1
         cache.imgCountBySec[secEarly] = n
