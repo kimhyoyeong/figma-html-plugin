@@ -97,13 +97,16 @@ figma.ui.onmessage = function (msg) {
         })
             .then(function (payload) {
                 return loadFontsForMobileTreeAsync(rootMobile).then(function () {
+                    var pcRasterExtByStem = buildPcRasterExtByStemFromImageList(payload.images || [])
                     return dumpTreeAsync(rootMobile, projectNameMo, allowedFontsMo, {
                         phase: "mobile",
                         imageSuffix: "_mo",
                         fontHtmlFilterActive: fontHtmlFilterActiveMo,
+                        pcRasterExtByStem: pcRasterExtByStem,
                     }).then(function (moPayload) {
                         var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
-                        // 구조 불일치여도 PC 기준 단일 뷰 + @media MO 오버라이드만 사용 (텍스트/이미지는 1:1 매칭 가능, frame 구조는 PC 기준·MO는 사람이 수정)
+                        var separateViews = !!(secMatch && secMatch.mismatchSecs && secMatch.mismatchSecs.length)
+                        // 구조 불일치 섹션: HTML은 div.pc-only / div.mo-only 로 section 이중 본문, CSS는 `.pc-only .ap-section--NN` 등. @media MO walk는 해당 섹션 스킵(skipStructureMismatchSecs).
                         var code = combinePcMoAsBreakpoint(payload.code || "", rootDesktop, rootMobile, breakpoint, {
                             exportedNodeIds: payload.exportedNodeIds,
                             ownImageNodeIds: payload.ownImageNodeIds,
@@ -112,19 +115,30 @@ figma.ui.onmessage = function (msg) {
                             fontHtmlFilterActive: fontHtmlFilterActiveMo,
                             pcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds,
                             moSectionImageRenderOrderIds: moPayload.sectionImageRenderOrderIds,
+                            moImages: moPayload.images || [],
                         })
-                        var separateViews = false
                         var images = (payload.images || []).concat(moPayload.images || [])
                         // MO 미리보기: 섹션 배경 --bg-img의 _mo 경로가 MO에서 export 안 됐을 수 있음 → PC 이미지로 채움
                         var pcParts = parseCodeIntoParts(payload.code || "")
                         var sectionStyles = pcParts.sectionStyles || ""
                         var moNames = {}
                         ;(moPayload.images || []).forEach(function (img) { moNames[img.name] = true })
+                        var moPathByPcStemPrev = buildMoRasterPathByPcStemFromMoImageList(moPayload.images || [])
                         var pcByName = {}
                         ;(payload.images || []).forEach(function (img) { pcByName[img.name] = img.dataUrl })
-                        sectionStyles.replace(/--bg-img\s*:\s*url\s*\(\s*(assets\/images\/[^)]+\.(png|jpg|jpeg))\s*\)/gi, function (_, path, ext) {
-                            var p = path.trim()
-                            var pathMo = p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext)
+                        sectionStyles.replace(/--bg-img\s*:\s*url\s*\(\s*["']?([^"'()]+\.(?:png|jpg|jpeg))["']?\s*\)/gi, function (_, path) {
+                            var p = String(path || "").trim()
+                            var extMatch = /\.(png|jpe?g)$/i.exec(p)
+                            var ext = extMatch ? extMatch[1].toLowerCase() : "jpg"
+                            if (ext === "jpeg") ext = "jpg"
+                            var stem = p.replace(/\.(png|jpe?g)$/i, "")
+                            var stemBase = stem.replace(/_mo$/i, "")
+                            var pathMo =
+                                moPathByPcStemPrev[stemBase] ||
+                                moPathByPcStemPrev[stem] ||
+                                (/_mo\.(png|jpe?g)$/i.test(p)
+                                    ? p
+                                    : p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext))
                             if (!moNames[pathMo] && pcByName[p]) {
                                 images.push({ name: pathMo, dataUrl: pcByName[p] })
                             }
@@ -203,7 +217,10 @@ figma.ui.onmessage = function (msg) {
 
         // 1) PC dump (MO 루트 있으면 PC 코드 생성 시점에 MO characters와 줄바꿈 비교)
         var zipDeskOpts = {phase: "desktop", fontHtmlFilterActive: fontHtmlFilterActiveZip}
-        if (hasMobile && rootMobile) zipDeskOpts.mobileRoot = rootMobile
+        if (hasMobile && rootMobile) {
+            zipDeskOpts.mobileRoot = rootMobile
+            zipDeskOpts.moBreakpoint = breakpoint
+        }
         dumpTreeAsync(rootDesktop, projectName2, allowedFonts2, zipDeskOpts)
             .then(function (payload) {
                 var code = payload.code || ""
@@ -212,14 +229,16 @@ figma.ui.onmessage = function (msg) {
                 // 2) MO 있으면 MO dump + 합치기
                 if (hasMobile && rootMobile) {
                     return loadFontsForMobileTreeAsync(rootMobile).then(function () {
+                        var pcRasterExtByStemZip = buildPcRasterExtByStemFromImageList(payload.images || [])
                         return dumpTreeAsync(rootMobile, projectName2, allowedFonts2, {
                             phase: "mobile",
                             imageSuffix: "_mo",
                             exportWidth: Math.min(2400, Math.round(2 * breakpoint)),
                             fontHtmlFilterActive: fontHtmlFilterActiveZip,
+                            pcRasterExtByStem: pcRasterExtByStemZip,
                         }).then(function (moPayload) {
                             var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
-                            // 구조 불일치여도 PC 기준 단일 뷰 + @media MO 오버라이드만 사용
+                            // 구조 불일치 섹션: HTML·CSS는 096 래퍼+`.pc-only .ap-section--NN` — ZIP 경로도 동일 파이프라인
                             code = combinePcMoAsBreakpoint(code, rootDesktop, rootMobile, breakpoint, {
                                 exportedNodeIds: payload.exportedNodeIds,
                                 ownImageNodeIds: payload.ownImageNodeIds,
@@ -227,6 +246,7 @@ figma.ui.onmessage = function (msg) {
                                 fontHtmlFilterActive: fontHtmlFilterActiveZip,
                                 pcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds,
                                 moSectionImageRenderOrderIds: moPayload.sectionImageRenderOrderIds,
+                                moImages: moPayload.images || [],
                             })
 
                             images = (images || []).concat(moPayload.images || [])
@@ -239,7 +259,12 @@ figma.ui.onmessage = function (msg) {
                 return {code: code, images: images}
             })
             .then(function (out) {
-                var zipHtml = stripApAiAuditBlock(codeFromTab || out.code || "")
+                var zipHtml
+                if (hasMobile && rootMobile) {
+                    zipHtml = stripApAiAuditBlock((out && out.code) || codeFromTab || "")
+                } else {
+                    zipHtml = stripApAiAuditBlock(codeFromTab || (out && out.code) || "")
+                }
                 finishExport(zipHtml, out.images || [])
             })
             .catch(function (e) {

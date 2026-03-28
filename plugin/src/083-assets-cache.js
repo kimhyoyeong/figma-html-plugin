@@ -72,6 +72,7 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
     }
 
     if (!cache.imageName[key]) {
+        if (!dataUrl || !String(dataUrl).trim()) return ""
         var ext = ".jpg"
         if (dataUrl) {
             if (dataUrl.indexOf("image/png") >= 0) ext = ".png"
@@ -104,5 +105,41 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
         ensureImageInListOnce(cache, pathOut, dataUrl)
     }
     return pathOut
+}
+
+/**
+ * PC imageList 항목의 경로 → 확장자 맵 (확장자 제외 stem → .jpg | .png).
+ * MO(_mo) export 시 같은 sec/img 순서면 PC와 동일 확장자로 래스터를 맞춤.
+ */
+function buildPcRasterExtByStemFromImageList(images) {
+    var map = Object.create(null)
+    if (!images || !images.length) return map
+    for (var i = 0; i < images.length; i++) {
+        var name = String((images[i] && images[i].name) || "").replace(/\\/g, "/")
+        if (!name || /_mo\.(png|jpe?g)$/i.test(name)) continue
+        var m = /^(.*)\.(png|jpe?g)$/i.exec(name)
+        if (!m) continue
+        var ext = "." + m[2].toLowerCase()
+        if (ext === ".jpeg") ext = ".jpg"
+        map[m[1]] = ext
+    }
+    return map
+}
+
+/**
+ * MO(_mo) imageList → PC 래스터 stem(확장자 제외 전체 경로) → 실제 MO 에셋 경로.
+ */
+function buildMoRasterPathByPcStemFromMoImageList(moImages) {
+    var map = Object.create(null)
+    if (!moImages || !moImages.length) return map
+    for (var i = 0; i < moImages.length; i++) {
+        var name = String((moImages[i] && moImages[i].name) || "").replace(/\\/g, "/")
+        var m = /^(.*)_mo\.(png|jpe?g)$/i.exec(name)
+        if (!m) continue
+        var suf = m[2].toLowerCase()
+        if (suf === "jpeg") suf = "jpg"
+        map[m[1]] = m[1] + "_mo." + suf
+    }
+    return map
 }
 

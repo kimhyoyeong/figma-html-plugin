@@ -1829,12 +1829,12 @@ function exportImageFillOnlyAsync(node) {
 }
 
 /** 자식 제거한 복제본을 export → fill만 있는 이미지 (imageHash 실패 시 대안) */
-function exportNodeImageFillOnlyAsync(node) {
+function exportNodeImageFillOnlyAsync(node, moAlignCtx) {
     if (!node || !isContainer(node)) return Promise.resolve(null)
     try {
         var clone = node.clone()
         while (clone.children && clone.children.length > 0) clone.removeChild(clone.children[0])
-        return exportNodeImageAsync(clone)
+        return exportNodeImageAsync(clone, moAlignCtx)
             .then(function (dataUrl) {
                 clone.remove()
                 return dataUrl
@@ -1851,11 +1851,19 @@ function exportNodeImageFillOnlyAsync(node) {
 }
 
 /** imageHash → (필요 시) 자식 제거 클론 래스터 → 전체 노드 export */
-function exportImageFillThenCloneFallbackAsync(node) {
+function exportImageFillThenCloneFallbackAsync(node, moAlignCtx) {
+    moAlignCtx = moAlignCtx || {}
+    var forced = getForceRasterFormatForMoExport(moAlignCtx.cache, moAlignCtx.secNo)
+    if (forced === "JPG" || forced === "PNG") {
+        if (hasImageFill(node) && isContainer(node) && hasVisibleChildren(node)) {
+            return exportNodeImageFillOnlyAsync(node, moAlignCtx)
+        }
+        return exportNodeImageAsync(node, moAlignCtx)
+    }
     return exportImageFillOnlyAsync(node).then(function (fromHash) {
         if (fromHash) return fromHash
-        if (hasImageFill(node) && isContainer(node) && hasVisibleChildren(node)) return exportNodeImageFillOnlyAsync(node)
-        return exportNodeImageAsync(node)
+        if (hasImageFill(node) && isContainer(node) && hasVisibleChildren(node)) return exportNodeImageFillOnlyAsync(node, moAlignCtx)
+        return exportNodeImageAsync(node, moAlignCtx)
     })
 }
 
@@ -1863,12 +1871,13 @@ function exportImageFillThenCloneFallbackAsync(node) {
  * 배경/ap-image 공통. exportNodeImageAsync 는 자식 TEXT 까지 합쳐 래스터 → fill+TEXT 프레임은
  * mustStrip 경로에서 fill/클론만 사용.
  */
-function exportImagePreferSourceBytesAsync(node) {
+function exportImagePreferSourceBytesAsync(node, moAlignCtx) {
+    moAlignCtx = moAlignCtx || {}
     var mustStripChildrenForRaster = hasImageFill(node) && isContainer(node) && hasTextInSubtree(node)
-    if (mustStripChildrenForRaster) return exportImageFillThenCloneFallbackAsync(node)
-    return exportNodeImageAsync(node).then(function (dataUrl) {
+    if (mustStripChildrenForRaster) return exportImageFillThenCloneFallbackAsync(node, moAlignCtx)
+    return exportNodeImageAsync(node, moAlignCtx).then(function (dataUrl) {
         if (dataUrl) return dataUrl
-        return exportImageFillThenCloneFallbackAsync(node)
+        return exportImageFillThenCloneFallbackAsync(node, moAlignCtx)
     })
 }
 
@@ -2004,11 +2013,27 @@ var IMAGE_EXPORT_MAX_WIDTH = 200   // 미리보기
 var IMAGE_EXPORT_ZIP_WIDTH = 1200  // ZIP 내보내기
 var _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
 
+/** MO(_mo): 다음 imgNN stem 이 PC imageList 와 같을 때 PC 확장자로 래스터 export 우선 */
+function getForceRasterFormatForMoExport(cache, secNo) {
+    if (!cache || cache.imageSuffix !== "_mo" || !cache.pcRasterExtByStem) return null
+    var secEarly = Number(secNo) || 1
+    if (!cache.imgCountBySec) return null
+    var n = (cache.imgCountBySec[secEarly] || 0) + 1
+    var project = normalizeProjectName(cache.projectName)
+    var stemPrefix = typeof ASSETS_IMAGES_PREFIX !== "undefined" ? ASSETS_IMAGES_PREFIX : "assets/images/"
+    var stem = stemPrefix + "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n)
+    var ext = cache.pcRasterExtByStem[stem]
+    if (ext === ".jpg" || ext === ".jpeg") return "JPG"
+    if (ext === ".png") return "PNG"
+    return null
+}
+
 /** 노드 PNG/JPG export — imageExportNeedsPngAsync(투명 강제 + 점수제) 후 JPG 우선·실패 시 PNG */
-function exportNodeImageAsync(node) {
+/** @param {{ cache?: object, secNo?: number }|null} moAlignCtx */
+function exportNodeImageAsync(node, moAlignCtx) {
+    moAlignCtx = moAlignCtx || {}
     if (!node) return Promise.resolve(null)
     try {
-        var isText = node.type === "TEXT"
         var w = _currentExportWidth
         /** @param {"PNG"|"JPG"} format */
         function doExport(format, widthOrNull, extraOpts) {
@@ -2050,6 +2075,19 @@ function exportNodeImageAsync(node) {
             return tryFormatSequence("JPG").then(function (result) {
                 if (result) return result
                 return tryFormatSequence("PNG")
+            })
+        }
+        var forced = getForceRasterFormatForMoExport(moAlignCtx.cache, moAlignCtx.secNo)
+        if (forced === "JPG") {
+            return tryFormatSequence("JPG").then(function (result) {
+                if (result) return result
+                return tryFormatSequence("PNG")
+            })
+        }
+        if (forced === "PNG") {
+            return tryFormatSequence("PNG").then(function (result) {
+                if (result) return result
+                return tryFormatSequence("JPG")
             })
         }
         return imageExportNeedsPngAsync(node).then(function (usePng) {
@@ -3276,6 +3314,7 @@ function promoteRasterTextNodesToImageSemantics(sectionNode, map, allowedHtml, u
 
 /**
  * 082-deferred-css — 지연 CSS 누적·병합·BEM 정리·MO 셀렉터 필터·이미지 크기 var
+ *   구조 불일치(PC+MO) 시 096에서 `.pc-only .ap-section--NN …` / `.mo-only .ap-section--NN …` 형태로 누적
  *
  * 의존: 010 pad2, 070 getImageSizeDecl/cssInnerSel은 081·070 — pushDeferredImageImgSizeVars는 081 cssInner 이후
  */
@@ -3333,9 +3372,9 @@ function normalizeDeclForMergeKey(decl) {
     return pairs.map(function (x) { return x.k + ":" + x.v }).join(";")
 }
 
-/** deferred 규칙 선택자 선두의 `ap-section--` 번호 (없으면 빈 문자열) */
+/** deferred 규칙에 포함된 첫 `ap-section--NN` 번호 (`.pc-only .ap-section--02 …` 등 대응) */
 function leadingApSectionIdFromSelector(sel) {
-    var m = /^\.ap-section--(\d+)/.exec(String(sel || "").trim())
+    var m = /\.ap-section--(\d+)/.exec(String(sel || "").trim())
     return m ? m[1] : ""
 }
 
@@ -3729,12 +3768,14 @@ function moOverrideSelectorIsLive(sel, usedBySection) {
 }
 
 /** 래퍼(.ap-image .ap-section__image--XX)에 --ap-w/--ap-h만 넣음. 기존 .ap-image img 규칙이 var()로 활용 (ap-abs 래퍼는 생략) */
-function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapperIsApAbs) {
+function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapperIsApAbs, visibilityWrapper) {
     if (!nodeId || wrapperIsApAbs) return
     var decl = getImageSizeDecl(node)
     if (!decl) return
     var innerSel = cssInnerSelForNode(String(nodeId), opts, false)
-    var sel = ".ap-section--" + secClass + " " + innerSel.replace(/,/g, ", .ap-section--" + secClass + " ")
+    var vw = visibilityWrapper ? String(visibilityWrapper).replace(/^\./, "") : ""
+    var prefix = vw ? "." + vw + " .ap-section--" + secClass : ".ap-section--" + secClass
+    var sel = prefix + " " + innerSel.replace(/,/g, ", " + prefix + " ")
     pushDeferredStyle(ctx, sel, decl)
 }
 
@@ -3812,6 +3853,7 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
     }
 
     if (!cache.imageName[key]) {
+        if (!dataUrl || !String(dataUrl).trim()) return ""
         var ext = ".jpg"
         if (dataUrl) {
             if (dataUrl.indexOf("image/png") >= 0) ext = ".png"
@@ -3844,6 +3886,42 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
         ensureImageInListOnce(cache, pathOut, dataUrl)
     }
     return pathOut
+}
+
+/**
+ * PC imageList 항목의 경로 → 확장자 맵 (확장자 제외 stem → .jpg | .png).
+ * MO(_mo) export 시 같은 sec/img 순서면 PC와 동일 확장자로 래스터를 맞춤.
+ */
+function buildPcRasterExtByStemFromImageList(images) {
+    var map = Object.create(null)
+    if (!images || !images.length) return map
+    for (var i = 0; i < images.length; i++) {
+        var name = String((images[i] && images[i].name) || "").replace(/\\/g, "/")
+        if (!name || /_mo\.(png|jpe?g)$/i.test(name)) continue
+        var m = /^(.*)\.(png|jpe?g)$/i.exec(name)
+        if (!m) continue
+        var ext = "." + m[2].toLowerCase()
+        if (ext === ".jpeg") ext = ".jpg"
+        map[m[1]] = ext
+    }
+    return map
+}
+
+/**
+ * MO(_mo) imageList → PC 래스터 stem(확장자 제외 전체 경로) → 실제 MO 에셋 경로.
+ */
+function buildMoRasterPathByPcStemFromMoImageList(moImages) {
+    var map = Object.create(null)
+    if (!moImages || !moImages.length) return map
+    for (var i = 0; i < moImages.length; i++) {
+        var name = String((moImages[i] && moImages[i].name) || "").replace(/\\/g, "/")
+        var m = /^(.*)_mo\.(png|jpe?g)$/i.exec(name)
+        if (!m) continue
+        var suf = m[2].toLowerCase()
+        if (suf === "jpeg") suf = "jpg"
+        map[m[1]] = m[1] + "_mo." + suf
+    }
+    return map
 }
 
 
@@ -4095,8 +4173,9 @@ function collectImageFigureNodeIdsForSectionAsync(sectionNode, bg, slideData, ca
 
 function prefetchOneImageNodeAsync(node, cache, secNo) {
     if (!node || node.id == null) return Promise.resolve()
+    var imgCtx = { cache: cache, secNo: secNo }
     if (node.type === "TEXT") {
-        return exportNodeImageAsync(node).then(function (dataUrl) {
+        return exportNodeImageAsync(node, imgCtx).then(function (dataUrl) {
             if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
             if (cache && dataUrl) {
                 getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
@@ -4117,7 +4196,7 @@ function prefetchOneImageNodeAsync(node, cache, secNo) {
             }
         })
     }
-    return exportImagePreferSourceBytesAsync(node).then(function (dataUrl) {
+    return exportImagePreferSourceBytesAsync(node, imgCtx).then(function (dataUrl) {
         if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
         if (cache && dataUrl) {
             getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
@@ -4207,10 +4286,11 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
     // 최상단이 IMAGE면 이미지 1개만 적용
     if (topFill.type === "IMAGE") {
         var dataUrlPromise
+        var moBgCtx = { cache: cache, secNo: secNo }
         if (cache && cache.image && node.id != null && cache.image[node.id]) {
             dataUrlPromise = Promise.resolve(cache.image[node.id])
         } else {
-            dataUrlPromise = exportImagePreferSourceBytesAsync(node)
+            dataUrlPromise = exportImagePreferSourceBytesAsync(node, moBgCtx)
         }
 
         return dataUrlPromise
@@ -4277,10 +4357,11 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
       }
       if (!fullBleedChild) return {decl: decl, bgChildId: null}
 
+      var moBleedCtx = { cache: cache, secNo: secNo }
       var dataUrlPromise =
           cache && cache.image && fullBleedChild.id != null && cache.image[fullBleedChild.id]
               ? Promise.resolve(cache.image[fullBleedChild.id])
-              : exportNodeImageAsync(fullBleedChild)
+              : exportNodeImageAsync(fullBleedChild, moBleedCtx)
 
       return dataUrlPromise
           .then(function (dataUrl) {
@@ -4428,6 +4509,7 @@ function getSectionNodes(root) {
 /**
  * 095-responsive-pcmo — PC HTML + @media로 MO 스타일·배경·picture 병합
  *
+ * 구조 불일치 시 096이 `.pc-only .ap-section--NN` / `.mo-only .ap-section--NN` 지연 규칙 출력 — parseCodeIntoParts·injectBgOverridesForMo 가 래퍼+자손 선택자 인식.
  * buildMobileOverrides — 레이아웃 등은 인덱스 walk; 이미지 크기는 렌더순서(096)·슬롯·sourceNodeId 매칭
  * getSectionStructureMatch — 섹션별 구조 시그니처 일치 여부(하이브리드 경고용)
  * parseCodeIntoParts — 산출 HTML에서 base/section 스타일/article 분리
@@ -4446,6 +4528,9 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         if (Object.keys(exportedSet).length === 0) return true
         return exportedSet[String(id)] === true
     }
+    var skipStructSecs = options && options.skipStructureMismatchSecs ? options.skipStructureMismatchSecs : []
+    var skipStructSet = Object.create(null)
+    for (var si = 0; si < skipStructSecs.length; si++) skipStructSet[String(skipStructSecs[si])] = true
     /** @media 블록 안: 동일 셀렉터 선언을 한 규칙으로 합침 (diff·파일 길이·리뷰용) */
     var moMediaRuleList = []
     function pushMoMoRule(sel, decl) {
@@ -4677,6 +4762,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         var mSec = mSecs[s]
         if (!mSec || dSec.type !== mSec.type) continue
         var secClass = sectionClassPrefix(s + 1)
+        if (skipStructSet[secClass]) continue
         var mSecBox = getAbs(mSec)
         var mediaSecH = getMediaSectionCanvasHeightDecl(dSec, mSec, mSecBox)
         if (mediaSecH) pushMoMoRule(".ap-section--" + secClass, mediaSecH)
@@ -4863,36 +4949,101 @@ function parseCodeIntoParts(code) {
     if (styleStart < 0 || styleEnd < 0 || styleEnd <= styleStart) return {baseStyles: "", sectionStyles: "", articleHtml: "", headPrefix: ""}
     var headPrefix = styleStart > 0 ? code.substring(0, styleStart).trim() : ""
     var fullStyle = code.substring(styleStart + 7, styleEnd).trim()
-    var sectionStart = fullStyle.search(/\n\.ap-section--/)
+    var idxBare = fullStyle.search(/\n\.ap-section--/)
+    var idxWrapped = fullStyle.search(/\n\.(?:pc-only|mo-only)\s+\.ap-section--/)
+    var candidates = []
+    if (idxBare >= 0) candidates.push(idxBare)
+    if (idxWrapped >= 0) candidates.push(idxWrapped)
+    var sectionStart = candidates.length ? Math.min.apply(null, candidates) : -1
     var baseStyles = sectionStart >= 0 ? fullStyle.substring(0, sectionStart) : fullStyle
     var sectionStyles = sectionStart >= 0 ? fullStyle.substring(sectionStart).trim() : ""
     var articleHtml = code.substring(styleEnd + 8).trim()
     return {baseStyles: baseStyles, sectionStyles: sectionStyles, articleHtml: articleHtml, headPrefix: headPrefix}
 }
 
+/**
+ * PC+MO 하이브리드 스타일에 남은 assets 경로를 MO imageList 실제 확장자로 통일
+ */
+function rewriteMoRasterUrlsInSectionStyles(sectionStyles, moPathByPcStem) {
+    if (!sectionStyles || !moPathByPcStem) return sectionStyles || ""
+    function resolvePath(pathRaw) {
+        var p = String(pathRaw || "").trim()
+        if (p.indexOf("assets/images/") !== 0 || !/\.(png|jpe?g)$/i.test(p)) return null
+        var stem = p.replace(/\.(png|jpe?g)$/i, "")
+        var stemBase = stem.replace(/_mo$/i, "")
+        return moPathByPcStem[stemBase] || moPathByPcStem[stem] || null
+    }
+    var out = sectionStyles.replace(/--bg-img\s*:\s*url\s*\(\s*["']?([^"'()]+)["']?\s*\)/gi, function (full, path) {
+        var r = resolvePath(path)
+        return r ? "--bg-img:url(" + r + ")" : full
+    })
+    out = out.replace(/(background-image\s*:\s*url\s*\(\s*["']?)([^"'()]+)(["']?\s*\))/gi, function (full, open, path, close) {
+        var r = resolvePath(path)
+        return r ? open + r + close : full
+    })
+    return out
+}
+
 /** sectionStyles에서 --bg-img/background-image → @media에 _mo 이미지 오버라이드 병합 */
-function injectBgOverridesForMo(sectionStyles, overridesCss, excludedSecClasses) {
+function injectBgOverridesForMo(sectionStyles, overridesCss, excludedSecClasses, moPathByPcStem) {
     excludedSecClasses = excludedSecClasses || []
     var exclude = {}
     for (var i = 0; i < excludedSecClasses.length; i++) exclude[String(excludedSecClasses[i])] = true
 
+    function resolveMoAssetPath(pcPathWithExt, ext) {
+        var p = String(pcPathWithExt || "").trim()
+        var stem = p.replace(/\.(png|jpe?g)$/i, "")
+        var stemBase = stem.replace(/_mo$/i, "")
+        if (moPathByPcStem) {
+            if (moPathByPcStem[stemBase]) return moPathByPcStem[stemBase]
+            if (moPathByPcStem[stem]) return moPathByPcStem[stem]
+        }
+        if (/_mo\.(png|jpe?g)$/i.test(p)) return p
+        return p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext)
+    }
+
+    var reUrlAsset = "assets\\/images\\/[^\"')\\s]+\\.(?:png|jpg|jpeg)"
     var bgOverrides = {}
-    ;(sectionStyles || "").replace(/\.ap-section--(\d+)\s*\{[^}]*--bg-img\s*:\s*url\s*\(\s*(assets\/images\/[^)]+\.(png|jpg|jpeg))\s*\)[^}]*\}/gi, function (_, secClass, path, ext) {
-        var secNorm = secClass.length === 1 ? "0" + secClass : secClass
-        if (exclude[secNorm] || exclude[secClass]) return ""
-        var pathMo = path.trim().replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext)
-        bgOverrides[secNorm] = "--bg-img:url(" + pathMo + ")"
-        return ""
-    })
+    ;(sectionStyles || "").replace(
+        new RegExp(
+            "(?:\\.(?:pc-only|mo-only)\\s+)?\\.ap-section--(\\d+)\\s*\\{[^}]*--bg-img\\s*:\\s*url\\s*\\(\\s*[\"']?(" +
+                reUrlAsset +
+                ")[\"']?\\s*\\)[^}]*\\}",
+            "gi",
+        ),
+        function (_, secClass, path) {
+            var pathTrim = String(path || "").trim()
+            var extMatch = /\.(png|jpe?g)$/i.exec(pathTrim)
+            var ext = extMatch ? extMatch[1].toLowerCase() : "jpg"
+            if (ext === "jpeg") ext = "jpg"
+            var secNorm = secClass.length === 1 ? "0" + secClass : secClass
+            if (exclude[secNorm] || exclude[secClass]) return ""
+            var pathMo = resolveMoAssetPath(pathTrim, ext)
+            bgOverrides[secNorm] = "--bg-img:url(" + pathMo + ")"
+            return ""
+        },
+    )
     var frameBgOverrides = []
-    ;(sectionStyles || "").replace(/(\.ap-section--\d+(?:\s+[^{]+)?)\s*\{[^}]*?background-image\s*:\s*url\s*\(\s*(assets\/images\/[^)]+\.(png|jpg|jpeg))\s*\)[^}]*\}/gi, function (_, sel, path, ext) {
-        var selector = (sel || "").trim()
-        if (!selector) return ""
-        if (/^\.ap-section--\d+\s*$/.test(selector)) return ""
-        var pathMo = path.trim().replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext)
-        frameBgOverrides.push({ sel: selector, pathMo: pathMo })
-        return ""
-    })
+    ;(sectionStyles || "").replace(
+        new RegExp(
+            "(\\.ap-section--\\d+(?:\\s+[^{]+)?)\\s*\\{[^}]*?background-image\\s*:\\s*url\\s*\\(\\s*[\"']?(" +
+                reUrlAsset +
+                ")[\"']?\\s*\\)[^}]*\\}",
+            "gi",
+        ),
+        function (_, sel, path) {
+            var selector = (sel || "").trim()
+            if (!selector) return ""
+            if (/^\.ap-section--\d+\s*$/.test(selector)) return ""
+            var pathTrim = String(path || "").trim()
+            var extMatch = /\.(png|jpe?g)$/i.exec(pathTrim)
+            var ext = extMatch ? extMatch[1].toLowerCase() : "jpg"
+            if (ext === "jpeg") ext = "jpg"
+            var pathMo = resolveMoAssetPath(pathTrim, ext)
+            frameBgOverrides.push({ sel: selector, pathMo: pathMo })
+            return ""
+        },
+    )
 
     if (!Object.keys(bgOverrides).length && !frameBgOverrides.length) return overridesCss || ""
 
@@ -4938,13 +5089,21 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     var sectionStyles = pc.sectionStyles || ""
     var artTrim = String(pc.articleHtml || "").trim()
     var usedBem = artTrim ? buildUsedApSectionBemFromArticleHtml(pc.articleHtml) : null
+    var secStructMerge = getSectionStructureMatch(desktopRoot, mobileRoot)
+    var skipMoWalkSecs = secStructMerge && secStructMerge.mismatchSecs ? secStructMerge.mismatchSecs : []
+    var moPathByPcStem = buildMoRasterPathByPcStemFromMoImageList(options.moImages || [])
+    sectionStyles = rewriteMoRasterUrlsInSectionStyles(sectionStyles, moPathByPcStem)
+
     var overrides = buildMobileOverrides(
         desktopRoot,
         mobileRoot,
         breakpoint,
-        Object.assign({}, options, { usedApSectionBemBySection: usedBem }),
+        Object.assign({}, options, {
+            usedApSectionBemBySection: usedBem,
+            skipStructureMismatchSecs: skipMoWalkSecs,
+        }),
     )
-    overrides = injectBgOverridesForMo(sectionStyles, overrides)
+    overrides = injectBgOverridesForMo(sectionStyles, overrides, skipMoWalkSecs, moPathByPcStem)
 
     var mergedCss = [base, sectionStyles, overrides].filter(function (x) {
         return x && String(x).trim()
@@ -4955,7 +5114,8 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     articleHtml = articleHtml.replace(/<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+)\.(png|jpg|jpeg)"([^>]*)>/gi, function (full, before, basePath, ext, after) {
         if (/\bdata-slide-pc-img\s*=\s*["']1["']/.test(before + after)) return full
         if (String(ext).toLowerCase() === "svg") { return "<img " + before + "src=\"" + basePath + "." + ext + "\"" + after + ">"; }
-        return '<picture><source media="(max-width:' + bp + 'px)" srcset="' + basePath + "_mo." + ext + '"><img ' + before + 'src="' + basePath + "." + ext + '"' + after + "></picture>"
+        var moSrc = moPathByPcStem[basePath] || basePath + "_mo." + ext
+        return '<picture><source media="(max-width:' + bp + 'px)" srcset="' + moSrc + '"><img ' + before + 'src="' + basePath + "." + ext + '"' + after + "></picture>"
     })
     var headPrefix = (pc.headPrefix || "").trim()
     return (headPrefix ? headPrefix + "\n" : "") + styleBlock + articleHtml
@@ -4967,6 +5127,7 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
  * compressCssForStyleTag — <style> 안 CSS 압축(주석·공백 제거, } 단위 줄바꿈)
  * compressEmbeddedStyleTagsInHtml — HTML 문자열 속 <style> 내용만 압축
  * buildCodeAsync — article·섹션·지연 스타일·Swiper 자산 포함 전체 코드 조립(내부에 render* 다수)
+ *   PC+MO 구조 불일치·비슬라이드: `div.pc-only`/`div.mo-only` 래퍼 + section, 지연 CSS `.pc-only .ap-section--NN …`
  */
 // ----- 9. HTML Renderers / Code Builder (node-id 기반 HTML·CSS) -----
 /** CMS <style> 블록용: 주석 제거·내부 공백 축약 + 닫는 } 마다 줄바꿈 (한 덩어리 한 줄 방지) */
@@ -4994,12 +5155,19 @@ function compressEmbeddedStyleTagsInHtml(html) {
 }
 
 /** 루트 노드와 캐시로 전체 HTML/CSS 문자열 생성 (섹션별 스타일·article 본문) */
-function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot) {
+function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot, structureMismatchSecs) {
     var codeLines = []
     var deferredStyles = []
     var exportedNodeIds = {}
     var ownImageNodeIds = {}
     var ctx = {deferredStyles: deferredStyles, exportedNodeIds: exportedNodeIds, ownImageNodeIds: ownImageNodeIds}
+
+    var mismatchSet = Object.create(null)
+    if (Array.isArray(structureMismatchSecs)) {
+        for (var _msi = 0; _msi < structureMismatchSecs.length; _msi++) {
+            mismatchSet[String(structureMismatchSecs[_msi])] = true
+        }
+    }
 
     /** 첫 분석(fontHtmlFilterActive 아님): 필터 없음. 이후: allowedFonts로만 HTML 허용. */
     var fontHtmlUnrestricted = cache.fontHtmlFilterActive !== true
@@ -5119,24 +5287,35 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     /** 섹션별 HTML 렌더 순서 <img> 노드 id (applyApSectionImageRenderOrderFromIds와 동일) — 095 MO 이미지 diff에 전달 */
     var sectionImageRenderOrderIds = []
 
-    function selInSection(secClass, innerSel) {
-        // 쉼표로 구분된 복합 선택자 각각에 prefix 적용
-        // e.g. .ap-text[...], .ap-image[...] -> .ap-section--01 .ap-text[...], .ap-section--01 .ap-image[...]
-        return ".ap-section--" + secClass + " " + innerSel.replace(/,/g, ", .ap-section--" + secClass + " ")
+    function visWrapFromOpts(opts) {
+        return opts && opts.visibilityWrapper ? String(opts.visibilityWrapper) : ""
+    }
+
+    /** 섹션 루트 한 줄 규칙용: `.ap-section--NN` 또는 `.pc-only .ap-section--NN` */
+    function sectionRootSelector(secClass, visWrap) {
+        var vw = visWrap ? String(visWrap).replace(/^\./, "") : ""
+        return vw ? "." + vw + " .ap-section--" + secClass : ".ap-section--" + secClass
+    }
+
+    function selInSection(secClass, innerSel, visWrap) {
+        var vw = visWrap ? String(visWrap).replace(/^\./, "") : ""
+        var prefix = vw ? "." + vw + " .ap-section--" + secClass : ".ap-section--" + secClass
+        return prefix + " " + String(innerSel || "").replace(/,/g, ", " + prefix + " ")
     }
 
     function pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, includeAbs, ropts) {
         if (includeAbs === undefined) includeAbs = true
         var inner = cssInnerSelForNode(id, ropts || {}, false)
+        var vw = visWrapFromOpts(ropts)
         var decl = buildTextVarsDecl(ts)
-        if (decl) pushDeferredStyle(ctx, selInSection(secClass, inner), decl)
+        if (decl) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), decl)
         if (includeAbs && textAbs && id) {
             var textAbsDecl = buildAbsDecl(node, parent)
-            if (textAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, inner), textAbsDecl)
+            if (textAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textAbsDecl)
         }
         var partResult = buildTextPartInnerHtml(ts)
         var parentStyle = typeof partResult === "string" ? "" : (partResult.parentStyle || "")
-        if (parentStyle && id) pushDeferredStyle(ctx, selInSection(secClass, inner), parentStyle)
+        if (parentStyle && id) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), parentStyle)
     }
 
     function buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth) {
@@ -5183,9 +5362,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     var imgWrapClsPre = apNodeClassList(("ap-image" + (textAbs ? " ap-abs" : "")).trim(), id, rasterOptsPre)
                     if (textAbs && id) {
                         var traDeclPre = buildAbsDeclTextRaster(node, parent)
-                        if (traDeclPre) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, rasterOptsPre, false)), traDeclPre)
+                        if (traDeclPre) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, rasterOptsPre, false), visWrapFromOpts(opts)), traDeclPre)
                     }
-                    pushDeferredImageImgSizeVars(ctx, secClass, id, node, rasterOptsPre, textAbs)
+                    pushDeferredImageImgSizeVars(ctx, secClass, id, node, rasterOptsPre, textAbs, visWrapFromOpts(opts))
                     return Promise.resolve(
                         wrapIfBtn(
                             node,
@@ -5195,7 +5374,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     )
                 }
 
-                return exportNodeImageAsync(node)
+                return exportNodeImageAsync(node, { cache: cache, secNo: secNo })
                     .then(function (dataUrl) {
                         if (!dataUrl) {
                             pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, true, opts)
@@ -5214,9 +5393,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         var imgWrapCls = apNodeClassList(("ap-image" + (textAbs ? " ap-abs" : "")).trim(), id, rasterOpts)
                         if (textAbs && id) {
                             var traDecl = buildAbsDeclTextRaster(node, parent)
-                            if (traDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, rasterOpts, false)), traDecl)
+                            if (traDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, rasterOpts, false), visWrapFromOpts(opts)), traDecl)
                         }
-                        pushDeferredImageImgSizeVars(ctx, secClass, id, node, rasterOpts, textAbs)
+                        pushDeferredImageImgSizeVars(ctx, secClass, id, node, rasterOpts, textAbs, visWrapFromOpts(opts))
                         return wrapIfBtn(
                             node,
                             indent(depth) + '<div class="' + imgWrapCls + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (path || "") + '" alt="' + altText + '" /></div>',
@@ -5243,10 +5422,10 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var lineNeedWrapper = lineAbs && (!lineParentWraps || (node.type === "FRAME" && isContainer(node)))
             if (lineAbs && id) {
                 var lineAbsDecl = buildAbsDecl(node, parent)
-                if (lineAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), lineAbsDecl)
+                if (lineAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), lineAbsDecl)
             }
             var lineVars = buildLineVarsDecl(node)
-            if (lineVars) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), lineVars)
+            if (lineVars) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), lineVars)
             var lineCls = apNodeClassList("ap-line" + (lineNeedWrapper ? " ap-abs" : ""), id, opts)
             var lineHtml = '<div class="' + lineCls + '"></div>'
             return Promise.resolve(wrapIfBtn(node, indent(depth) + lineHtml, depth))
@@ -5257,10 +5436,10 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var ellipseNeedWrapper = ellipseAbs && (!ellipseParentWraps || (node.type === "FRAME" && isContainer(node)))
             if (ellipseAbs && id) {
                 var ellipseAbsDecl = buildAbsDecl(node, parent)
-                if (ellipseAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), ellipseAbsDecl)
+                if (ellipseAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), ellipseAbsDecl)
             }
             var ellipseVars = buildEllipseVarsDecl(node)
-            if (ellipseVars) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), ellipseVars)
+            if (ellipseVars) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), ellipseVars)
             var ellipseCls = apNodeClassList("ap-ellipse" + (ellipseNeedWrapper ? " ap-abs" : ""), id, opts)
             var ellipseHtml = '<div class="' + ellipseCls + '"></div>'
             return Promise.resolve(wrapIfBtn(node, indent(depth) + ellipseHtml, depth))
@@ -5276,12 +5455,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 : dataUrlSv || ""
             if (svgImgAbs && id) {
                 var svgAbsDeclC = buildAbsDecl(node, parent)
-                if (svgAbsDeclC) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), svgAbsDeclC)
+                if (svgAbsDeclC) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), svgAbsDeclC)
             }
             var altTextSv = getImageAltText(node)
             if (id) ctx.ownImageNodeIds[id] = true
             var svgImgClsC = apNodeClassList(("ap-image" + (svgImgAbs ? " ap-abs" : "")).trim(), id, opts)
-            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, svgImgAbs)
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, svgImgAbs, visWrapFromOpts(opts))
             var htmlSv = indent(depth) + '<div class="' + svgImgClsC + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (pathSv || "") + '" alt="' + altTextSv + '" /></div>'
             return Promise.resolve(wrapIfBtn(node, htmlSv, depth))
         }
@@ -5295,12 +5474,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 : dataUrl || ""
             if (svgImgAbs && id) {
                 var svgAbsDecl = buildAbsDecl(node, parent)
-                if (svgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), svgAbsDecl)
+                if (svgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), svgAbsDecl)
             }
             var altText = getImageAltText(node)
             if (id) ctx.ownImageNodeIds[id] = true
             var svgImgCls = apNodeClassList(("ap-image" + (svgImgAbs ? " ap-abs" : "")).trim(), id, opts)
-            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, svgImgAbs)
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, svgImgAbs, visWrapFromOpts(opts))
             var html = indent(depth) + '<div class="' + svgImgCls + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (path || "") + '" alt="' + altText + '" /></div>'
             return wrapIfBtn(node, html, depth)
         })
@@ -5332,7 +5511,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 if (fillWImgGrp && !nodeHasApSectionImageSemantic(node.id, opts)) declPartsImgGrp.push(fillWImgGrp)
                 if (!useFlexImg && !absImgGrp && containerNeedsRelativeForAbsoluteChildren(node)) declPartsImgGrp.push("position:relative")
                 if (declPartsImgGrp.length && id) {
-                    pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declPartsImgGrp.join(";"))
+                    pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), declPartsImgGrp.join(";"))
                 }
                 var chunksImg = []
                 var imgGrpBase = [absImgGrp ? "ap-abs" : ""].filter(Boolean).join(" ")
@@ -5366,16 +5545,16 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 : dataUrlImg || ""
             if (imgAbs && id) {
                 var imgAbsDeclC = buildAbsDecl(node, parent)
-                if (imgAbsDeclC) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), imgAbsDeclC)
+                if (imgAbsDeclC) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), imgAbsDeclC)
             }
             var altTextImg = getImageAltText(node)
             if (id) ctx.ownImageNodeIds[id] = true
             var figureClsC = apNodeClassList("ap-image" + (imgAbs ? " ap-abs" : ""), id, opts)
-            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs)
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs, visWrapFromOpts(opts))
             var figureHtmlC = '<div class="' + figureClsC + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (pathImg || "") + '" alt="' + altTextImg + '" /></div>'
             return Promise.resolve(wrapIfBtn(node, indent(depth) + figureHtmlC, depth))
         }
-        return exportImagePreferSourceBytesAsync(node).then(function (dataUrl) {
+        return exportImagePreferSourceBytesAsync(node, { cache: cache, secNo: secNo }).then(function (dataUrl) {
             if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
             var path = cache
                 ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, {
@@ -5385,12 +5564,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 : dataUrl || ""
             if (imgAbs && id) {
                 var imgAbsDecl = buildAbsDecl(node, parent)
-                if (imgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), imgAbsDecl)
+                if (imgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), imgAbsDecl)
             }
             var altText = getImageAltText(node)
             if (id) ctx.ownImageNodeIds[id] = true
             var figureCls = apNodeClassList("ap-image" + (imgAbs ? " ap-abs" : ""), id, opts)
-            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs)
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs, visWrapFromOpts(opts))
             var figureHtml = '<div class="' + figureCls + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (path || "") + '" alt="' + altText + '" /></div>'
             return wrapIfBtn(node, indent(depth) + figureHtml, depth)
         })
@@ -5470,7 +5649,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             }
 
             if (declParts.length) {
-                pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declParts.join(";"))
+                pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), declParts.join(";"))
             }
 
             var isFrameBtn = isBtnNode(node)
@@ -5534,7 +5713,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     var itemDecl = itemDeclParts.join(";")
 
                     if (itemDecl && leafSel) {
-                        pushDeferredStyle(ctx, selInSection(secClass, leafSel), itemDecl)
+                        pushDeferredStyle(ctx, selInSection(secClass, leafSel, visWrapFromOpts(opts)), itemDecl)
                     }
 
                     // GROUP 등 컨테이너는 renderNodeAsync가 프레임 래퍼를 이미 출력
@@ -5595,13 +5774,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var skipGroupWrapper = singleChild && !groupHasAttrs && !isFlex(node)
 
             if (groupHasAttrs && id && !skipGroupWrapper) {
-                pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declParts2.join(";"))
+                pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), declParts2.join(";"))
             }
 
             if (skipGroupWrapper) {
                 if (declParts2Flex.length > 0) {
                     var childSel = getLeafSelectorForNode(singleChild, opts)
-                    if (childSel) pushDeferredStyle(ctx, selInSection(secClass, childSel), declParts2Flex.join(";"))
+                    if (childSel) pushDeferredStyle(ctx, selInSection(secClass, childSel, visWrapFromOpts(opts)), declParts2Flex.join(";"))
                 }
                 return renderNodeAsync(singleChild, node, secNo, secClass, depth, opts)
             }
@@ -5648,10 +5827,10 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var videoNeedWrapper = videoAbs && (!videoParentWraps || (node.type === "FRAME" && isContainer(node)))
             if (videoAbs && id) {
                 var videoAbsDecl = buildAbsDecl(node, parent)
-                if (videoAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), videoAbsDecl)
+                if (videoAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), videoAbsDecl)
             } else if (id) {
                 var videoSizeDecl = getImageSizeDecl(node)
-                if (videoSizeDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), videoSizeDecl)
+                if (videoSizeDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), videoSizeDecl)
             }
             var videoCls = apNodeClassList("ap-video" + (videoNeedWrapper ? " ap-abs" : ""), id, opts)
             var videoHtml = '<div class="' + videoCls + '"><video src="" controls playsinline muted loop autoplay preload="metadata"></video></div>'
@@ -5689,7 +5868,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 var absDeclLeaf = buildAbsDecl(node, parent)
                 if (absDeclLeaf) declParts.push(absDeclLeaf)
             }
-            if (declParts.length && id) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false)), declParts.join(";"))
+            if (declParts.length && id) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), declParts.join(";"))
             return wrapIfBtn(node, indent(depth) + '<div class="' + leafCls + '"></div>', depth)
         })
     }
@@ -5717,10 +5896,242 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var fillWidthVirtual = getFillFlexStartWidthDecl(ch, sectionNode)
             if (fillWidthVirtual && !nodeHasApSectionImageSemantic(ch.id, opts)) itemDeclParts.push(fillWidthVirtual)
             var itemDecl = itemDeclParts.join(";")
-            if (itemDecl && leafSel) pushDeferredStyle(ctx, selInSection(secClass, leafSel), itemDecl)
+            if (itemDecl && leafSel) pushDeferredStyle(ctx, selInSection(secClass, leafSel, visWrapFromOpts(opts)), itemDecl)
             if (isChContainer) return renderNodeAsync(ch, sectionNode, secNo, secClass, depth, opts)
             return renderNodeAsync(ch, sectionNode, secNo, secClass, depth, opts)
         })
+    }
+
+    /**
+     * PC+MO 구조 불일치·비슬라이드: visWrap `pc-only` / `mo-only` 로 바깥 div → section (랜드마크는 section 유지).
+     * 지연 CSS는 `.pc-only .ap-section--NN …` 자손 선택자(095 @media display 토글과 정합).
+     */
+    function runSectionPipeline(sectionNode, bg, visWrap, secNo, secClass, slideData) {
+        var slideSectionMeta = null
+        var sectionSemantics = buildSectionSemanticClasses(sectionNode, geoStructure, bg.bgChildId)
+        promoteRasterTextNodesToImageSemantics(sectionNode, sectionSemantics, allowedFontsForHtml, fontHtmlUnrestricted)
+        demoteNestedDuplicateSectionRoles(sectionNode, sectionSemantics)
+        disambiguateSectionSemantics(sectionNode, sectionSemantics)
+        demoteNestedDuplicateSectionRoles(sectionNode, sectionSemantics)
+        disambiguateSectionSemantics(sectionNode, sectionSemantics)
+        var collectRopts = {
+            includeHidden: true,
+            allowedFonts: allowedFontsForHtml,
+            fontHtmlUnrestricted: fontHtmlUnrestricted,
+            sectionSemantics: sectionSemantics,
+        }
+        return collectImageFigureNodeIdsForSectionAsync(sectionNode, bg, slideData, cache, secNo, collectRopts)
+            .then(function (orderedIds) {
+                applyApSectionImageRenderOrderFromIds(sectionSemantics, orderedIds)
+                if (visWrap !== "mo-only") {
+                    sectionImageRenderOrderIds[secNo - 1] = (orderedIds || []).map(function (id) {
+                        return String(id)
+                    })
+                }
+                return prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo)
+            })
+            .then(function () {
+                var vw = visWrap || ""
+                var sectionRenderOpts = {
+                    includeHidden: true,
+                    sectionSemantics: sectionSemantics,
+                    mobileRoot: mobileRoot || null,
+                    visibilityWrapper: vw || undefined,
+                }
+                var sectionDeclParts = []
+
+                var box = getAbs(sectionNode)
+                if (slideData) {
+                    var mSecForSlide = mobileRoot ? (getSectionNodes(mobileRoot)[secNo - 1] || null) : null
+                    slideSectionMeta = resolveSlideMeta(sectionNode, mSecForSlide, bg.bgChildId, {
+                        mobileRoot: mobileRoot || null,
+                        secNo: secNo,
+                    })
+                    sectionDeclParts.push("height:auto;min-height:auto")
+                } else {
+                    var pcSecH = getPcSectionCanvasHeightDecls(sectionNode, slideData, box)
+                    if (pcSecH) {
+                        sectionDeclParts.push(pcSecH[0])
+                        sectionDeclParts.push(pcSecH[1])
+                    }
+                }
+
+                if (bg.decl) sectionDeclParts.push(bg.decl)
+
+                if (isFlex(sectionNode)) {
+                    var sectionLayoutVars = getLayoutVars(sectionNode)
+                    var visibleSecChildren = (sectionNode.children || []).filter(function (c) { return c && isVisible(c) })
+                    if (visibleSecChildren.length === 1 && sectionLayoutVars.align === "center") {
+                        sectionLayoutVars = Object.assign({}, sectionLayoutVars, { align: "" })
+                    }
+                    var sectionFlexDecl = buildFlexDecl(sectionLayoutVars, sectionNode)
+                    if (sectionFlexDecl) sectionDeclParts.push(sectionFlexDecl)
+                }
+
+                if (sectionDeclParts.length) {
+                    pushDeferredStyle(ctx, sectionRootSelector(secClass, vw), sectionDeclParts.join(";"))
+                }
+
+                if (sectionNode.id != null) ctx.exportedNodeIds[String(sectionNode.id)] = true
+
+                if (vw) contentLines.push('    <div class="' + vw + '">')
+
+                var secClassList =
+                    apNodeClassList(
+                        "ap-section ap-section--" +
+                            secClass +
+                            (slideData ? " ap-section--swiper" : ""),
+                        String(sectionNode.id),
+                        {
+                            sectionSemantics: {},
+                        },
+                    )
+                contentLines.push('    <section class="' + secClassList + '">')
+
+                var slideParent = sectionNode
+                var slideItems = slideData ? collectSwiperSlideItemNodes(sectionNode, bg.bgChildId) : []
+                if (slideData) slideParent = slideData.parent || sectionNode
+
+                function isSlideContainerNodeInSection(child) {
+                    if (!slideData || !child) return false
+
+                    // 케이스1) 섹션 자식 중 code-slide 그룹 1개 → slideData.parent가 그 그룹
+                    if (slideData.parent && child.id === slideData.parent.id) return true
+
+                    // 케이스2) 섹션 자식 중 code-slide 여러 개 → 자식 레이어명이 code-slide일 수 있음
+                    if (isSlideNode(child)) return true
+
+                    // 케이스3) 섹션 자체가 code-slide면 — pass1 자식 순회와는 별도로 slideItems에서 처리
+                    return false
+                }
+
+                var kids = sectionNode.children || []
+                var i = 0
+
+                function pass1NextChild() {
+                    if (i >= kids.length) return Promise.resolve()
+
+                    var ch = kids[i++]
+                    if (!ch || !isVisible(ch)) return pass1NextChild()
+                    if (bg.bgChildId && ch.id === bg.bgChildId) return pass1NextChild()
+
+                    if (isSlideContainerNodeInSection(ch)) return pass1NextChild()
+
+                    if (ch.type === "FRAME" && isContainer(ch)) {
+                        return renderNodeAsync(ch, sectionNode, secNo, secClass, 3, sectionRenderOpts).then(function (html) {
+                            if (html) contentLines.push(html)
+                            return pass1NextChild()
+                        })
+                    }
+
+                    var chAbsVirtual = isAbsoluteLike(ch, sectionNode)
+                    if (!chAbsVirtual && (ch.type === "LINE" || ch.type === "ELLIPSE" || isLineLikeNode(ch))) {
+                        return renderNodeAsync(ch, sectionNode, secNo, secClass, 3, sectionRenderOpts).then(function (html) {
+                            if (html) contentLines.push(html)
+                            return pass1NextChild()
+                        })
+                    }
+
+                    var secChildDepth = 3
+                    return (function () {
+                        var chAbs = isAbsoluteLike(ch, sectionNode)
+                        var itemId = ch.id ? String(ch.id) : ""
+                        if (itemId) ctx.exportedNodeIds[itemId] = true
+                        var leafSel = getLeafSelectorForNode(ch, sectionRenderOpts)
+                        var isChContainer = isContainer(ch)
+
+                        return Promise.all([
+                            buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}),
+                            (function () {
+                                if (!chAbs) return Promise.resolve("")
+                                var absDecl = buildAbsDecl(ch, sectionNode)
+                                return Promise.resolve(absDecl || "")
+                            })(),
+                        ]).then(function (res) {
+                            var itemDeclParts = [res[0]].filter(Boolean)
+                            if (res[1] && !isImageCandidate(ch)) itemDeclParts.push(res[1])
+                            var strokeDeclVirtual = buildStrokeDecl(ch)
+                            if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)
+                            var fillWidthVirtual = getFillFlexStartWidthDecl(ch, sectionNode)
+                            if (fillWidthVirtual && !nodeHasApSectionImageSemantic(ch.id, sectionRenderOpts)) itemDeclParts.push(fillWidthVirtual)
+                            var itemDecl = itemDeclParts.join(";")
+
+                            if (itemDecl && leafSel) pushDeferredStyle(ctx, selInSection(secClass, leafSel, visWrapFromOpts(sectionRenderOpts)), itemDecl)
+
+                            if (isChContainer) {
+                                return renderNodeAsync(ch, sectionNode, secNo, secClass, secChildDepth, sectionRenderOpts).then(function (inner) {
+                                    if (inner) contentLines.push(inner)
+                                    return pass1NextChild()
+                                })
+                            }
+                            return renderNodeAsync(ch, sectionNode, secNo, secClass, secChildDepth, sectionRenderOpts).then(function (inner) {
+                                if (inner) contentLines.push(inner)
+                                return pass1NextChild()
+                            })
+                        })
+                    })()
+                }
+
+                function renderSwiperPass2() {
+                    if (!slideData) return Promise.resolve()
+
+                    hasSlideSection = true
+
+                    var slideCount = slideItems.length
+                    var swiperMeta =
+                        slideSectionMeta ||
+                        resolveSlideMeta(sectionNode, mobileRoot ? (getSectionNodes(mobileRoot)[secNo - 1] || null) : null, bg.bgChildId, {
+                            mobileRoot: mobileRoot || null,
+                            secNo: secNo,
+                        })
+                    var pcSlidesPerView = swiperMeta.pcSlidesPerView
+                    var moSlidesPerView = swiperMeta.moSlidesPerView
+
+                    contentLines.push(
+                        '      <div class="swiper" data-slide-view="' +
+                            escapeHtml(String(pcSlidesPerView)) +
+                            '" data-slide-view-mo="' +
+                            escapeHtml(String(moSlidesPerView)) +
+                            '">',
+                    )
+                    contentLines.push('        <div class="swiper-wrapper">')
+
+                    function renderSlide(idx) {
+                        if (idx >= slideCount) {
+                            contentLines.push("        </div>")
+                            contentLines.push('        <div class="swiper-pagination"></div>')
+                            contentLines.push('        <div class="swiper-button-prev"></div>')
+                            contentLines.push('        <div class="swiper-button-next"></div>')
+                            contentLines.push("      </div>")
+                            return Promise.resolve()
+                        }
+
+                        var ch = slideItems[idx]
+                        contentLines.push('          <div class="swiper-slide">')
+
+                        if (!ch) {
+                            contentLines.push("          </div>")
+                            return renderSlide(idx + 1)
+                        }
+
+                        return renderSectionChildAsync(ch, slideParent, secNo, secClass, bg, 6, Object.assign({}, sectionRenderOpts, { insideSwiperSlide: true })).then(function (html) {
+                            if (html) contentLines.push(html)
+                            contentLines.push("          </div>")
+                            return renderSlide(idx + 1)
+                        })
+                    }
+
+                    return renderSlide(0)
+                }
+
+                return pass1NextChild()
+                    .then(renderSwiperPass2)
+                    .then(function () {
+                        contentLines.push("    </section>")
+                        if (vw) contentLines.push("    </div>")
+                        contentLines.push("")
+                    })
+            })
     }
 
     function nextSection() {
@@ -5733,228 +6144,44 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
         if (!sectionNode || !isVisible(sectionNode)) return nextSection()
 
-        // section style: height + background (incl child bg detection) + flex(섹션이 Auto Layout일 때)
         return buildSectionBackgroundAsync(sectionNode, cache, secNo).then(function (bg) {
-            var slideSectionMeta = null
-            var sectionSemantics = buildSectionSemanticClasses(sectionNode, geoStructure, bg.bgChildId)
-            promoteRasterTextNodesToImageSemantics(sectionNode, sectionSemantics, allowedFontsForHtml, fontHtmlUnrestricted)
-            demoteNestedDuplicateSectionRoles(sectionNode, sectionSemantics)
-            disambiguateSectionSemantics(sectionNode, sectionSemantics)
-            demoteNestedDuplicateSectionRoles(sectionNode, sectionSemantics)
-            disambiguateSectionSemantics(sectionNode, sectionSemantics)
             var slideData = getSlideItems(sectionNode)
-            var collectRopts = {
-                includeHidden: true,
-                allowedFonts: allowedFontsForHtml,
-                fontHtmlUnrestricted: fontHtmlUnrestricted,
-                sectionSemantics: sectionSemantics,
-            }
-            return collectImageFigureNodeIdsForSectionAsync(sectionNode, bg, slideData, cache, secNo, collectRopts)
-                .then(function (orderedIds) {
-                    applyApSectionImageRenderOrderFromIds(sectionSemantics, orderedIds)
-                    sectionImageRenderOrderIds[secNo - 1] = (orderedIds || []).map(function (id) {
-                        return String(id)
-                    })
-                    return prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo)
-                })
-                .then(function () {
-            var sectionRenderOpts = {
-                includeHidden: true,
-                sectionSemantics: sectionSemantics,
-                mobileRoot: mobileRoot || null,
-            }
-            var sectionDeclParts = []
+            var isStructMismatch = !!(mobileRoot && !slideData && mismatchSet[secClass])
 
-            var box = getAbs(sectionNode)
-            if (slideData) {
-                var mSecForSlide = mobileRoot ? (getSectionNodes(mobileRoot)[secNo - 1] || null) : null
-                slideSectionMeta = resolveSlideMeta(sectionNode, mSecForSlide, bg.bgChildId, {
-                    mobileRoot: mobileRoot || null,
-                    secNo: secNo,
-                })
-                sectionDeclParts.push("height:auto;min-height:auto")
-            } else {
-                var pcSecH = getPcSectionCanvasHeightDecls(sectionNode, slideData, box)
-                if (pcSecH) {
-                    sectionDeclParts.push(pcSecH[0])
-                    sectionDeclParts.push(pcSecH[1])
-                }
-            }
-
-            if (bg.decl) sectionDeclParts.push(bg.decl)
-
-            if (isFlex(sectionNode)) {
-                var sectionLayoutVars = getLayoutVars(sectionNode)
-                var visibleSecChildren = (sectionNode.children || []).filter(function (c) { return c && isVisible(c) })
-                if (visibleSecChildren.length === 1 && sectionLayoutVars.align === "center") {
-                    sectionLayoutVars = Object.assign({}, sectionLayoutVars, { align: "" })
-                }
-                var sectionFlexDecl = buildFlexDecl(sectionLayoutVars, sectionNode)
-                if (sectionFlexDecl) sectionDeclParts.push(sectionFlexDecl)
-            }
-
-            if (sectionDeclParts.length) {
-                pushDeferredStyle(ctx, ".ap-section--" + secClass, sectionDeclParts.join(";"))
-            }
-
-            if (sectionNode.id != null) ctx.exportedNodeIds[String(sectionNode.id)] = true
-
-            var secClassList =
-                apNodeClassList(
-                    "ap-section ap-section--" +
-                        secClass +
-                        (slideData ? " ap-section--swiper" : ""),
-                    String(sectionNode.id),
-                    {
-                        sectionSemantics: {},
-                    },
-                )
-            contentLines.push('    <section class="' + secClassList + '">')
-
-            var slideParent = sectionNode
-            var slideItems = slideData ? collectSwiperSlideItemNodes(sectionNode, bg.bgChildId) : []
-            if (slideData) slideParent = slideData.parent || sectionNode
-
-            function isSlideContainerNodeInSection(child) {
-                if (!slideData || !child) return false
-
-                // 케이스1) 섹션 자식 중 code-slide 그룹 1개 → slideData.parent가 그 그룹
-                if (slideData.parent && child.id === slideData.parent.id) return true
-
-                // 케이스2) 섹션 자식 중 code-slide 여러 개 → 자식 레이어명이 code-slide일 수 있음
-                if (isSlideNode(child)) return true
-
-                // 케이스3) 섹션 자체가 code-slide면 — pass1 자식 순회와는 별도로 slideItems에서 처리
-                return false
-            }
-
-            var kids = sectionNode.children || []
-            var i = 0
-
-            function pass1NextChild() {
-                if (i >= kids.length) return Promise.resolve()
-
-                var ch = kids[i++]
-                if (!ch || !isVisible(ch)) return pass1NextChild()
-                if (bg.bgChildId && ch.id === bg.bgChildId) return pass1NextChild()
-
-                if (isSlideContainerNodeInSection(ch)) return pass1NextChild()
-
-                if (ch.type === "FRAME" && isContainer(ch)) {
-                    return renderNodeAsync(ch, sectionNode, secNo, secClass, 3, sectionRenderOpts).then(function (html) {
-                        if (html) contentLines.push(html)
-                        return pass1NextChild()
-                    })
-                }
-
-                var chAbsVirtual = isAbsoluteLike(ch, sectionNode)
-                if (!chAbsVirtual && (ch.type === "LINE" || ch.type === "ELLIPSE" || isLineLikeNode(ch))) {
-                    return renderNodeAsync(ch, sectionNode, secNo, secClass, 3, sectionRenderOpts).then(function (html) {
-                        if (html) contentLines.push(html)
-                        return pass1NextChild()
-                    })
-                }
-
-                var secChildDepth = 3
-                return (function () {
-                    var chAbs = isAbsoluteLike(ch, sectionNode)
-                    var itemId = ch.id ? String(ch.id) : ""
-                    if (itemId) ctx.exportedNodeIds[itemId] = true
-                    var leafSel = getLeafSelectorForNode(ch, sectionRenderOpts)
-                    var isChContainer = isContainer(ch)
-
-                    return Promise.all([
-                        buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}),
-                        (function () {
-                            if (!chAbs) return Promise.resolve("")
-                            var absDecl = buildAbsDecl(ch, sectionNode)
-                            return Promise.resolve(absDecl || "")
-                        })(),
-                    ]).then(function (res) {
-                        var itemDeclParts = [res[0]].filter(Boolean)
-                        if (res[1] && !isImageCandidate(ch)) itemDeclParts.push(res[1])
-                        var strokeDeclVirtual = buildStrokeDecl(ch)
-                        if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)
-                        var fillWidthVirtual = getFillFlexStartWidthDecl(ch, sectionNode)
-                        if (fillWidthVirtual && !nodeHasApSectionImageSemantic(ch.id, sectionRenderOpts)) itemDeclParts.push(fillWidthVirtual)
-                        var itemDecl = itemDeclParts.join(";")
-
-                        if (itemDecl && leafSel) pushDeferredStyle(ctx, selInSection(secClass, leafSel), itemDecl)
-
-                        if (isChContainer) {
-                            return renderNodeAsync(ch, sectionNode, secNo, secClass, secChildDepth, sectionRenderOpts).then(function (inner) {
-                                if (inner) contentLines.push(inner)
-                                return pass1NextChild()
-                            })
-                        }
-                        return renderNodeAsync(ch, sectionNode, secNo, secClass, secChildDepth, sectionRenderOpts).then(function (inner) {
-                            if (inner) contentLines.push(inner)
-                            return pass1NextChild()
-                        })
-                    })
-                })()
-            }
-
-            function renderSwiperPass2() {
-                if (!slideData) return Promise.resolve()
-
-                hasSlideSection = true
-
-                var slideCount = slideItems.length
-                var swiperMeta =
-                    slideSectionMeta ||
-                    resolveSlideMeta(sectionNode, mobileRoot ? (getSectionNodes(mobileRoot)[secNo - 1] || null) : null, bg.bgChildId, {
-                        mobileRoot: mobileRoot || null,
-                        secNo: secNo,
-                    })
-                var pcSlidesPerView = swiperMeta.pcSlidesPerView
-                var moSlidesPerView = swiperMeta.moSlidesPerView
-
-                contentLines.push(
-                    '      <div class="swiper" data-slide-view="' +
-                        escapeHtml(String(pcSlidesPerView)) +
-                        '" data-slide-view-mo="' +
-                        escapeHtml(String(moSlidesPerView)) +
-                        '">',
-                )
-                contentLines.push('        <div class="swiper-wrapper">')
-
-                function renderSlide(idx) {
-                    if (idx >= slideCount) {
-                        contentLines.push("        </div>")
-                        contentLines.push('        <div class="swiper-pagination"></div>')
-                        contentLines.push('        <div class="swiper-button-prev"></div>')
-                        contentLines.push('        <div class="swiper-button-next"></div>')
-                        contentLines.push("      </div>")
-                        return Promise.resolve()
-                    }
-
-                    var ch = slideItems[idx]
-                    contentLines.push('          <div class="swiper-slide">')
-
-                    if (!ch) {
-                        contentLines.push("          </div>")
-                        return renderSlide(idx + 1)
-                    }
-
-                    return renderSectionChildAsync(ch, slideParent, secNo, secClass, bg, 6, Object.assign({}, sectionRenderOpts, { insideSwiperSlide: true })).then(function (html) {
-                        if (html) contentLines.push(html)
-                        contentLines.push("          </div>")
-                        return renderSlide(idx + 1)
-                    })
-                }
-
-                return renderSlide(0)
-            }
-
-            return pass1NextChild()
-                .then(renderSwiperPass2)
-                .then(function () {
-                    contentLines.push("    </section>")
-                    contentLines.push("")
+            if (!isStructMismatch) {
+                return runSectionPipeline(sectionNode, bg, null, secNo, secClass, slideData).then(function () {
                     return nextSection()
                 })
+            }
+
+            return runSectionPipeline(sectionNode, bg, "pc-only", secNo, secClass, slideData).then(function () {
+                var mNode = getSectionNodes(mobileRoot)[secNo - 1] || null
+                if (!mNode) {
+                    contentLines.push('    <div class="mo-only">')
+                    var emptySecClass = apNodeClassList("ap-section ap-section--" + secClass, "", { sectionSemantics: {} })
+                    contentLines.push('    <section class="' + emptySecClass + '">')
+                    contentLines.push('    </section>')
+                    contentLines.push('    </div>')
+                    contentLines.push('')
+                    return nextSection()
+                }
+
+                var prevSuffix = cache.imageSuffix
+                var prevImgCount = cache.imgCountBySec ? cache.imgCountBySec[secNo] : undefined
+                cache.imageSuffix = "_mo"
+                if (!cache.imgCountBySec) cache.imgCountBySec = {}
+                cache.imgCountBySec[secNo] = 0
+
+                return buildSectionBackgroundAsync(mNode, cache, secNo).then(function (mBg) {
+                    var moSlideData = getSlideItems(mNode)
+                    return runSectionPipeline(mNode, mBg, "mo-only", secNo, secClass, moSlideData)
+                }).then(function () {
+                    cache.imageSuffix = prevSuffix
+                    if (prevImgCount === undefined) delete cache.imgCountBySec[secNo]
+                    else cache.imgCountBySec[secNo] = prevImgCount
+                    return nextSection()
                 })
+            })
         })
     }
 
@@ -6097,6 +6324,9 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
     }
     if (options.mobileRoot && options.phase === "desktop") {
         cache.responsiveTextInnerByNodeId = buildResponsiveTextInnerByNodeIdMap(root, options.mobileRoot)
+    }
+    if (options.pcRasterExtByStem && typeof options.pcRasterExtByStem === "object") {
+        cache.pcRasterExtByStem = options.pcRasterExtByStem
     }
 
     var rootBox = getAbs(root)
@@ -6278,7 +6508,19 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         .then(function () {
             var dataTree = {rootSummary: rootSummary, sections: sections, legend: legend}
             var text = flattenTree(dataTree)
-            return buildCodeAsync(root, cache, sectionNodes, options.geoStructure || null, options.mobileRoot || null).then(function (result) {
+            var structureMismatchSecs = []
+            if (options.mobileRoot && options.phase === "desktop") {
+                var _sm = getSectionStructureMatch(root, options.mobileRoot)
+                if (_sm && !_sm.allMatch && _sm.mismatchSecs && _sm.mismatchSecs.length) structureMismatchSecs = _sm.mismatchSecs
+            }
+            return buildCodeAsync(
+                root,
+                cache,
+                sectionNodes,
+                options.geoStructure || null,
+                options.mobileRoot || null,
+                structureMismatchSecs,
+            ).then(function (result) {
                 var code = result && result.code != null ? result.code : typeof result === "string" ? result : ""
                 var exportedNodeIds = result && result.exportedNodeIds ? result.exportedNodeIds : {}
                 var ownImageNodeIds = result && result.ownImageNodeIds ? result.ownImageNodeIds : {}
@@ -6404,13 +6646,16 @@ figma.ui.onmessage = function (msg) {
         })
             .then(function (payload) {
                 return loadFontsForMobileTreeAsync(rootMobile).then(function () {
+                    var pcRasterExtByStem = buildPcRasterExtByStemFromImageList(payload.images || [])
                     return dumpTreeAsync(rootMobile, projectNameMo, allowedFontsMo, {
                         phase: "mobile",
                         imageSuffix: "_mo",
                         fontHtmlFilterActive: fontHtmlFilterActiveMo,
+                        pcRasterExtByStem: pcRasterExtByStem,
                     }).then(function (moPayload) {
                         var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
-                        // 구조 불일치여도 PC 기준 단일 뷰 + @media MO 오버라이드만 사용 (텍스트/이미지는 1:1 매칭 가능, frame 구조는 PC 기준·MO는 사람이 수정)
+                        var separateViews = !!(secMatch && secMatch.mismatchSecs && secMatch.mismatchSecs.length)
+                        // 구조 불일치 섹션: HTML은 div.pc-only / div.mo-only 로 section 이중 본문, CSS는 `.pc-only .ap-section--NN` 등. @media MO walk는 해당 섹션 스킵(skipStructureMismatchSecs).
                         var code = combinePcMoAsBreakpoint(payload.code || "", rootDesktop, rootMobile, breakpoint, {
                             exportedNodeIds: payload.exportedNodeIds,
                             ownImageNodeIds: payload.ownImageNodeIds,
@@ -6419,19 +6664,30 @@ figma.ui.onmessage = function (msg) {
                             fontHtmlFilterActive: fontHtmlFilterActiveMo,
                             pcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds,
                             moSectionImageRenderOrderIds: moPayload.sectionImageRenderOrderIds,
+                            moImages: moPayload.images || [],
                         })
-                        var separateViews = false
                         var images = (payload.images || []).concat(moPayload.images || [])
                         // MO 미리보기: 섹션 배경 --bg-img의 _mo 경로가 MO에서 export 안 됐을 수 있음 → PC 이미지로 채움
                         var pcParts = parseCodeIntoParts(payload.code || "")
                         var sectionStyles = pcParts.sectionStyles || ""
                         var moNames = {}
                         ;(moPayload.images || []).forEach(function (img) { moNames[img.name] = true })
+                        var moPathByPcStemPrev = buildMoRasterPathByPcStemFromMoImageList(moPayload.images || [])
                         var pcByName = {}
                         ;(payload.images || []).forEach(function (img) { pcByName[img.name] = img.dataUrl })
-                        sectionStyles.replace(/--bg-img\s*:\s*url\s*\(\s*(assets\/images\/[^)]+\.(png|jpg|jpeg))\s*\)/gi, function (_, path, ext) {
-                            var p = path.trim()
-                            var pathMo = p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext)
+                        sectionStyles.replace(/--bg-img\s*:\s*url\s*\(\s*["']?([^"'()]+\.(?:png|jpg|jpeg))["']?\s*\)/gi, function (_, path) {
+                            var p = String(path || "").trim()
+                            var extMatch = /\.(png|jpe?g)$/i.exec(p)
+                            var ext = extMatch ? extMatch[1].toLowerCase() : "jpg"
+                            if (ext === "jpeg") ext = "jpg"
+                            var stem = p.replace(/\.(png|jpe?g)$/i, "")
+                            var stemBase = stem.replace(/_mo$/i, "")
+                            var pathMo =
+                                moPathByPcStemPrev[stemBase] ||
+                                moPathByPcStemPrev[stem] ||
+                                (/_mo\.(png|jpe?g)$/i.test(p)
+                                    ? p
+                                    : p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext))
                             if (!moNames[pathMo] && pcByName[p]) {
                                 images.push({ name: pathMo, dataUrl: pcByName[p] })
                             }
@@ -6510,7 +6766,10 @@ figma.ui.onmessage = function (msg) {
 
         // 1) PC dump (MO 루트 있으면 PC 코드 생성 시점에 MO characters와 줄바꿈 비교)
         var zipDeskOpts = {phase: "desktop", fontHtmlFilterActive: fontHtmlFilterActiveZip}
-        if (hasMobile && rootMobile) zipDeskOpts.mobileRoot = rootMobile
+        if (hasMobile && rootMobile) {
+            zipDeskOpts.mobileRoot = rootMobile
+            zipDeskOpts.moBreakpoint = breakpoint
+        }
         dumpTreeAsync(rootDesktop, projectName2, allowedFonts2, zipDeskOpts)
             .then(function (payload) {
                 var code = payload.code || ""
@@ -6519,14 +6778,16 @@ figma.ui.onmessage = function (msg) {
                 // 2) MO 있으면 MO dump + 합치기
                 if (hasMobile && rootMobile) {
                     return loadFontsForMobileTreeAsync(rootMobile).then(function () {
+                        var pcRasterExtByStemZip = buildPcRasterExtByStemFromImageList(payload.images || [])
                         return dumpTreeAsync(rootMobile, projectName2, allowedFonts2, {
                             phase: "mobile",
                             imageSuffix: "_mo",
                             exportWidth: Math.min(2400, Math.round(2 * breakpoint)),
                             fontHtmlFilterActive: fontHtmlFilterActiveZip,
+                            pcRasterExtByStem: pcRasterExtByStemZip,
                         }).then(function (moPayload) {
                             var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
-                            // 구조 불일치여도 PC 기준 단일 뷰 + @media MO 오버라이드만 사용
+                            // 구조 불일치 섹션: HTML·CSS는 096 래퍼+`.pc-only .ap-section--NN` — ZIP 경로도 동일 파이프라인
                             code = combinePcMoAsBreakpoint(code, rootDesktop, rootMobile, breakpoint, {
                                 exportedNodeIds: payload.exportedNodeIds,
                                 ownImageNodeIds: payload.ownImageNodeIds,
@@ -6534,6 +6795,7 @@ figma.ui.onmessage = function (msg) {
                                 fontHtmlFilterActive: fontHtmlFilterActiveZip,
                                 pcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds,
                                 moSectionImageRenderOrderIds: moPayload.sectionImageRenderOrderIds,
+                                moImages: moPayload.images || [],
                             })
 
                             images = (images || []).concat(moPayload.images || [])
@@ -6546,7 +6808,12 @@ figma.ui.onmessage = function (msg) {
                 return {code: code, images: images}
             })
             .then(function (out) {
-                var zipHtml = stripApAiAuditBlock(codeFromTab || out.code || "")
+                var zipHtml
+                if (hasMobile && rootMobile) {
+                    zipHtml = stripApAiAuditBlock((out && out.code) || codeFromTab || "")
+                } else {
+                    zipHtml = stripApAiAuditBlock(codeFromTab || (out && out.code) || "")
+                }
                 finishExport(zipHtml, out.images || [])
             })
             .catch(function (e) {

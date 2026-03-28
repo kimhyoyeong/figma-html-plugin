@@ -246,8 +246,9 @@ function collectImageFigureNodeIdsForSectionAsync(sectionNode, bg, slideData, ca
 
 function prefetchOneImageNodeAsync(node, cache, secNo) {
     if (!node || node.id == null) return Promise.resolve()
+    var imgCtx = { cache: cache, secNo: secNo }
     if (node.type === "TEXT") {
-        return exportNodeImageAsync(node).then(function (dataUrl) {
+        return exportNodeImageAsync(node, imgCtx).then(function (dataUrl) {
             if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
             if (cache && dataUrl) {
                 getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
@@ -268,7 +269,7 @@ function prefetchOneImageNodeAsync(node, cache, secNo) {
             }
         })
     }
-    return exportImagePreferSourceBytesAsync(node).then(function (dataUrl) {
+    return exportImagePreferSourceBytesAsync(node, imgCtx).then(function (dataUrl) {
         if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
         if (cache && dataUrl) {
             getOrAssignImagePath(cache, node.id, dataUrl, secNo, {

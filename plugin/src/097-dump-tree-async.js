@@ -35,6 +35,9 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
     if (options.mobileRoot && options.phase === "desktop") {
         cache.responsiveTextInnerByNodeId = buildResponsiveTextInnerByNodeIdMap(root, options.mobileRoot)
     }
+    if (options.pcRasterExtByStem && typeof options.pcRasterExtByStem === "object") {
+        cache.pcRasterExtByStem = options.pcRasterExtByStem
+    }
 
     var rootBox = getAbs(root)
     var rootSummary = ["", "  ─── LAYER INSPECT ───", "  ROOT    " + oneLineBase(root)]
@@ -215,7 +218,19 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         .then(function () {
             var dataTree = {rootSummary: rootSummary, sections: sections, legend: legend}
             var text = flattenTree(dataTree)
-            return buildCodeAsync(root, cache, sectionNodes, options.geoStructure || null, options.mobileRoot || null).then(function (result) {
+            var structureMismatchSecs = []
+            if (options.mobileRoot && options.phase === "desktop") {
+                var _sm = getSectionStructureMatch(root, options.mobileRoot)
+                if (_sm && !_sm.allMatch && _sm.mismatchSecs && _sm.mismatchSecs.length) structureMismatchSecs = _sm.mismatchSecs
+            }
+            return buildCodeAsync(
+                root,
+                cache,
+                sectionNodes,
+                options.geoStructure || null,
+                options.mobileRoot || null,
+                structureMismatchSecs,
+            ).then(function (result) {
                 var code = result && result.code != null ? result.code : typeof result === "string" ? result : ""
                 var exportedNodeIds = result && result.exportedNodeIds ? result.exportedNodeIds : {}
                 var ownImageNodeIds = result && result.ownImageNodeIds ? result.ownImageNodeIds : {}

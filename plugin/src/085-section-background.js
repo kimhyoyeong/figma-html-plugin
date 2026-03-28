@@ -63,10 +63,11 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
     // 최상단이 IMAGE면 이미지 1개만 적용
     if (topFill.type === "IMAGE") {
         var dataUrlPromise
+        var moBgCtx = { cache: cache, secNo: secNo }
         if (cache && cache.image && node.id != null && cache.image[node.id]) {
             dataUrlPromise = Promise.resolve(cache.image[node.id])
         } else {
-            dataUrlPromise = exportImagePreferSourceBytesAsync(node)
+            dataUrlPromise = exportImagePreferSourceBytesAsync(node, moBgCtx)
         }
 
         return dataUrlPromise
@@ -133,10 +134,11 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
       }
       if (!fullBleedChild) return {decl: decl, bgChildId: null}
 
+      var moBleedCtx = { cache: cache, secNo: secNo }
       var dataUrlPromise =
           cache && cache.image && fullBleedChild.id != null && cache.image[fullBleedChild.id]
               ? Promise.resolve(cache.image[fullBleedChild.id])
-              : exportNodeImageAsync(fullBleedChild)
+              : exportNodeImageAsync(fullBleedChild, moBleedCtx)
 
       return dataUrlPromise
           .then(function (dataUrl) {

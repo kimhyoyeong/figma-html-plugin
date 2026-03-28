@@ -1,5 +1,6 @@
 /**
  * 082-deferred-css — 지연 CSS 누적·병합·BEM 정리·MO 셀렉터 필터·이미지 크기 var
+ *   구조 불일치(PC+MO) 시 096에서 `.pc-only .ap-section--NN …` / `.mo-only .ap-section--NN …` 형태로 누적
  *
  * 의존: 010 pad2, 070 getImageSizeDecl/cssInnerSel은 081·070 — pushDeferredImageImgSizeVars는 081 cssInner 이후
  */
@@ -57,9 +58,9 @@ function normalizeDeclForMergeKey(decl) {
     return pairs.map(function (x) { return x.k + ":" + x.v }).join(";")
 }
 
-/** deferred 규칙 선택자 선두의 `ap-section--` 번호 (없으면 빈 문자열) */
+/** deferred 규칙에 포함된 첫 `ap-section--NN` 번호 (`.pc-only .ap-section--02 …` 등 대응) */
 function leadingApSectionIdFromSelector(sel) {
-    var m = /^\.ap-section--(\d+)/.exec(String(sel || "").trim())
+    var m = /\.ap-section--(\d+)/.exec(String(sel || "").trim())
     return m ? m[1] : ""
 }
 
@@ -453,11 +454,13 @@ function moOverrideSelectorIsLive(sel, usedBySection) {
 }
 
 /** 래퍼(.ap-image .ap-section__image--XX)에 --ap-w/--ap-h만 넣음. 기존 .ap-image img 규칙이 var()로 활용 (ap-abs 래퍼는 생략) */
-function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapperIsApAbs) {
+function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapperIsApAbs, visibilityWrapper) {
     if (!nodeId || wrapperIsApAbs) return
     var decl = getImageSizeDecl(node)
     if (!decl) return
     var innerSel = cssInnerSelForNode(String(nodeId), opts, false)
-    var sel = ".ap-section--" + secClass + " " + innerSel.replace(/,/g, ", .ap-section--" + secClass + " ")
+    var vw = visibilityWrapper ? String(visibilityWrapper).replace(/^\./, "") : ""
+    var prefix = vw ? "." + vw + " .ap-section--" + secClass : ".ap-section--" + secClass
+    var sel = prefix + " " + innerSel.replace(/,/g, ", " + prefix + " ")
     pushDeferredStyle(ctx, sel, decl)
 }

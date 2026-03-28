@@ -390,12 +390,12 @@ function exportImageFillOnlyAsync(node) {
 }
 
 /** 자식 제거한 복제본을 export → fill만 있는 이미지 (imageHash 실패 시 대안) */
-function exportNodeImageFillOnlyAsync(node) {
+function exportNodeImageFillOnlyAsync(node, moAlignCtx) {
     if (!node || !isContainer(node)) return Promise.resolve(null)
     try {
         var clone = node.clone()
         while (clone.children && clone.children.length > 0) clone.removeChild(clone.children[0])
-        return exportNodeImageAsync(clone)
+        return exportNodeImageAsync(clone, moAlignCtx)
             .then(function (dataUrl) {
                 clone.remove()
                 return dataUrl
@@ -412,11 +412,19 @@ function exportNodeImageFillOnlyAsync(node) {
 }
 
 /** imageHash → (필요 시) 자식 제거 클론 래스터 → 전체 노드 export */
-function exportImageFillThenCloneFallbackAsync(node) {
+function exportImageFillThenCloneFallbackAsync(node, moAlignCtx) {
+    moAlignCtx = moAlignCtx || {}
+    var forced = getForceRasterFormatForMoExport(moAlignCtx.cache, moAlignCtx.secNo)
+    if (forced === "JPG" || forced === "PNG") {
+        if (hasImageFill(node) && isContainer(node) && hasVisibleChildren(node)) {
+            return exportNodeImageFillOnlyAsync(node, moAlignCtx)
+        }
+        return exportNodeImageAsync(node, moAlignCtx)
+    }
     return exportImageFillOnlyAsync(node).then(function (fromHash) {
         if (fromHash) return fromHash
-        if (hasImageFill(node) && isContainer(node) && hasVisibleChildren(node)) return exportNodeImageFillOnlyAsync(node)
-        return exportNodeImageAsync(node)
+        if (hasImageFill(node) && isContainer(node) && hasVisibleChildren(node)) return exportNodeImageFillOnlyAsync(node, moAlignCtx)
+        return exportNodeImageAsync(node, moAlignCtx)
     })
 }
 
@@ -424,12 +432,13 @@ function exportImageFillThenCloneFallbackAsync(node) {
  * 배경/ap-image 공통. exportNodeImageAsync 는 자식 TEXT 까지 합쳐 래스터 → fill+TEXT 프레임은
  * mustStrip 경로에서 fill/클론만 사용.
  */
-function exportImagePreferSourceBytesAsync(node) {
+function exportImagePreferSourceBytesAsync(node, moAlignCtx) {
+    moAlignCtx = moAlignCtx || {}
     var mustStripChildrenForRaster = hasImageFill(node) && isContainer(node) && hasTextInSubtree(node)
-    if (mustStripChildrenForRaster) return exportImageFillThenCloneFallbackAsync(node)
-    return exportNodeImageAsync(node).then(function (dataUrl) {
+    if (mustStripChildrenForRaster) return exportImageFillThenCloneFallbackAsync(node, moAlignCtx)
+    return exportNodeImageAsync(node, moAlignCtx).then(function (dataUrl) {
         if (dataUrl) return dataUrl
-        return exportImageFillThenCloneFallbackAsync(node)
+        return exportImageFillThenCloneFallbackAsync(node, moAlignCtx)
     })
 }
 
@@ -565,11 +574,27 @@ var IMAGE_EXPORT_MAX_WIDTH = 200   // 미리보기
 var IMAGE_EXPORT_ZIP_WIDTH = 1200  // ZIP 내보내기
 var _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
 
+/** MO(_mo): 다음 imgNN stem 이 PC imageList 와 같을 때 PC 확장자로 래스터 export 우선 */
+function getForceRasterFormatForMoExport(cache, secNo) {
+    if (!cache || cache.imageSuffix !== "_mo" || !cache.pcRasterExtByStem) return null
+    var secEarly = Number(secNo) || 1
+    if (!cache.imgCountBySec) return null
+    var n = (cache.imgCountBySec[secEarly] || 0) + 1
+    var project = normalizeProjectName(cache.projectName)
+    var stemPrefix = typeof ASSETS_IMAGES_PREFIX !== "undefined" ? ASSETS_IMAGES_PREFIX : "assets/images/"
+    var stem = stemPrefix + "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n)
+    var ext = cache.pcRasterExtByStem[stem]
+    if (ext === ".jpg" || ext === ".jpeg") return "JPG"
+    if (ext === ".png") return "PNG"
+    return null
+}
+
 /** 노드 PNG/JPG export — imageExportNeedsPngAsync(투명 강제 + 점수제) 후 JPG 우선·실패 시 PNG */
-function exportNodeImageAsync(node) {
+/** @param {{ cache?: object, secNo?: number }|null} moAlignCtx */
+function exportNodeImageAsync(node, moAlignCtx) {
+    moAlignCtx = moAlignCtx || {}
     if (!node) return Promise.resolve(null)
     try {
-        var isText = node.type === "TEXT"
         var w = _currentExportWidth
         /** @param {"PNG"|"JPG"} format */
         function doExport(format, widthOrNull, extraOpts) {
@@ -611,6 +636,19 @@ function exportNodeImageAsync(node) {
             return tryFormatSequence("JPG").then(function (result) {
                 if (result) return result
                 return tryFormatSequence("PNG")
+            })
+        }
+        var forced = getForceRasterFormatForMoExport(moAlignCtx.cache, moAlignCtx.secNo)
+        if (forced === "JPG") {
+            return tryFormatSequence("JPG").then(function (result) {
+                if (result) return result
+                return tryFormatSequence("PNG")
+            })
+        }
+        if (forced === "PNG") {
+            return tryFormatSequence("PNG").then(function (result) {
+                if (result) return result
+                return tryFormatSequence("JPG")
             })
         }
         return imageExportNeedsPngAsync(node).then(function (usePng) {

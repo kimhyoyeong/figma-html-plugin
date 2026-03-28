@@ -1,6 +1,7 @@
 /**
  * 095-responsive-pcmo — PC HTML + @media로 MO 스타일·배경·picture 병합
  *
+ * 구조 불일치 시 096이 `.pc-only .ap-section--NN` / `.mo-only .ap-section--NN` 지연 규칙 출력 — parseCodeIntoParts·injectBgOverridesForMo 가 래퍼+자손 선택자 인식.
  * buildMobileOverrides — 레이아웃 등은 인덱스 walk; 이미지 크기는 렌더순서(096)·슬롯·sourceNodeId 매칭
  * getSectionStructureMatch — 섹션별 구조 시그니처 일치 여부(하이브리드 경고용)
  * parseCodeIntoParts — 산출 HTML에서 base/section 스타일/article 분리
@@ -19,6 +20,9 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         if (Object.keys(exportedSet).length === 0) return true
         return exportedSet[String(id)] === true
     }
+    var skipStructSecs = options && options.skipStructureMismatchSecs ? options.skipStructureMismatchSecs : []
+    var skipStructSet = Object.create(null)
+    for (var si = 0; si < skipStructSecs.length; si++) skipStructSet[String(skipStructSecs[si])] = true
     /** @media 블록 안: 동일 셀렉터 선언을 한 규칙으로 합침 (diff·파일 길이·리뷰용) */
     var moMediaRuleList = []
     function pushMoMoRule(sel, decl) {
@@ -250,6 +254,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         var mSec = mSecs[s]
         if (!mSec || dSec.type !== mSec.type) continue
         var secClass = sectionClassPrefix(s + 1)
+        if (skipStructSet[secClass]) continue
         var mSecBox = getAbs(mSec)
         var mediaSecH = getMediaSectionCanvasHeightDecl(dSec, mSec, mSecBox)
         if (mediaSecH) pushMoMoRule(".ap-section--" + secClass, mediaSecH)
@@ -436,36 +441,101 @@ function parseCodeIntoParts(code) {
     if (styleStart < 0 || styleEnd < 0 || styleEnd <= styleStart) return {baseStyles: "", sectionStyles: "", articleHtml: "", headPrefix: ""}
     var headPrefix = styleStart > 0 ? code.substring(0, styleStart).trim() : ""
     var fullStyle = code.substring(styleStart + 7, styleEnd).trim()
-    var sectionStart = fullStyle.search(/\n\.ap-section--/)
+    var idxBare = fullStyle.search(/\n\.ap-section--/)
+    var idxWrapped = fullStyle.search(/\n\.(?:pc-only|mo-only)\s+\.ap-section--/)
+    var candidates = []
+    if (idxBare >= 0) candidates.push(idxBare)
+    if (idxWrapped >= 0) candidates.push(idxWrapped)
+    var sectionStart = candidates.length ? Math.min.apply(null, candidates) : -1
     var baseStyles = sectionStart >= 0 ? fullStyle.substring(0, sectionStart) : fullStyle
     var sectionStyles = sectionStart >= 0 ? fullStyle.substring(sectionStart).trim() : ""
     var articleHtml = code.substring(styleEnd + 8).trim()
     return {baseStyles: baseStyles, sectionStyles: sectionStyles, articleHtml: articleHtml, headPrefix: headPrefix}
 }
 
+/**
+ * PC+MO 하이브리드 스타일에 남은 assets 경로를 MO imageList 실제 확장자로 통일
+ */
+function rewriteMoRasterUrlsInSectionStyles(sectionStyles, moPathByPcStem) {
+    if (!sectionStyles || !moPathByPcStem) return sectionStyles || ""
+    function resolvePath(pathRaw) {
+        var p = String(pathRaw || "").trim()
+        if (p.indexOf("assets/images/") !== 0 || !/\.(png|jpe?g)$/i.test(p)) return null
+        var stem = p.replace(/\.(png|jpe?g)$/i, "")
+        var stemBase = stem.replace(/_mo$/i, "")
+        return moPathByPcStem[stemBase] || moPathByPcStem[stem] || null
+    }
+    var out = sectionStyles.replace(/--bg-img\s*:\s*url\s*\(\s*["']?([^"'()]+)["']?\s*\)/gi, function (full, path) {
+        var r = resolvePath(path)
+        return r ? "--bg-img:url(" + r + ")" : full
+    })
+    out = out.replace(/(background-image\s*:\s*url\s*\(\s*["']?)([^"'()]+)(["']?\s*\))/gi, function (full, open, path, close) {
+        var r = resolvePath(path)
+        return r ? open + r + close : full
+    })
+    return out
+}
+
 /** sectionStyles에서 --bg-img/background-image → @media에 _mo 이미지 오버라이드 병합 */
-function injectBgOverridesForMo(sectionStyles, overridesCss, excludedSecClasses) {
+function injectBgOverridesForMo(sectionStyles, overridesCss, excludedSecClasses, moPathByPcStem) {
     excludedSecClasses = excludedSecClasses || []
     var exclude = {}
     for (var i = 0; i < excludedSecClasses.length; i++) exclude[String(excludedSecClasses[i])] = true
 
+    function resolveMoAssetPath(pcPathWithExt, ext) {
+        var p = String(pcPathWithExt || "").trim()
+        var stem = p.replace(/\.(png|jpe?g)$/i, "")
+        var stemBase = stem.replace(/_mo$/i, "")
+        if (moPathByPcStem) {
+            if (moPathByPcStem[stemBase]) return moPathByPcStem[stemBase]
+            if (moPathByPcStem[stem]) return moPathByPcStem[stem]
+        }
+        if (/_mo\.(png|jpe?g)$/i.test(p)) return p
+        return p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext)
+    }
+
+    var reUrlAsset = "assets\\/images\\/[^\"')\\s]+\\.(?:png|jpg|jpeg)"
     var bgOverrides = {}
-    ;(sectionStyles || "").replace(/\.ap-section--(\d+)\s*\{[^}]*--bg-img\s*:\s*url\s*\(\s*(assets\/images\/[^)]+\.(png|jpg|jpeg))\s*\)[^}]*\}/gi, function (_, secClass, path, ext) {
-        var secNorm = secClass.length === 1 ? "0" + secClass : secClass
-        if (exclude[secNorm] || exclude[secClass]) return ""
-        var pathMo = path.trim().replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext)
-        bgOverrides[secNorm] = "--bg-img:url(" + pathMo + ")"
-        return ""
-    })
+    ;(sectionStyles || "").replace(
+        new RegExp(
+            "(?:\\.(?:pc-only|mo-only)\\s+)?\\.ap-section--(\\d+)\\s*\\{[^}]*--bg-img\\s*:\\s*url\\s*\\(\\s*[\"']?(" +
+                reUrlAsset +
+                ")[\"']?\\s*\\)[^}]*\\}",
+            "gi",
+        ),
+        function (_, secClass, path) {
+            var pathTrim = String(path || "").trim()
+            var extMatch = /\.(png|jpe?g)$/i.exec(pathTrim)
+            var ext = extMatch ? extMatch[1].toLowerCase() : "jpg"
+            if (ext === "jpeg") ext = "jpg"
+            var secNorm = secClass.length === 1 ? "0" + secClass : secClass
+            if (exclude[secNorm] || exclude[secClass]) return ""
+            var pathMo = resolveMoAssetPath(pathTrim, ext)
+            bgOverrides[secNorm] = "--bg-img:url(" + pathMo + ")"
+            return ""
+        },
+    )
     var frameBgOverrides = []
-    ;(sectionStyles || "").replace(/(\.ap-section--\d+(?:\s+[^{]+)?)\s*\{[^}]*?background-image\s*:\s*url\s*\(\s*(assets\/images\/[^)]+\.(png|jpg|jpeg))\s*\)[^}]*\}/gi, function (_, sel, path, ext) {
-        var selector = (sel || "").trim()
-        if (!selector) return ""
-        if (/^\.ap-section--\d+\s*$/.test(selector)) return ""
-        var pathMo = path.trim().replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext)
-        frameBgOverrides.push({ sel: selector, pathMo: pathMo })
-        return ""
-    })
+    ;(sectionStyles || "").replace(
+        new RegExp(
+            "(\\.ap-section--\\d+(?:\\s+[^{]+)?)\\s*\\{[^}]*?background-image\\s*:\\s*url\\s*\\(\\s*[\"']?(" +
+                reUrlAsset +
+                ")[\"']?\\s*\\)[^}]*\\}",
+            "gi",
+        ),
+        function (_, sel, path) {
+            var selector = (sel || "").trim()
+            if (!selector) return ""
+            if (/^\.ap-section--\d+\s*$/.test(selector)) return ""
+            var pathTrim = String(path || "").trim()
+            var extMatch = /\.(png|jpe?g)$/i.exec(pathTrim)
+            var ext = extMatch ? extMatch[1].toLowerCase() : "jpg"
+            if (ext === "jpeg") ext = "jpg"
+            var pathMo = resolveMoAssetPath(pathTrim, ext)
+            frameBgOverrides.push({ sel: selector, pathMo: pathMo })
+            return ""
+        },
+    )
 
     if (!Object.keys(bgOverrides).length && !frameBgOverrides.length) return overridesCss || ""
 
@@ -511,13 +581,21 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     var sectionStyles = pc.sectionStyles || ""
     var artTrim = String(pc.articleHtml || "").trim()
     var usedBem = artTrim ? buildUsedApSectionBemFromArticleHtml(pc.articleHtml) : null
+    var secStructMerge = getSectionStructureMatch(desktopRoot, mobileRoot)
+    var skipMoWalkSecs = secStructMerge && secStructMerge.mismatchSecs ? secStructMerge.mismatchSecs : []
+    var moPathByPcStem = buildMoRasterPathByPcStemFromMoImageList(options.moImages || [])
+    sectionStyles = rewriteMoRasterUrlsInSectionStyles(sectionStyles, moPathByPcStem)
+
     var overrides = buildMobileOverrides(
         desktopRoot,
         mobileRoot,
         breakpoint,
-        Object.assign({}, options, { usedApSectionBemBySection: usedBem }),
+        Object.assign({}, options, {
+            usedApSectionBemBySection: usedBem,
+            skipStructureMismatchSecs: skipMoWalkSecs,
+        }),
     )
-    overrides = injectBgOverridesForMo(sectionStyles, overrides)
+    overrides = injectBgOverridesForMo(sectionStyles, overrides, skipMoWalkSecs, moPathByPcStem)
 
     var mergedCss = [base, sectionStyles, overrides].filter(function (x) {
         return x && String(x).trim()
@@ -528,7 +606,8 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     articleHtml = articleHtml.replace(/<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+)\.(png|jpg|jpeg)"([^>]*)>/gi, function (full, before, basePath, ext, after) {
         if (/\bdata-slide-pc-img\s*=\s*["']1["']/.test(before + after)) return full
         if (String(ext).toLowerCase() === "svg") { return "<img " + before + "src=\"" + basePath + "." + ext + "\"" + after + ">"; }
-        return '<picture><source media="(max-width:' + bp + 'px)" srcset="' + basePath + "_mo." + ext + '"><img ' + before + 'src="' + basePath + "." + ext + '"' + after + "></picture>"
+        var moSrc = moPathByPcStem[basePath] || basePath + "_mo." + ext
+        return '<picture><source media="(max-width:' + bp + 'px)" srcset="' + moSrc + '"><img ' + before + 'src="' + basePath + "." + ext + '"' + after + "></picture>"
     })
     var headPrefix = (pc.headPrefix || "").trim()
     return (headPrefix ? headPrefix + "\n" : "") + styleBlock + articleHtml
