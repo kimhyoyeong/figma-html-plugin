@@ -1309,8 +1309,8 @@
         <span class="previewToolbarTitle">미리보기</span>
         <button type="button" class="viewBtn u-hidden" id="previewViewPc" data-view="pc">PC</button>
         <button type="button" class="viewBtn u-hidden" id="previewViewMo" data-view="mo">MO</button>
-        <span id="previewToolbarDualHint" class="previewToolbarDualHint u-hidden">PC · MO 동시 미리보기</span>
-        <span class="previewToolbarHint" id="previewStructureHint">레이어 구조가 다르면 PC/MO를 각각 표시합니다</span>
+        <!-- <span id="previewToolbarDualHint" class="previewToolbarDualHint u-hidden">PC · MO 동시 미리보기</span> -->
+        <span class="previewToolbarDualHint" id="previewToolbarDualHint">레이어 구조가 다르면 PC/MO를 각각 표시합니다</span>
       </div>
       <div id="previewViewport">
         <div id="previewSingleWrap" class="previewSingleWrap">
@@ -1899,9 +1899,8 @@
     var selectedNode = null;
     var vectorTypes = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "LINE", "ELLIPSE", "POLYGON", "RECTANGLE"];
 
-    /** 구조 불일치(separateViews)일 때만 이중 iframe. 일치 시 단일 iframe에서 PC/MO 토글로 pc-only·mo-only 반영 */
     function isHybridPreviewSplit() {
-      return !!(separateViews && mobileDataTree && previewImagesReady);
+      return !!(mobileDataTree && previewImagesReady);
     }
 
     /** MO iframe·meta viewport 폭(px), bp와 375 중 작은 값 */
@@ -2624,26 +2623,7 @@
         var frameCls = previewRole === "mo" ? "preview-frame preview-frame--mo" : "preview-frame preview-frame--pc";
         inner = '<div class="' + frameCls + '">' + inner + "</div>";
       }
-      /** iframe 뷰포트·@media와 무관하게 미리보기 역할에 맞게 pc-only / mo-only 표시 (단일·분할 공통) */
-      var previewVisibilityFix = "";
-      if (!forExport && (previewRole === "pc" || previewRole === "mo")) {
-        if (previewRole === "pc") {
-          previewVisibilityFix =
-            "<style id=\"ap-preview-pc-mo\">.pc-only{display:block!important}.mo-only{display:none!important}</style>";
-        } else {
-          previewVisibilityFix =
-            "<style id=\"ap-preview-pc-mo\">.pc-only{display:none!important}.mo-only{display:block!important}</style>";
-        }
-      }
-      return (
-        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">" +
-        viewport +
-        baseStyle +
-        "</head><body>" +
-        inner +
-        previewVisibilityFix +
-        "</body></html>"
-      );
+      return '<!DOCTYPE html><html><head><meta charset="utf-8">' + viewport + baseStyle + "</head><body>" + inner + "</body></html>";
     }
 
     var PREVIEW_SWIPER_FIX_DEBOUNCE_MS = 140;

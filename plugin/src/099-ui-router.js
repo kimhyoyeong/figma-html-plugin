@@ -105,8 +105,9 @@ figma.ui.onmessage = function (msg) {
                         pcRasterExtByStem: pcRasterExtByStem,
                     }).then(function (moPayload) {
                         var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
-                        var separateViews = !!(secMatch && secMatch.mismatchSecs && secMatch.mismatchSecs.length)
-                        // 구조 불일치 섹션: HTML은 div.pc-only / div.mo-only 로 section 이중 본문, CSS는 `.pc-only .ap-section--NN` 등. @media MO walk는 해당 섹션 스킵(skipStructureMismatchSecs).
+                        // 미리보기는 항상 단일 iframe + PC/MO 토글(@media·pc-only/mo-only 보정). 이중 탭은 사용하지 않음.
+                        var separateViews = false
+                        // 구조 불일치 섹션: HTML은 div.pc-only / div.mo-only … hybridMismatchSecs 로 트리 배지·상태만 전달.
                         var code = combinePcMoAsBreakpoint(payload.code || "", rootDesktop, rootMobile, breakpoint, {
                             exportedNodeIds: payload.exportedNodeIds,
                             ownImageNodeIds: payload.ownImageNodeIds,
