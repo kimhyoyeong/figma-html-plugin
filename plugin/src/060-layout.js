@@ -13,6 +13,32 @@
  * getFirstSolidStroke, buildCornerRadiusDecl, buildStrokeDecl, buildStrokeDeclDiff — 테두리·모서리
  */
 // ----- 4. Layout Utils (flex vars, abs decl) -----
+/**
+ * row Auto Layout에서 플로우에 참여하는 보이는 자식이 2개 이상이고,
+ * absoluteBoundingBox 높이가 모두 같으면 true (교차축 MIN→flex-start 대신 stretch가 자연스러움).
+ */
+function rowFlexVisibleChildrenEqualHeight(node) {
+    if (!node || !isFlex(node)) return false
+    try {
+        if (node.layoutMode === "VERTICAL") return false
+        var kids = (node.children || []).filter(function (c) {
+            return c && isVisible(c) && !isAbsolutePositioned(c)
+        })
+        if (kids.length < 2) return false
+        var h0 = null
+        for (var ri = 0; ri < kids.length; ri++) {
+            var b = getAbs(kids[ri])
+            if (!b || b.h == null) return false
+            var hh = r2(b.h)
+            if (h0 === null) h0 = hh
+            else if (hh !== h0) return false
+        }
+        return true
+    } catch (e) {
+        return false
+    }
+}
+
 /** Auto Layout 설정을 CSS 변수용 객체로 추출. isFlex(node)일 때만 값 채움 */
 function getLayoutVars(node) {
     var out = {direction: "", gap: "", pt: "", pr: "", pb: "", pl: "", justify: "", align: "", wrap: ""}
@@ -62,6 +88,11 @@ function getLayoutVars(node) {
         if (isBtnNode(node) && out.justify === "center") {
             out.pr = "0"
             out.pl = "0"
+        }
+
+        // row + 교차축 MIN → align flex-start 출력; 자식 높이가 전부 같으면 stretch(align 선언 생략)가 동일·배경 채움에 유리
+        if (out.direction === "row" && out.align === "flex-start" && rowFlexVisibleChildrenEqualHeight(node)) {
+            out.align = ""
         }
     } catch (e) {}
     return out

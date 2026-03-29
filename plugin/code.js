@@ -923,6 +923,32 @@ function containerNeedsRelativeForAbsoluteChildren(node) {
  * getFirstSolidStroke, buildCornerRadiusDecl, buildStrokeDecl, buildStrokeDeclDiff — 테두리·모서리
  */
 // ----- 4. Layout Utils (flex vars, abs decl) -----
+/**
+ * row Auto Layout에서 플로우에 참여하는 보이는 자식이 2개 이상이고,
+ * absoluteBoundingBox 높이가 모두 같으면 true (교차축 MIN→flex-start 대신 stretch가 자연스러움).
+ */
+function rowFlexVisibleChildrenEqualHeight(node) {
+    if (!node || !isFlex(node)) return false
+    try {
+        if (node.layoutMode === "VERTICAL") return false
+        var kids = (node.children || []).filter(function (c) {
+            return c && isVisible(c) && !isAbsolutePositioned(c)
+        })
+        if (kids.length < 2) return false
+        var h0 = null
+        for (var ri = 0; ri < kids.length; ri++) {
+            var b = getAbs(kids[ri])
+            if (!b || b.h == null) return false
+            var hh = r2(b.h)
+            if (h0 === null) h0 = hh
+            else if (hh !== h0) return false
+        }
+        return true
+    } catch (e) {
+        return false
+    }
+}
+
 /** Auto Layout 설정을 CSS 변수용 객체로 추출. isFlex(node)일 때만 값 채움 */
 function getLayoutVars(node) {
     var out = {direction: "", gap: "", pt: "", pr: "", pb: "", pl: "", justify: "", align: "", wrap: ""}
@@ -972,6 +998,11 @@ function getLayoutVars(node) {
         if (isBtnNode(node) && out.justify === "center") {
             out.pr = "0"
             out.pl = "0"
+        }
+
+        // row + 교차축 MIN → align flex-start 출력; 자식 높이가 전부 같으면 stretch(align 선언 생략)가 동일·배경 채움에 유리
+        if (out.direction === "row" && out.align === "flex-start" && rowFlexVisibleChildrenEqualHeight(node)) {
+            out.align = ""
         }
     } catch (e) {}
     return out
@@ -4678,6 +4709,107 @@ function getFillFlexStartWidthDecl(node, parent) {
     return ""
 }
 
+/**
+ * 직계 부모·자식 getAbs 가로가 같으면 width:100% (반응형에서 부모 안 전폭).
+ * 절대 배치 자식은 제외 (--ap-w와 충돌).
+ */
+function getSameWidthAsParentDecl(node, parent) {
+    if (!node || !parent) return ""
+    try {
+        if (isAbsoluteLike(node, parent)) return ""
+    } catch (e) {
+        return ""
+    }
+    var cBox = getAbs(node)
+    var pBox = getAbs(parent)
+    if (!cBox || !pBox || cBox.w == null || pBox.w == null) return ""
+    if (r2(cBox.w) !== r2(pBox.w)) return ""
+    return "width:100%"
+}
+
+/**
+ * ap-section__container: 섹션이 column + align-items flex-start 이면 자식이 가로로 안 늘어남.
+ * bounding 상 자식이 부모보다 좁을 때 width:100% 로 자손의 % 기준을 잡아줌.
+ * 가로 FIXED(고정 픽셀)인 컨테이너는 의도적으로 부모보다 좁을 수 있음 → 휴리스틱 제외(--ap-w calc 유지).
+ * semanticNodeId: PC/MO walkPair에서 MO 노드 m에 데스크톱 시맨틱(d.id)을 넘길 때 사용.
+ */
+function sectionContainerNeedsFullWidthInColumnParent(frameNode, parent, sectionSemantics, semanticNodeId) {
+    if (!frameNode || frameNode.type !== "FRAME" || !parent) return false
+    try {
+        if (isAbsoluteLike(frameNode, parent)) return false
+        if (frameNode.layoutSizingHorizontal === "FIXED") return false
+        var semId = semanticNodeId != null ? String(semanticNodeId) : String(frameNode.id)
+        var arr = sectionSemantics && sectionSemantics[semId]
+        if (!arr || !arr.length) return false
+        var hasContainer = false
+        for (var si = 0; si < arr.length; si++) {
+            if (/^ap-section__container/.test(String(arr[si] || ""))) {
+                hasContainer = true
+                break
+            }
+        }
+        if (!hasContainer) return false
+        if (!isFlex(parent)) return false
+        var pv = getLayoutVars(parent)
+        if (pv.direction !== "column") return false
+        var pBox = getAbs(parent)
+        var fBox = getAbs(frameNode)
+        if (!pBox || !fBox || pBox.w == null || fBox.w == null) return false
+        if (r2(fBox.w) >= r2(pBox.w)) return false
+        return true
+    } catch (e) {
+        return false
+    }
+}
+
+/**
+ * Hug 텍스트는 absoluteBoundingBox 가로가 글자 폭만 잡혀 부모 프레임과 숫자가 다름.
+ * column flex 안에서 CENTER/RIGHT/JUSTIFIED면 부모 전폭 기준 정렬이 되려면 width:100% 필요.
+ * 단, 부모 교차축이 CENTER(align-items:center)면 자식은 flex로 가로 중앙 배치되므로 width:100% 생략(전폭+text-align로 이중·깨짐 방지).
+ */
+function textNeedsFullWidthForAlignInColumnFlex(textNode, parent) {
+    if (!textNode || textNode.type !== "TEXT" || !parent) return false
+    try {
+        if (!isFlex(parent)) return false
+        var pv = getLayoutVars(parent)
+        if (pv.direction !== "column") return false
+        var counterAxis = String(parent.counterAxisAlignItems || "").toUpperCase()
+        if (counterAxis === "CENTER") return false
+        var ta = String(textNode.textAlignHorizontal || "").toUpperCase()
+        if (ta !== "CENTER" && ta !== "RIGHT" && ta !== "JUSTIFIED") return false
+        var isFill = false
+        try {
+            isFill = textNode.layoutSizingHorizontal === "FILL"
+        } catch (e2) {}
+        if (isFill) return false
+        var pBox = getAbs(parent)
+        var tBox = getAbs(textNode)
+        if (!pBox || !tBox || pBox.w == null || tBox.w == null) return false
+        if (r2(pBox.w) <= r2(tBox.w)) return false
+        return true
+    } catch (e) {
+        return false
+    }
+}
+
+/**
+ * TEXT가 직계 부모 가로를 “채우는” 경우 → 시맨틱 지연 규칙(.ap-section__*)에 width:100% 병합 (줄바꿈·text-align 기준 폭).
+ * 1) Auto Layout Fill: layoutSizingHorizontal === "FILL"
+ * 2) 또는 getSameWidthAsParentDecl (bounding 가로 = 부모)
+ * 3) 또는 column flex + (CENTER|RIGHT|JUSTIFIED) + Hug·좁은 박스 — 단 부모 align-items:center 제외
+ * 절대 배치(ap-abs)는 --ap-w와 충돌하므로 제외.
+ */
+function getTextFullWidthDecl(node, textAbs, parent) {
+    if (textAbs || !node || node.type !== "TEXT") return ""
+    var byFill = false
+    try {
+        if (node.layoutSizingHorizontal === "FILL") byFill = true
+    } catch (e) {}
+    if (!byFill && parent && getSameWidthAsParentDecl(node, parent)) byFill = true
+    if (!byFill && parent && textNeedsFullWidthForAlignInColumnFlex(node, parent)) byFill = true
+    return byFill ? "width:100%" : ""
+}
+
 /** 선택 2개 시 가로 큰 쪽=데스크톱, 작은 쪽=모바일. breakpoint = 모바일 width */
 function resolveDesktopMobile(sel) {
     if (!sel || sel.length < 2) return null
@@ -4854,15 +4986,25 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                     var fillW = getFillFlexStartWidthDecl(m, mNode)
                     var fillWD = getFillFlexStartWidthDecl(d, dNode)
                     if (fillW && fillW !== fillWD && !nodeHasApSectionImageSemantic(d.id, moOpts)) declParts.push(fillW)
-                    else {
-                        var mBox = getAbs(m)
-                        var dBox = getAbs(d)
-                        var mFixed = mBox && mBox.w != null && m.layoutSizingHorizontal === "FIXED"
-                        if (mFixed && layoutPxNum(mBox.w) !== layoutPxNum(dBox && dBox.w != null ? dBox.w : 0)) {
-                            declParts.push("--ap-w:" + cssOutLayoutPx(mBox.w))
-                            declParts.push("width:calc(var(--ap-w)/var(--ap-width)*100cqi)")
+                    else if (!nodeHasApSectionImageSemantic(d.id, moOpts)) {
+                        var sameWM = getSameWidthAsParentDecl(m, mNode)
+                        var sameWD = getSameWidthAsParentDecl(d, dNode)
+                        if (sameWM && !sameWD) declParts.push(sameWM)
+                        else {
+                            var mBox = getAbs(m)
+                            var dBox = getAbs(d)
+                            var mFixed = mBox && mBox.w != null && m.layoutSizingHorizontal === "FIXED"
+                            if (mFixed && layoutPxNum(mBox.w) !== layoutPxNum(dBox && dBox.w != null ? dBox.w : 0)) {
+                                declParts.push("--ap-w:" + cssOutLayoutPx(mBox.w))
+                                declParts.push("width:calc(var(--ap-w)/var(--ap-width)*100cqi)")
+                            }
                         }
                     }
+                }
+                if (!mAbs && !moImageFigureDup && !nodeHasApSectionImageSemantic(d.id, moOpts)) {
+                    var contStrM = sectionContainerNeedsFullWidthInColumnParent(m, mNode, semMap, String(d.id))
+                    var contStrD = sectionContainerNeedsFullWidthInColumnParent(d, dNode, semMap, String(d.id))
+                    if (contStrM && !contStrD) declParts.push("width:100%")
                 }
                 var strokeDiff = buildStrokeDeclDiff(d, m)
                 if (strokeDiff) declParts.push(strokeDiff)
@@ -4900,6 +5042,9 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                         if (textDecl) declParts.push(textDecl)
                         if (textOverrideDone && d.id != null) textOverrideDone[String(d.id)] = true
                     }
+                    var textFillM = getTextFullWidthDecl(m, isAbsoluteLike(m, mNode), mNode)
+                    var textFillD = getTextFullWidthDecl(d, isAbsoluteLike(d, dNode), dNode)
+                    if (textFillM && textFillM !== textFillD) declParts.push(textFillM)
                     if (isAbsoluteLike(m, mNode)) {
                         var adTxt = buildAbsDeclDiff(d, dNode, m, mNode)
                         if (adTxt) declParts.push(adTxt)
@@ -4915,6 +5060,11 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var fillW2 = getFillFlexStartWidthDecl(m, mNode)
                 var fillW2D = getFillFlexStartWidthDecl(d, dNode)
                 if (fillW2 && fillW2 !== fillW2D && !nodeHasApSectionImageSemantic(d.id, moOpts)) declParts.push(fillW2)
+                else if (!nodeHasApSectionImageSemantic(d.id, moOpts)) {
+                    var sw2M = getSameWidthAsParentDecl(m, mNode)
+                    var sw2D = getSameWidthAsParentDecl(d, dNode)
+                    if (sw2M && !sw2D) declParts.push(sw2M)
+                }
                 var mAbs2 = isAbsoluteLike(m, mNode)
                 if (mAbs2) {
                     var ad2 =
@@ -5048,10 +5198,13 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                             if (textDecl) nameTxtDecls.push(textDecl)
                             var dParN = dNode.parent
                             var mParN = mText.parent
+                            var nameFillM = getTextFullWidthDecl(mText, isAbsoluteLike(mText, mParN), mParN)
+                            var nameFillD = getTextFullWidthDecl(dNode, isAbsoluteLike(dNode, dParN), dParN)
                             if (dParN && mParN && isAbsoluteLike(mText, mParN)) {
                                 var adName = buildAbsDeclDiff(dNode, dParN, mText, mParN)
                                 if (adName) nameTxtDecls.push(adName)
                             }
+                            if (nameFillM && nameFillM !== nameFillD) nameTxtDecls.push(nameFillM)
                             if (nameTxtDecls.length) {
                                 pushMoMoRule(".ap-section--" + secCls + " " + deskTxtSel, nameTxtDecls.join(";"))
                             }
@@ -5618,8 +5771,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         if (includeAbs === undefined) includeAbs = true
         var inner = cssInnerSelForNode(id, ropts || {}, false)
         var vw = visWrapFromOpts(ropts)
+        var textDeclParts = []
         var decl = buildTextVarsDecl(ts)
-        if (decl) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), decl)
+        if (decl) textDeclParts.push(decl)
+        var textFullW = getTextFullWidthDecl(node, textAbs, parent)
+        if (textFullW) textDeclParts.push(textFullW)
+        if (textDeclParts.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textDeclParts.join(";"))
         if (includeAbs && textAbs && id) {
             var textAbsDecl = buildAbsDecl(node, parent)
             if (textAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textAbsDecl)
@@ -5773,7 +5930,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     if (flexImgGrp) declPartsImgGrp.push(flexImgGrp)
                 }
                 var fillWImgGrp = getFillFlexStartWidthDecl(node, parent)
-                if (fillWImgGrp && !nodeHasApSectionImageSemantic(node.id, opts)) declPartsImgGrp.push(fillWImgGrp)
+                var fillImgGrpPushed = !!(fillWImgGrp && !nodeHasApSectionImageSemantic(node.id, opts))
+                if (fillImgGrpPushed) declPartsImgGrp.push(fillWImgGrp)
+                else if (!absImgGrp && !nodeHasApSectionImageSemantic(node.id, opts)) {
+                    var sameWImgGrp = getSameWidthAsParentDecl(node, parent)
+                    if (sameWImgGrp) declPartsImgGrp.push(sameWImgGrp)
+                }
                 if (!useFlexImg && !absImgGrp && containerNeedsRelativeForAbsoluteChildren(node)) declPartsImgGrp.push("position:relative")
                 if (declPartsImgGrp.length && id) {
                     pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), declPartsImgGrp.join(";"))
@@ -5831,6 +5993,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var parentBox = parent ? getAbs(parent) : null
         var isFullWidth = node.layoutSizingHorizontal === "FILL" ||
             (parentBox && box && box.w != null && parentBox.w != null && r2(box.w) === r2(parentBox.w))
+        var containerStretchW = sectionContainerNeedsFullWidthInColumnParent(node, parent, opts && opts.sectionSemantics, null)
+        var effFullWidth = isFullWidth || containerStretchW
 
             var frameBase = [abs ? "ap-abs" : "", isBtnNode(node) ? "ap-btn" : ""].filter(Boolean).join(" ")
             var cls = apNodeClassList(frameBase, id, opts)
@@ -5846,11 +6010,11 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (flexDecl) declParts.push(flexDecl)
         }
 
-        if (isFullWidth && !nodeHasApSectionImageSemantic(node.id, opts)) {
+        if (effFullWidth && !nodeHasApSectionImageSemantic(node.id, opts)) {
             declParts.push("width:100%")
         }
 
-        if (!isFullWidth) {
+        if (!effFullWidth) {
             var fillWidthDecl = getFillFlexStartWidthDecl(node, parent)
             if (fillWidthDecl && !nodeHasApSectionImageSemantic(node.id, opts)) declParts.push(fillWidthDecl)
             else if (!abs) {
@@ -5956,7 +6120,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     var strokeDeclCh = buildStrokeDecl(ch)
                     if (strokeDeclCh) itemDeclParts.push(strokeDeclCh)
                     var fillWidthCh = getFillFlexStartWidthDecl(ch, node)
-                    if (fillWidthCh && !chAbs && !nodeHasApSectionImageSemantic(ch.id, opts)) itemDeclParts.push(fillWidthCh)
+                    var fillChPushed = !!(fillWidthCh && !chAbs && !nodeHasApSectionImageSemantic(ch.id, opts))
+                    if (fillChPushed) itemDeclParts.push(fillWidthCh)
+                    else if (!chAbs && !nodeHasApSectionImageSemantic(ch.id, opts)) {
+                        var sameWCh = getSameWidthAsParentDecl(ch, node)
+                        if (sameWCh) itemDeclParts.push(sameWCh)
+                    }
                     var itemDecl = itemDeclParts.join(";")
 
                     if (itemDecl && leafSel) {
@@ -6009,7 +6178,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             }
 
             var fillWidthDecl2 = getFillFlexStartWidthDecl(node, parent)
-            if (fillWidthDecl2 && !nodeHasApSectionImageSemantic(node.id, opts)) declParts2Flex.push(fillWidthDecl2)
+            var fillGrpPushed = !!(fillWidthDecl2 && !nodeHasApSectionImageSemantic(node.id, opts))
+            if (fillGrpPushed) declParts2Flex.push(fillWidthDecl2)
+            else if (!abs2 && !nodeHasApSectionImageSemantic(node.id, opts)) {
+                var sameWGrp = getSameWidthAsParentDecl(node, parent)
+                if (sameWGrp) declParts2Flex.push(sameWGrp)
+            }
 
             var children2 = node.children || []
             var visibleChildren = children2.filter(function (c) { return c && (opts && opts.includeHidden ? true : isVisible(c)) })
@@ -6141,7 +6315,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var strokeDeclVirtual = buildStrokeDecl(ch)
             if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)
             var fillWidthVirtual = getFillFlexStartWidthDecl(ch, sectionNode)
-            if (fillWidthVirtual && !nodeHasApSectionImageSemantic(ch.id, opts)) itemDeclParts.push(fillWidthVirtual)
+            var fillVirtPushed = !!(fillWidthVirtual && !nodeHasApSectionImageSemantic(ch.id, opts))
+            if (fillVirtPushed) itemDeclParts.push(fillWidthVirtual)
+            else if (!chAbs && !nodeHasApSectionImageSemantic(ch.id, opts)) {
+                var sameWVirt = getSameWidthAsParentDecl(ch, sectionNode)
+                if (sameWVirt) itemDeclParts.push(sameWVirt)
+            }
             var itemDecl = itemDeclParts.join(";")
             if (itemDecl && leafSel) pushDeferredStyle(ctx, selInSection(secClass, leafSel, visWrapFromOpts(opts)), itemDecl)
             if (isChContainer) return renderNodeAsync(ch, sectionNode, secNo, secClass, depth, opts)
@@ -6319,7 +6498,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                             var strokeDeclVirtual = buildStrokeDecl(ch)
                             if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)
                             var fillWidthVirtual = getFillFlexStartWidthDecl(ch, sectionNode)
-                            if (fillWidthVirtual && !nodeHasApSectionImageSemantic(ch.id, sectionRenderOpts)) itemDeclParts.push(fillWidthVirtual)
+                            var fillVirtPushed2 = !!(fillWidthVirtual && !nodeHasApSectionImageSemantic(ch.id, sectionRenderOpts))
+                            if (fillVirtPushed2) itemDeclParts.push(fillWidthVirtual)
+                            else if (!chAbs && !nodeHasApSectionImageSemantic(ch.id, sectionRenderOpts)) {
+                                var sameWVirt2 = getSameWidthAsParentDecl(ch, sectionNode)
+                                if (sameWVirt2) itemDeclParts.push(sameWVirt2)
+                            }
                             var itemDecl = itemDeclParts.join(";")
 
                             if (itemDecl && leafSel) pushDeferredStyle(ctx, selInSection(secClass, leafSel, visWrapFromOpts(sectionRenderOpts)), itemDecl)

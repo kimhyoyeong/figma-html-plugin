@@ -155,15 +155,25 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                     var fillW = getFillFlexStartWidthDecl(m, mNode)
                     var fillWD = getFillFlexStartWidthDecl(d, dNode)
                     if (fillW && fillW !== fillWD && !nodeHasApSectionImageSemantic(d.id, moOpts)) declParts.push(fillW)
-                    else {
-                        var mBox = getAbs(m)
-                        var dBox = getAbs(d)
-                        var mFixed = mBox && mBox.w != null && m.layoutSizingHorizontal === "FIXED"
-                        if (mFixed && layoutPxNum(mBox.w) !== layoutPxNum(dBox && dBox.w != null ? dBox.w : 0)) {
-                            declParts.push("--ap-w:" + cssOutLayoutPx(mBox.w))
-                            declParts.push("width:calc(var(--ap-w)/var(--ap-width)*100cqi)")
+                    else if (!nodeHasApSectionImageSemantic(d.id, moOpts)) {
+                        var sameWM = getSameWidthAsParentDecl(m, mNode)
+                        var sameWD = getSameWidthAsParentDecl(d, dNode)
+                        if (sameWM && !sameWD) declParts.push(sameWM)
+                        else {
+                            var mBox = getAbs(m)
+                            var dBox = getAbs(d)
+                            var mFixed = mBox && mBox.w != null && m.layoutSizingHorizontal === "FIXED"
+                            if (mFixed && layoutPxNum(mBox.w) !== layoutPxNum(dBox && dBox.w != null ? dBox.w : 0)) {
+                                declParts.push("--ap-w:" + cssOutLayoutPx(mBox.w))
+                                declParts.push("width:calc(var(--ap-w)/var(--ap-width)*100cqi)")
+                            }
                         }
                     }
+                }
+                if (!mAbs && !moImageFigureDup && !nodeHasApSectionImageSemantic(d.id, moOpts)) {
+                    var contStrM = sectionContainerNeedsFullWidthInColumnParent(m, mNode, semMap, String(d.id))
+                    var contStrD = sectionContainerNeedsFullWidthInColumnParent(d, dNode, semMap, String(d.id))
+                    if (contStrM && !contStrD) declParts.push("width:100%")
                 }
                 var strokeDiff = buildStrokeDeclDiff(d, m)
                 if (strokeDiff) declParts.push(strokeDiff)
@@ -201,6 +211,9 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                         if (textDecl) declParts.push(textDecl)
                         if (textOverrideDone && d.id != null) textOverrideDone[String(d.id)] = true
                     }
+                    var textFillM = getTextFullWidthDecl(m, isAbsoluteLike(m, mNode), mNode)
+                    var textFillD = getTextFullWidthDecl(d, isAbsoluteLike(d, dNode), dNode)
+                    if (textFillM && textFillM !== textFillD) declParts.push(textFillM)
                     if (isAbsoluteLike(m, mNode)) {
                         var adTxt = buildAbsDeclDiff(d, dNode, m, mNode)
                         if (adTxt) declParts.push(adTxt)
@@ -216,6 +229,11 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var fillW2 = getFillFlexStartWidthDecl(m, mNode)
                 var fillW2D = getFillFlexStartWidthDecl(d, dNode)
                 if (fillW2 && fillW2 !== fillW2D && !nodeHasApSectionImageSemantic(d.id, moOpts)) declParts.push(fillW2)
+                else if (!nodeHasApSectionImageSemantic(d.id, moOpts)) {
+                    var sw2M = getSameWidthAsParentDecl(m, mNode)
+                    var sw2D = getSameWidthAsParentDecl(d, dNode)
+                    if (sw2M && !sw2D) declParts.push(sw2M)
+                }
                 var mAbs2 = isAbsoluteLike(m, mNode)
                 if (mAbs2) {
                     var ad2 =
@@ -349,10 +367,13 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                             if (textDecl) nameTxtDecls.push(textDecl)
                             var dParN = dNode.parent
                             var mParN = mText.parent
+                            var nameFillM = getTextFullWidthDecl(mText, isAbsoluteLike(mText, mParN), mParN)
+                            var nameFillD = getTextFullWidthDecl(dNode, isAbsoluteLike(dNode, dParN), dParN)
                             if (dParN && mParN && isAbsoluteLike(mText, mParN)) {
                                 var adName = buildAbsDeclDiff(dNode, dParN, mText, mParN)
                                 if (adName) nameTxtDecls.push(adName)
                             }
+                            if (nameFillM && nameFillM !== nameFillD) nameTxtDecls.push(nameFillM)
                             if (nameTxtDecls.length) {
                                 pushMoMoRule(".ap-section--" + secCls + " " + deskTxtSel, nameTxtDecls.join(";"))
                             }

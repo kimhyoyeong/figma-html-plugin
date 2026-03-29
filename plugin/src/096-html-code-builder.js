@@ -206,8 +206,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         if (includeAbs === undefined) includeAbs = true
         var inner = cssInnerSelForNode(id, ropts || {}, false)
         var vw = visWrapFromOpts(ropts)
+        var textDeclParts = []
         var decl = buildTextVarsDecl(ts)
-        if (decl) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), decl)
+        if (decl) textDeclParts.push(decl)
+        var textFullW = getTextFullWidthDecl(node, textAbs, parent)
+        if (textFullW) textDeclParts.push(textFullW)
+        if (textDeclParts.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textDeclParts.join(";"))
         if (includeAbs && textAbs && id) {
             var textAbsDecl = buildAbsDecl(node, parent)
             if (textAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textAbsDecl)
@@ -361,7 +365,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     if (flexImgGrp) declPartsImgGrp.push(flexImgGrp)
                 }
                 var fillWImgGrp = getFillFlexStartWidthDecl(node, parent)
-                if (fillWImgGrp && !nodeHasApSectionImageSemantic(node.id, opts)) declPartsImgGrp.push(fillWImgGrp)
+                var fillImgGrpPushed = !!(fillWImgGrp && !nodeHasApSectionImageSemantic(node.id, opts))
+                if (fillImgGrpPushed) declPartsImgGrp.push(fillWImgGrp)
+                else if (!absImgGrp && !nodeHasApSectionImageSemantic(node.id, opts)) {
+                    var sameWImgGrp = getSameWidthAsParentDecl(node, parent)
+                    if (sameWImgGrp) declPartsImgGrp.push(sameWImgGrp)
+                }
                 if (!useFlexImg && !absImgGrp && containerNeedsRelativeForAbsoluteChildren(node)) declPartsImgGrp.push("position:relative")
                 if (declPartsImgGrp.length && id) {
                     pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), declPartsImgGrp.join(";"))
@@ -419,6 +428,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var parentBox = parent ? getAbs(parent) : null
         var isFullWidth = node.layoutSizingHorizontal === "FILL" ||
             (parentBox && box && box.w != null && parentBox.w != null && r2(box.w) === r2(parentBox.w))
+        var containerStretchW = sectionContainerNeedsFullWidthInColumnParent(node, parent, opts && opts.sectionSemantics, null)
+        var effFullWidth = isFullWidth || containerStretchW
 
             var frameBase = [abs ? "ap-abs" : "", isBtnNode(node) ? "ap-btn" : ""].filter(Boolean).join(" ")
             var cls = apNodeClassList(frameBase, id, opts)
@@ -434,11 +445,11 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (flexDecl) declParts.push(flexDecl)
         }
 
-        if (isFullWidth && !nodeHasApSectionImageSemantic(node.id, opts)) {
+        if (effFullWidth && !nodeHasApSectionImageSemantic(node.id, opts)) {
             declParts.push("width:100%")
         }
 
-        if (!isFullWidth) {
+        if (!effFullWidth) {
             var fillWidthDecl = getFillFlexStartWidthDecl(node, parent)
             if (fillWidthDecl && !nodeHasApSectionImageSemantic(node.id, opts)) declParts.push(fillWidthDecl)
             else if (!abs) {
@@ -544,7 +555,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     var strokeDeclCh = buildStrokeDecl(ch)
                     if (strokeDeclCh) itemDeclParts.push(strokeDeclCh)
                     var fillWidthCh = getFillFlexStartWidthDecl(ch, node)
-                    if (fillWidthCh && !chAbs && !nodeHasApSectionImageSemantic(ch.id, opts)) itemDeclParts.push(fillWidthCh)
+                    var fillChPushed = !!(fillWidthCh && !chAbs && !nodeHasApSectionImageSemantic(ch.id, opts))
+                    if (fillChPushed) itemDeclParts.push(fillWidthCh)
+                    else if (!chAbs && !nodeHasApSectionImageSemantic(ch.id, opts)) {
+                        var sameWCh = getSameWidthAsParentDecl(ch, node)
+                        if (sameWCh) itemDeclParts.push(sameWCh)
+                    }
                     var itemDecl = itemDeclParts.join(";")
 
                     if (itemDecl && leafSel) {
@@ -597,7 +613,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             }
 
             var fillWidthDecl2 = getFillFlexStartWidthDecl(node, parent)
-            if (fillWidthDecl2 && !nodeHasApSectionImageSemantic(node.id, opts)) declParts2Flex.push(fillWidthDecl2)
+            var fillGrpPushed = !!(fillWidthDecl2 && !nodeHasApSectionImageSemantic(node.id, opts))
+            if (fillGrpPushed) declParts2Flex.push(fillWidthDecl2)
+            else if (!abs2 && !nodeHasApSectionImageSemantic(node.id, opts)) {
+                var sameWGrp = getSameWidthAsParentDecl(node, parent)
+                if (sameWGrp) declParts2Flex.push(sameWGrp)
+            }
 
             var children2 = node.children || []
             var visibleChildren = children2.filter(function (c) { return c && (opts && opts.includeHidden ? true : isVisible(c)) })
@@ -729,7 +750,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var strokeDeclVirtual = buildStrokeDecl(ch)
             if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)
             var fillWidthVirtual = getFillFlexStartWidthDecl(ch, sectionNode)
-            if (fillWidthVirtual && !nodeHasApSectionImageSemantic(ch.id, opts)) itemDeclParts.push(fillWidthVirtual)
+            var fillVirtPushed = !!(fillWidthVirtual && !nodeHasApSectionImageSemantic(ch.id, opts))
+            if (fillVirtPushed) itemDeclParts.push(fillWidthVirtual)
+            else if (!chAbs && !nodeHasApSectionImageSemantic(ch.id, opts)) {
+                var sameWVirt = getSameWidthAsParentDecl(ch, sectionNode)
+                if (sameWVirt) itemDeclParts.push(sameWVirt)
+            }
             var itemDecl = itemDeclParts.join(";")
             if (itemDecl && leafSel) pushDeferredStyle(ctx, selInSection(secClass, leafSel, visWrapFromOpts(opts)), itemDecl)
             if (isChContainer) return renderNodeAsync(ch, sectionNode, secNo, secClass, depth, opts)
@@ -907,7 +933,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                             var strokeDeclVirtual = buildStrokeDecl(ch)
                             if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)
                             var fillWidthVirtual = getFillFlexStartWidthDecl(ch, sectionNode)
-                            if (fillWidthVirtual && !nodeHasApSectionImageSemantic(ch.id, sectionRenderOpts)) itemDeclParts.push(fillWidthVirtual)
+                            var fillVirtPushed2 = !!(fillWidthVirtual && !nodeHasApSectionImageSemantic(ch.id, sectionRenderOpts))
+                            if (fillVirtPushed2) itemDeclParts.push(fillWidthVirtual)
+                            else if (!chAbs && !nodeHasApSectionImageSemantic(ch.id, sectionRenderOpts)) {
+                                var sameWVirt2 = getSameWidthAsParentDecl(ch, sectionNode)
+                                if (sameWVirt2) itemDeclParts.push(sameWVirt2)
+                            }
                             var itemDecl = itemDeclParts.join(";")
 
                             if (itemDecl && leafSel) pushDeferredStyle(ctx, selInSection(secClass, leafSel, visWrapFromOpts(sectionRenderOpts)), itemDecl)

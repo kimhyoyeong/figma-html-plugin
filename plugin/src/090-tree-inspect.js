@@ -101,6 +101,107 @@ function getFillFlexStartWidthDecl(node, parent) {
     return ""
 }
 
+/**
+ * 직계 부모·자식 getAbs 가로가 같으면 width:100% (반응형에서 부모 안 전폭).
+ * 절대 배치 자식은 제외 (--ap-w와 충돌).
+ */
+function getSameWidthAsParentDecl(node, parent) {
+    if (!node || !parent) return ""
+    try {
+        if (isAbsoluteLike(node, parent)) return ""
+    } catch (e) {
+        return ""
+    }
+    var cBox = getAbs(node)
+    var pBox = getAbs(parent)
+    if (!cBox || !pBox || cBox.w == null || pBox.w == null) return ""
+    if (r2(cBox.w) !== r2(pBox.w)) return ""
+    return "width:100%"
+}
+
+/**
+ * ap-section__container: 섹션이 column + align-items flex-start 이면 자식이 가로로 안 늘어남.
+ * bounding 상 자식이 부모보다 좁을 때 width:100% 로 자손의 % 기준을 잡아줌.
+ * 가로 FIXED(고정 픽셀)인 컨테이너는 의도적으로 부모보다 좁을 수 있음 → 휴리스틱 제외(--ap-w calc 유지).
+ * semanticNodeId: PC/MO walkPair에서 MO 노드 m에 데스크톱 시맨틱(d.id)을 넘길 때 사용.
+ */
+function sectionContainerNeedsFullWidthInColumnParent(frameNode, parent, sectionSemantics, semanticNodeId) {
+    if (!frameNode || frameNode.type !== "FRAME" || !parent) return false
+    try {
+        if (isAbsoluteLike(frameNode, parent)) return false
+        if (frameNode.layoutSizingHorizontal === "FIXED") return false
+        var semId = semanticNodeId != null ? String(semanticNodeId) : String(frameNode.id)
+        var arr = sectionSemantics && sectionSemantics[semId]
+        if (!arr || !arr.length) return false
+        var hasContainer = false
+        for (var si = 0; si < arr.length; si++) {
+            if (/^ap-section__container/.test(String(arr[si] || ""))) {
+                hasContainer = true
+                break
+            }
+        }
+        if (!hasContainer) return false
+        if (!isFlex(parent)) return false
+        var pv = getLayoutVars(parent)
+        if (pv.direction !== "column") return false
+        var pBox = getAbs(parent)
+        var fBox = getAbs(frameNode)
+        if (!pBox || !fBox || pBox.w == null || fBox.w == null) return false
+        if (r2(fBox.w) >= r2(pBox.w)) return false
+        return true
+    } catch (e) {
+        return false
+    }
+}
+
+/**
+ * Hug 텍스트는 absoluteBoundingBox 가로가 글자 폭만 잡혀 부모 프레임과 숫자가 다름.
+ * column flex 안에서 CENTER/RIGHT/JUSTIFIED면 부모 전폭 기준 정렬이 되려면 width:100% 필요.
+ * 단, 부모 교차축이 CENTER(align-items:center)면 자식은 flex로 가로 중앙 배치되므로 width:100% 생략(전폭+text-align로 이중·깨짐 방지).
+ */
+function textNeedsFullWidthForAlignInColumnFlex(textNode, parent) {
+    if (!textNode || textNode.type !== "TEXT" || !parent) return false
+    try {
+        if (!isFlex(parent)) return false
+        var pv = getLayoutVars(parent)
+        if (pv.direction !== "column") return false
+        var counterAxis = String(parent.counterAxisAlignItems || "").toUpperCase()
+        if (counterAxis === "CENTER") return false
+        var ta = String(textNode.textAlignHorizontal || "").toUpperCase()
+        if (ta !== "CENTER" && ta !== "RIGHT" && ta !== "JUSTIFIED") return false
+        var isFill = false
+        try {
+            isFill = textNode.layoutSizingHorizontal === "FILL"
+        } catch (e2) {}
+        if (isFill) return false
+        var pBox = getAbs(parent)
+        var tBox = getAbs(textNode)
+        if (!pBox || !tBox || pBox.w == null || tBox.w == null) return false
+        if (r2(pBox.w) <= r2(tBox.w)) return false
+        return true
+    } catch (e) {
+        return false
+    }
+}
+
+/**
+ * TEXT가 직계 부모 가로를 “채우는” 경우 → 시맨틱 지연 규칙(.ap-section__*)에 width:100% 병합 (줄바꿈·text-align 기준 폭).
+ * 1) Auto Layout Fill: layoutSizingHorizontal === "FILL"
+ * 2) 또는 getSameWidthAsParentDecl (bounding 가로 = 부모)
+ * 3) 또는 column flex + (CENTER|RIGHT|JUSTIFIED) + Hug·좁은 박스 — 단 부모 align-items:center 제외
+ * 절대 배치(ap-abs)는 --ap-w와 충돌하므로 제외.
+ */
+function getTextFullWidthDecl(node, textAbs, parent) {
+    if (textAbs || !node || node.type !== "TEXT") return ""
+    var byFill = false
+    try {
+        if (node.layoutSizingHorizontal === "FILL") byFill = true
+    } catch (e) {}
+    if (!byFill && parent && getSameWidthAsParentDecl(node, parent)) byFill = true
+    if (!byFill && parent && textNeedsFullWidthForAlignInColumnFlex(node, parent)) byFill = true
+    return byFill ? "width:100%" : ""
+}
+
 /** 선택 2개 시 가로 큰 쪽=데스크톱, 작은 쪽=모바일. breakpoint = 모바일 width */
 function resolveDesktopMobile(sel) {
     if (!sel || sel.length < 2) return null
