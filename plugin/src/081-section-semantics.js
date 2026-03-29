@@ -375,6 +375,10 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
                 for (var k2 = 0; k2 < (n.children || []).length; k2++) walkImg(n.children[k2])
                 return
             }
+            if (hasImageFill(n) && hasVisibleChildren(n) && (!isCompositeCandidate(n) || subtreeHasVectorOrTextOverlay(n))) {
+                for (var kBg = 0; kBg < (n.children || []).length; kBg++) walkImg(n.children[kBg])
+                return
+            }
             tagImageNode(n)
             return
         }

@@ -61,10 +61,7 @@ figma.ui.onmessage = function (msg) {
                     usedFonts: payload.usedFonts || [],
                     mobileDataTree: undefined,
                 })
-                images.forEach(function (item, i) {
-                    figma.ui.postMessage({type: "RESULT_IMAGES_CHUNK", ingestId: ingestId, index: i, name: item.name, dataUrl: item.dataUrl})
-                })
-                figma.ui.postMessage({type: "RESULT_IMAGES_END", ingestId: ingestId})
+                sendImagesToUI(images, ingestId)
             })
             .catch(function (e) {
                 figma.ui.postMessage({type: "LOADING", value: false})
@@ -103,6 +100,8 @@ figma.ui.onmessage = function (msg) {
                         imageSuffix: "_mo",
                         fontHtmlFilterActive: fontHtmlFilterActiveMo,
                         pcRasterExtByStem: pcRasterExtByStem,
+                        inheritAssetStores: payload.assetStoresSnapshot,
+                        inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
                     }).then(function (moPayload) {
                         var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                         // 미리보기는 항상 단일 iframe + PC/MO 토글(@media·pc-only/mo-only 보정). 이중 탭은 사용하지 않음.
@@ -168,14 +167,10 @@ figma.ui.onmessage = function (msg) {
                     moBreakpoint: breakpoint,
                 })
                 try {
-                    for (var i = 0; i < images.length; i++) {
-                        var item = images[i]
-                        figma.ui.postMessage({type: "RESULT_IMAGES_CHUNK", ingestId: ingestId, index: i, name: item.name, dataUrl: item.dataUrl})
-                    }
+                    sendImagesToUI(images, ingestId)
                 } catch (chunkErr) {
                     figma.ui.postMessage({type: "ERROR", message: "이미지 전송 중 오류: " + String(chunkErr && chunkErr.message ? chunkErr.message : chunkErr)})
                 }
-                figma.ui.postMessage({type: "RESULT_IMAGES_END", ingestId: ingestId})
             })
             .catch(function (e) {
                 figma.ui.postMessage({type: "LOADING", value: false})
@@ -237,6 +232,8 @@ figma.ui.onmessage = function (msg) {
                             exportWidth: Math.min(2400, Math.round(2 * breakpoint)),
                             fontHtmlFilterActive: fontHtmlFilterActiveZip,
                             pcRasterExtByStem: pcRasterExtByStemZip,
+                            inheritAssetStores: payload.assetStoresSnapshot,
+                            inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
                         }).then(function (moPayload) {
                             var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                             // 구조 불일치 섹션: HTML·CSS는 096 래퍼+`.pc-only .ap-section--NN` — ZIP 경로도 동일 파이프라인

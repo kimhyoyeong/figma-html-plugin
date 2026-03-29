@@ -244,52 +244,71 @@ function collectImageFigureNodeIdsForSectionAsync(sectionNode, bg, slideData, ca
     })
 }
 
-function prefetchOneImageNodeAsync(node, cache, secNo) {
-    if (!node || node.id == null) return Promise.resolve()
-    var imgCtx = { cache: cache, secNo: secNo }
-    if (node.type === "TEXT") {
-        return exportNodeImageAsync(node, imgCtx).then(function (dataUrl) {
-            if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
-            if (cache && dataUrl) {
-                getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
-                    skipExport: isVideoNode(node),
-                    imageHash: getPrimaryImageFillHash(node),
-                })
-            }
-        })
+function precomputeRasterFormatsForSlotsAsync(sectionRoot, orderedIds, secNo, cache, pairedRoot, pairedIds) {
+    var moNodes = []
+    var pcNodes = pairedRoot && pairedIds ? [] : null
+    for (var i = 0; i < orderedIds.length; i++) {
+        moNodes.push(findNodeByIdInSubtree(sectionRoot, orderedIds[i]))
+        if (pcNodes) {
+            var pid = pairedIds[i]
+            pcNodes.push(pid != null ? findNodeByIdInSubtree(pairedRoot, pid) : null)
+        }
     }
-    if (isVectorOnlyTree(node) && !isLineLikeNode(node) && node.type !== "ELLIPSE") {
-        return exportNodeSvgAsync(node).then(function (dataUrl) {
-            if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
-            if (cache && dataUrl) {
-                getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
-                    skipExport: isVideoNode(node),
-                    imageHash: getPrimaryImageFillHash(node),
-                })
-            }
-        })
+    return precomputeRasterFormatsForOrderedNodePairsAsync(moNodes, pcNodes, secNo, cache)
+}
+
+function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotIndex, pairedDesktopSection, pcOrderedIds, slideData) {
+    if (!node) return Promise.resolve()
+    var slideIdSet = Object.create(null)
+    if (slideData && sectionNode) {
+        var sit = collectSwiperSlideItemNodes(sectionNode, bg.bgChildId)
+        for (var sj = 0; sj < sit.length; sj++) {
+            if (sit[sj] && sit[sj].id != null) slideIdSet[String(sit[sj].id)] = true
+        }
     }
-    return exportImagePreferSourceBytesAsync(node, imgCtx).then(function (dataUrl) {
-        if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
-        if (cache && dataUrl) {
-            getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
-                skipExport: isVideoNode(node),
-                imageHash: getPrimaryImageFillHash(node),
-            })
+    var pairPc = null
+    if (pairedDesktopSection && pcOrderedIds && pcOrderedIds[slotIndex] != null) {
+        pairPc = findNodeByIdInSubtree(pairedDesktopSection, pcOrderedIds[slotIndex])
+    }
+    if (pairPc && node && node.id != null && pairPc.id != null) {
+        cache.pairPcNodeIdByMoId = cache.pairPcNodeIdByMoId || Object.create(null)
+        cache.pairPcNodeIdByMoId[String(node.id)] = String(pairPc.id)
+    }
+    var imgCtx = {
+        cache: cache,
+        secNo: secNo,
+        slotIndex: slotIndex,
+        pairPcNode: pairPc,
+        insideSwiperSlide: !!slideIdSet[String(node.id)],
+        fromPrefetchSlot: true,
+    }
+    return pipelineEnsureImageAsync(node, imgCtx).then(function (meta) {
+        if (!meta) return
+        if (meta.kind === "pc-shared-slide" && meta.dataUrl && meta.assetKey) setCachedAsset(cache, meta.assetKey, meta.dataUrl)
+        var pathOpts = { skipExport: isVideoNode(node), imageHash: getPrimaryImageFillHash(node) }
+        if (meta.reuseAssetKey) pathOpts.reuseAssetKey = meta.reuseAssetKey
+        getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl || "", secNo, pathOpts)
+        if (slideData && slideIdSet[String(node.id)] && meta.assetKey) {
+            cache.slideAssetKeyByNodeId = cache.slideAssetKeyByNodeId || Object.create(null)
+            cache.slideAssetKeyByNodeId[String(node.id)] = meta.reuseAssetKey || meta.assetKey
+        }
+        if (slideData && !cache.imageSuffix && slideIdSet[String(node.id)] && meta.assetKey) {
+            if (!cache.slideAssetKeyBySlot) cache.slideAssetKeyBySlot = Object.create(null)
+            cache.slideAssetKeyBySlot[secNo + ":" + slotIndex] = meta.reuseAssetKey || meta.assetKey
         }
     })
 }
 
-/** 렌더 순서대로 이미지 바이너리·경로(083) 선할당 — 마크업 단계는 캐시 우선 */
-function prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo) {
+function prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo, bg, slideData, pairedDesktopSection, pcOrderedIds) {
     if (!orderedIds || !orderedIds.length) return Promise.resolve()
     var ix = 0
     function next() {
         if (ix >= orderedIds.length) return Promise.resolve()
+        var slot = ix
         var nid = orderedIds[ix++]
         var node = findNodeByIdInSubtree(sectionNode, nid)
         if (!node) return next()
-        return prefetchOneImageNodeAsync(node, cache, secNo).then(next)
+        return prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slot, pairedDesktopSection, pcOrderedIds, slideData).then(next)
     }
     return next()
 }

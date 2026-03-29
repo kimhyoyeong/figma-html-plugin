@@ -39,12 +39,13 @@ function getLayoutVars(node) {
         else out.justify = ""
 
         var counter = String(node.counterAxisAlignItems || "").toUpperCase()
-        // MIN = CSS align-items:flex-start 와 동일 → 선언 생략(buildFlexDecl)
-        if (counter === "MIN") out.align = ""
+        // MIN → flex-start (생략 시 브라우저 기본은 stretch라 Figma와 어긋남)
+        if (counter === "MIN") out.align = "flex-start"
         else if (counter === "MAX") out.align = "flex-end"
         else if (counter === "CENTER") out.align = "center"
         else if (counter === "BASELINE") out.align = "baseline"
-        else out.align = "center"
+        else if (counter === "STRETCH" || counter === "") out.align = ""
+        else out.align = ""
 
         out.wrap = node.layoutWrap === "WRAP" ? "wrap" : "nowrap"
 
@@ -121,9 +122,8 @@ function buildFlexDecl(layoutVars, node) {
     if (wrap !== "nowrap") parts.push("flex-wrap:" + wrap)
     if (justify !== "flex-start") parts.push("justify-content:" + justify)
     var alignRaw = layoutVars.align
-    if (alignRaw !== "" && alignRaw !== "flex-start") {
-        var align = alignRaw || "stretch"
-        if (align !== "stretch") parts.push("align-items:" + align)
+    if (alignRaw !== "") {
+        if (alignRaw !== "stretch") parts.push("align-items:" + alignRaw)
     }
 
     var gap = Number(layoutVars.gap) || 0
@@ -215,12 +215,7 @@ function buildFlexDeclDiff(dLv, mLv, node) {
             direction: lv.direction || "row",
             wrap: lv.wrap || "nowrap",
             justify: lv.justify || "flex-start",
-            align:
-                lv.align === "" || lv.align === "flex-start"
-                    ? "flex-start"
-                    : lv.align == null
-                      ? "stretch"
-                      : lv.align,
+            align: lv.align == null || lv.align === "" ? "stretch" : lv.align,
             gap: layoutPxInt(lv.gap),
             pt: layoutPxInt(lv.pt),
             pr: layoutPxInt(lv.pr),
@@ -393,7 +388,6 @@ function getPrimaryImageFillHash(node) {
     } catch (e) {}
     return ""
 }
-
 
 /** section이 캔버스형 레이아웃이면 min-height 필요 */
 function needsMinHeight(sectionNode) {

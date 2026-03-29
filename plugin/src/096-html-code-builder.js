@@ -168,6 +168,28 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         return opts && opts.visibilityWrapper ? String(opts.visibilityWrapper) : ""
     }
 
+    function pipelineImgCtx(node, secNo, opts) {
+        opts = opts || {}
+        var o = {
+            cache: cache,
+            secNo: secNo,
+            slotIndex: opts.slotIndex != null ? opts.slotIndex : 0,
+            insideSwiperSlide: !!opts.insideSwiperSlide,
+            fromPrefetchSlot: opts.fromPrefetchSlot === true,
+            pairPcNode: opts.pairPcNode || null,
+        }
+        if (cache.imageSuffix === "_mo" && node && node.id != null && cache.pairPcNodeIdByMoId) {
+            var pcid = cache.pairPcNodeIdByMoId[String(node.id)]
+            if (pcid) {
+                try {
+                    var pn = figma.getNodeById(pcid)
+                    if (pn) o.pairPcNode = pn
+                } catch (e) {}
+            }
+        }
+        return o
+    }
+
     /** 섹션 루트 한 줄 규칙용: `.ap-section--NN` 또는 `.pc-only .ap-section--NN` */
     function sectionRootSelector(secClass, visWrap) {
         var vw = visWrap ? String(visWrap).replace(/^\./, "") : ""
@@ -225,45 +247,19 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                 }
 
-                if (cache && cache.image && node.id != null && cache.image[node.id]) {
-                    var dataUrlPre = cache.image[node.id]
-                    var pathPre = cache
-                        ? getOrAssignImagePath(cache, node.id, dataUrlPre, secNo, {
-                              skipExport: isVideoNode(node),
-                              imageHash: getPrimaryImageFillHash(node),
-                          })
-                        : dataUrlPre
-                    var altTextPre = getImageAltText(node)
-                    if (id) ctx.ownImageNodeIds[id] = true
-                    var rasterOptsPre = optsWithRasterTextAsImageSemantics(id, opts)
-                    var imgWrapClsPre = apNodeClassList(("ap-image" + (textAbs ? " ap-abs" : "")).trim(), id, rasterOptsPre)
-                    if (textAbs && id) {
-                        var traDeclPre = buildAbsDeclTextRaster(node, parent)
-                        if (traDeclPre) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, rasterOptsPre, false), visWrapFromOpts(opts)), traDeclPre)
-                    }
-                    pushDeferredImageImgSizeVars(ctx, secClass, id, node, rasterOptsPre, textAbs, visWrapFromOpts(opts))
-                    return Promise.resolve(
-                        wrapIfBtn(
-                            node,
-                            indent(depth) + '<div class="' + imgWrapClsPre + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (pathPre || "") + '" alt="' + altTextPre + '" /></div>',
-                            depth
-                        )
-                    )
-                }
-
-                return exportNodeImageAsync(node, { cache: cache, secNo: secNo })
-                    .then(function (dataUrl) {
-                        if (!dataUrl) {
+                return pipelineEnsureImageAsync(node, pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide) }))
+                    .then(function (meta) {
+                        if (!meta || !meta.dataUrl) {
                             pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, true, opts)
                             return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                         }
-                        if (node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-                        var path = cache
-                            ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
-                                  skipExport: isVideoNode(node),
-                                  imageHash: getPrimaryImageFillHash(node),
-                              })
-                            : dataUrl
+                        var path =
+                            cache &&
+                            getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
+                                skipExport: isVideoNode(node),
+                                imageHash: getPrimaryImageFillHash(node),
+                                reuseAssetKey: meta.reuseAssetKey || undefined,
+                            })
                         var altText = getImageAltText(node)
                         if (id) ctx.ownImageNodeIds[id] = true
                         var rasterOpts = optsWithRasterTextAsImageSemantics(id, opts)
@@ -322,33 +318,15 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             return Promise.resolve(wrapIfBtn(node, indent(depth) + ellipseHtml, depth))
         }
         var svgImgAbs = isAbsoluteLike(node, parent)
-        if (cache && cache.image && node.id != null && cache.image[node.id]) {
-            var dataUrlSv = cache.image[node.id]
-            var pathSv = cache
-                ? getOrAssignImagePath(cache, node.id, dataUrlSv || "", secNo, {
-                      skipExport: isVideoNode(node),
-                      imageHash: getPrimaryImageFillHash(node),
-                  })
-                : dataUrlSv || ""
-            if (svgImgAbs && id) {
-                var svgAbsDeclC = buildAbsDecl(node, parent)
-                if (svgAbsDeclC) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), svgAbsDeclC)
-            }
-            var altTextSv = getImageAltText(node)
-            if (id) ctx.ownImageNodeIds[id] = true
-            var svgImgClsC = apNodeClassList(("ap-image" + (svgImgAbs ? " ap-abs" : "")).trim(), id, opts)
-            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, svgImgAbs, visWrapFromOpts(opts))
-            var htmlSv = indent(depth) + '<div class="' + svgImgClsC + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (pathSv || "") + '" alt="' + altTextSv + '" /></div>'
-            return Promise.resolve(wrapIfBtn(node, htmlSv, depth))
-        }
-        return exportNodeSvgAsync(node).then(function (dataUrl) {
-            if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-            var path = cache
-                ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, {
-                      skipExport: isVideoNode(node),
-                      imageHash: getPrimaryImageFillHash(node),
-                  })
-                : dataUrl || ""
+        return pipelineEnsureImageAsync(node, pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide) })).then(function (meta) {
+            if (!meta || !meta.dataUrl) return ""
+            var path =
+                cache &&
+                getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
+                    skipExport: isVideoNode(node),
+                    imageHash: getPrimaryImageFillHash(node),
+                    reuseAssetKey: meta.reuseAssetKey || undefined,
+                })
             if (svgImgAbs && id) {
                 var svgAbsDecl = buildAbsDecl(node, parent)
                 if (svgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), svgAbsDecl)
@@ -362,9 +340,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         })
     }
 
-    // IMAGE (단일 이미지 또는 컴포지트 → 하나의 이미지로 export)
-    // 컨테이너에 텍스트가 있으면 이미지로보내지 않고 자식 재귀 렌더 (텍스트 유지)
-    // 겹친 composite(clipsContent)일 때만 한 장으로 export. 분리된 이미지 2개 이상이면 래퍼로 풀어서 각각 figure로
+    // IMAGE — shouldExportAsSingleRasterImage: 직계 래스터 3+는 composite-raster(067), 그 외 분리는 hasMultiple+CLIP(isCompositeCandidate) 등 070 규칙과 동일
     function renderImageNodeAsync(node, parent, secNo, secClass, depth, opts) {
         var id = node.id != null ? String(node.id) : ""
         if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node) && !isCodeRasterNode(node)) {
@@ -412,33 +388,15 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             })
         }
         var imgAbs = isAbsoluteLike(node, parent)
-        if (cache && cache.image && node.id != null && cache.image[node.id]) {
-            var dataUrlImg = cache.image[node.id]
-            var pathImg = cache
-                ? getOrAssignImagePath(cache, node.id, dataUrlImg || "", secNo, {
-                      skipExport: isVideoNode(node),
-                      imageHash: getPrimaryImageFillHash(node),
-                  })
-                : dataUrlImg || ""
-            if (imgAbs && id) {
-                var imgAbsDeclC = buildAbsDecl(node, parent)
-                if (imgAbsDeclC) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), imgAbsDeclC)
-            }
-            var altTextImg = getImageAltText(node)
-            if (id) ctx.ownImageNodeIds[id] = true
-            var figureClsC = apNodeClassList("ap-image" + (imgAbs ? " ap-abs" : ""), id, opts)
-            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs, visWrapFromOpts(opts))
-            var figureHtmlC = '<div class="' + figureClsC + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (pathImg || "") + '" alt="' + altTextImg + '" /></div>'
-            return Promise.resolve(wrapIfBtn(node, indent(depth) + figureHtmlC, depth))
-        }
-        return exportImagePreferSourceBytesAsync(node, { cache: cache, secNo: secNo }).then(function (dataUrl) {
-            if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-            var path = cache
-                ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, {
-                      skipExport: isVideoNode(node),
-                      imageHash: getPrimaryImageFillHash(node),
-                  })
-                : dataUrl || ""
+        return pipelineEnsureImageAsync(node, pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide) })).then(function (meta) {
+            if (!meta || !meta.dataUrl) return ""
+            var path =
+                cache &&
+                getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
+                    skipExport: isVideoNode(node),
+                    imageHash: getPrimaryImageFillHash(node),
+                    reuseAssetKey: meta.reuseAssetKey || undefined,
+                })
             if (imgAbs && id) {
                 var imgAbsDecl = buildAbsDecl(node, parent)
                 if (imgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), imgAbsDecl)
@@ -783,7 +741,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
      * PC+MO 구조 불일치·비슬라이드: visWrap `pc-only` / `mo-only` 로 바깥 div → section (랜드마크는 section 유지).
      * 지연 CSS는 `.pc-only .ap-section--NN …` 자손 선택자(095 @media display 토글과 정합).
      */
-    function runSectionPipeline(sectionNode, bg, visWrap, secNo, secClass, slideData) {
+    function runSectionPipeline(sectionNode, bg, visWrap, secNo, secClass, slideData, pairedDesktopSection) {
         var slideSectionMeta = null
         var sectionSemantics = buildSectionSemanticClasses(sectionNode, geoStructure, bg.bgChildId)
         promoteRasterTextNodesToImageSemantics(sectionNode, sectionSemantics, allowedFontsForHtml, fontHtmlUnrestricted)
@@ -805,7 +763,26 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         return String(id)
                     })
                 }
-                return prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo)
+                var pcIdsPair = visWrap === "mo-only" && pairedDesktopSection ? sectionImageRenderOrderIds[secNo - 1] : null
+                return precomputeRasterFormatsForSlotsAsync(
+                    sectionNode,
+                    orderedIds,
+                    secNo,
+                    cache,
+                    visWrap === "mo-only" ? pairedDesktopSection : null,
+                    pcIdsPair,
+                ).then(function () {
+                    return prefetchSectionImageAssetsAsync(
+                        sectionNode,
+                        orderedIds,
+                        cache,
+                        secNo,
+                        bg,
+                        slideData,
+                        visWrap === "mo-only" ? pairedDesktopSection : null,
+                        pcIdsPair,
+                    )
+                })
             })
             .then(function () {
                 var vw = visWrap || ""
@@ -1051,7 +1028,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
                 return buildSectionBackgroundAsync(mNode, cache, secNo).then(function (mBg) {
                     var moSlideData = getSlideItems(mNode)
-                    return runSectionPipeline(mNode, mBg, "mo-only", secNo, secClass, moSlideData)
+                    return runSectionPipeline(mNode, mBg, "mo-only", secNo, secClass, moSlideData, sectionNode)
                 }).then(function () {
                     cache.imageSuffix = prevSuffix
                     if (prevImgCount === undefined) delete cache.imgCountBySec[secNo]

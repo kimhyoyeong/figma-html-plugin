@@ -1,12 +1,6 @@
 /**
- * 085-section-background — 노드 fill 배경 선언 + 섹션 루트 풀블리드 이미지 승격
- *
- * buildBackgroundDeclAsync — 일반 노드 --bgc/--bg-img (060 fill·070 export·083 경로)
- * buildSectionBackgroundAsync — stroke/radius 포함, 90% 이상 덮는 직계 이미지 → --bg-img 승격
+ * 085-section-background — 섹션·노드 배경 fill → CSS (--bg-img 등)
  */
-// ----- Section background (fill → CSS vars, 풀블리드 자식 승격) -----
-
-/** fills 스택에서 최상단(마지막 visible) fill 1개만 반환 */
 function getTopmostVisibleFill(node, opts) {
     try {
         if (!node || !node.fills || node.fills === figma.mixed) return null
@@ -31,7 +25,38 @@ function getTopmostVisibleFill(node, opts) {
     return null
 }
 
-/** section이면 --bgc/--bg-img, 그 외는 background-color/background-image */
+function pipelineRasterBackgroundImageDeclAsync(node, useCssVarsForSection, cache, secNo) {
+    var bgCtx = { cache: cache, secNo: secNo, slotIndex: 0, insideSwiperSlide: false, sectionBackgroundImageFillOnly: true }
+    if (cache.imageSuffix === "_mo" && node && node.id != null && cache.pairPcNodeIdByMoId) {
+        var _pcBgId = cache.pairPcNodeIdByMoId[String(node.id)]
+        if (_pcBgId) {
+            try {
+                bgCtx.pairPcNode = figma.getNodeById(_pcBgId)
+            } catch (e) {}
+        }
+    }
+    return pipelineEnsureImageAsync(node, bgCtx).then(function (meta) {
+        if (!meta || !meta.dataUrl) return ""
+        var path = cache
+            ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl || "", secNo, {
+                  skipExport: isVideoNode(node),
+                  imageHash: getPrimaryImageFillHash(node),
+                  reuseAssetKey: meta.reuseAssetKey || undefined,
+              })
+            : ""
+        var imgUrl = (path && path.length) ? path : meta.dataUrl
+        if (!imgUrl) return ""
+        if (useCssVarsForSection) {
+            return "--bg-img:url(" + imgUrl + ")"
+        }
+        return (
+            "background-image:url(" +
+            imgUrl +
+            ");background-repeat:no-repeat;background-position:center;background-size:100% 100%"
+        )
+    })
+}
+
 function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts) {
     if (!node) return Promise.resolve("")
     if (node.type === "TEXT") return Promise.resolve("")
@@ -42,8 +67,10 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
 
     var parts = []
 
-    // 최상단이 SOLID면 색만 적용
     if (topFill.type === "SOLID") {
+        if (hasImageFill(node)) {
+            return pipelineRasterBackgroundImageDeclAsync(node, useCssVarsForSection, cache, secNo)
+        }
         var solid = topFill.fill
         var color = solid && solid.color ? rgbToHex(solid.color) : ""
         if (!color) return Promise.resolve("")
@@ -60,103 +87,68 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
         return Promise.resolve(parts.join(";"))
     }
 
-    // 최상단이 IMAGE면 이미지 1개만 적용
     if (topFill.type === "IMAGE") {
-        var dataUrlPromise
-        var moBgCtx = { cache: cache, secNo: secNo }
-        if (cache && cache.image && node.id != null && cache.image[node.id]) {
-            dataUrlPromise = Promise.resolve(cache.image[node.id])
-        } else {
-            dataUrlPromise = exportImagePreferSourceBytesAsync(node, moBgCtx)
-        }
-
-        return dataUrlPromise
-            .then(function (dataUrl) {
-                if (node.id != null && dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
-
-                var path = cache
-                    ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, {
-                          skipExport: isVideoNode(node),
-                          imageHash: getPrimaryImageFillHash(node),
-                      })
-                    : ""
-                var imgUrl = (path && path.length) ? path : dataUrl
-                if (!imgUrl) return ""
-
-                if (useCssVarsForSection) {
-                    parts.push("--bg-img:url(" + imgUrl + ")")
-                } else {
-                    parts.push("background-image:url(" + imgUrl + ")")
-                    parts.push("background-repeat:no-repeat")
-                    parts.push("background-position:center")
-                    parts.push("background-size:100% 100%")
-                }
-                return parts.join(";")
-            })
-            .catch(function () {
-                return ""
-            })
+        return pipelineRasterBackgroundImageDeclAsync(node, useCssVarsForSection, cache, secNo)
     }
 
     return Promise.resolve("")
 }
 
-/** 섹션 배경: fill 또는 직계 자식 중 90% 이상 크기 이미지 → --bg-img 승격 (slide 섹션 제외) */
 function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
-  var slideData = getSlideItems(sectionNode)
+    var slideData = getSlideItems(sectionNode)
 
-  return buildBackgroundDeclAsync(sectionNode, true, cache, secNo).then(function (decl) {
-      var strokeDecl = buildStrokeDecl(sectionNode)
-      if (strokeDecl) decl = decl ? decl + ";" + strokeDecl : strokeDecl
-      var radiusDecl = buildCornerRadiusDecl(sectionNode)
-      if (radiusDecl) decl = decl ? decl + ";" + radiusDecl : radiusDecl
+    return buildBackgroundDeclAsync(sectionNode, true, cache, secNo).then(function (decl) {
+        var strokeDecl = buildStrokeDecl(sectionNode)
+        if (strokeDecl) decl = decl ? decl + ";" + strokeDecl : strokeDecl
+        var radiusDecl = buildCornerRadiusDecl(sectionNode)
+        if (radiusDecl) decl = decl ? decl + ";" + radiusDecl : radiusDecl
 
-      var topFillForBg = getTopmostVisibleFill(sectionNode)
-      if (topFillForBg && topFillForBg.type === "IMAGE") return {decl: decl, bgChildId: null}
-      if (slideData) return {decl: decl, bgChildId: null}
+        var topFillForBg = getTopmostVisibleFill(sectionNode)
+        if (topFillForBg && topFillForBg.type === "IMAGE") return { decl: decl, bgChildId: null }
+        if (topFillForBg && topFillForBg.type === "SOLID" && hasImageFill(sectionNode)) return { decl: decl, bgChildId: null }
+        if (slideData) return { decl: decl, bgChildId: null }
 
-      var children = sectionNode && sectionNode.children ? sectionNode.children : []
-      var sectionBox = getAbs(sectionNode)
-      if (!sectionBox || children.length === 0) return {decl: decl, bgChildId: null}
+        var children = sectionNode && sectionNode.children ? sectionNode.children : []
+        var sectionBox = getAbs(sectionNode)
+        if (!sectionBox || children.length === 0) return { decl: decl, bgChildId: null }
 
-      // 90% 이상 덮는 이미지만 배경 승격. 자식이 있는 프레임(배너 등)은 제외 → 내부 텍스트/버튼 누락 방지
-      var fullBleedChild = null
-      for (var i = 0; i < children.length; i++) {
-          var ch = children[i]
-          if (!ch || !isVisible(ch) || !isImageCandidate(ch)) continue
-          if (isContainer(ch) && ch.children && ch.children.length > 0) continue
-          var chBox = getAbs(ch)
-          if (!chBox) continue
-          if (chBox.w >= sectionBox.w * 0.9 && chBox.h >= sectionBox.h * 0.9) {
-              fullBleedChild = ch
-              break
-          }
-      }
-      if (!fullBleedChild) return {decl: decl, bgChildId: null}
+        var fullBleedChild = null
+        for (var i = 0; i < children.length; i++) {
+            var ch = children[i]
+            if (!ch || !isVisible(ch) || !isImageCandidate(ch)) continue
+            if (isContainer(ch) && ch.children && ch.children.length > 0) continue
+            var chBox = getAbs(ch)
+            if (!chBox) continue
+            if (chBox.w >= sectionBox.w * 0.9 && chBox.h >= sectionBox.h * 0.9) {
+                fullBleedChild = ch
+                break
+            }
+        }
+        if (!fullBleedChild) return { decl: decl, bgChildId: null }
 
-      var moBleedCtx = { cache: cache, secNo: secNo }
-      var dataUrlPromise =
-          cache && cache.image && fullBleedChild.id != null && cache.image[fullBleedChild.id]
-              ? Promise.resolve(cache.image[fullBleedChild.id])
-              : exportNodeImageAsync(fullBleedChild, moBleedCtx)
-
-      return dataUrlPromise
-          .then(function (dataUrl) {
-              if (fullBleedChild.id != null && dataUrl && cache && cache.image) cache.image[fullBleedChild.id] = dataUrl
-              var path = cache
-                  ? getOrAssignImagePath(cache, fullBleedChild.id, dataUrl, secNo, {
-                        skipExport: isVideoNode(fullBleedChild),
-                        imageHash: getPrimaryImageFillHash(fullBleedChild),
-                    })
-                  : ""
-              if (path && dataUrl) {
-                  var merged = decl ? decl + ";--bg-img:url(" + path + ")" : "--bg-img:url(" + path + ")"
-                  return {decl: merged, bgChildId: fullBleedChild.id}
-              }
-              return {decl: decl, bgChildId: null}
-          })
-          .catch(function () {
-              return {decl: decl, bgChildId: null}
-          })
-  })
+        var bleedCtx = { cache: cache, secNo: secNo, slotIndex: 0, insideSwiperSlide: false, sectionBackgroundImageFillOnly: true }
+        if (cache.imageSuffix === "_mo" && fullBleedChild && fullBleedChild.id != null && cache.pairPcNodeIdByMoId) {
+            var _pcBleedId = cache.pairPcNodeIdByMoId[String(fullBleedChild.id)]
+            if (_pcBleedId) {
+                try {
+                    bleedCtx.pairPcNode = figma.getNodeById(_pcBleedId)
+                } catch (e) {}
+            }
+        }
+        return pipelineEnsureImageAsync(fullBleedChild, bleedCtx).then(function (meta) {
+            if (!meta || !meta.dataUrl) return { decl: decl, bgChildId: null }
+            var path = cache
+                ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
+                      skipExport: isVideoNode(fullBleedChild),
+                      imageHash: getPrimaryImageFillHash(fullBleedChild),
+                      reuseAssetKey: meta.reuseAssetKey || undefined,
+                  })
+                : ""
+            if (path && meta.dataUrl) {
+                var merged = decl ? decl + ";--bg-img:url(" + path + ")" : "--bg-img:url(" + path + ")"
+                return { decl: merged, bgChildId: fullBleedChild.id }
+            }
+            return { decl: decl, bgChildId: null }
+        })
+    })
 }

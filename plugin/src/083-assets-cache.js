@@ -1,13 +1,8 @@
 /**
- * 083-assets-cache — ZIP 에셋 파일명·프로젝트 슬러그·이미지 경로 할당
- *
- * page_*_imgNN 파일 번호·해시 디듀프는 여기(에셋 단계). ap-section__image--NN BEM 번호는 084/096 렌더 순서와 별개.
- *
- * 의존: 010 pad2
+ * 083-assets-cache — ZIP 에셋 파일명 (assetKey → path).
+ * 경로는 assetKey(067에서 secNo·노드 id 포함)당 1개만. 내용/figma imageHash만으로 다른 노드에 경로를 재사용하지 않음.
  */
-// ----- Asset paths (cache.imageName, imageList, svgByHash) -----
 var ASSETS_IMAGES_PREFIX = "assets/images/"
-/** 프로젝트명 → 파일명에 쓸 수 있는 문자열 (공백·특수문자 제거) */
 function normalizeProjectName(s) {
     s = String(s || "").trim()
     if (!s) return "project"
@@ -15,88 +10,42 @@ function normalizeProjectName(s) {
     return s || "project"
 }
 
-/** 동일 경로는 imageList에 한 번만 (dump walk + build 이중 호출·재사용 안전) */
 function ensureImageInListOnce(cache, name, dataUrl) {
     if (!cache || !cache.imageList || !name || !dataUrl) return
     for (var i = 0; i < cache.imageList.length; i++) {
         if (cache.imageList[i].name === name) return
     }
-    cache.imageList.push({name: name, dataUrl: dataUrl})
+    cache.imageList.push({ name: name, dataUrl: dataUrl })
 }
 
-/** data: URL MIME → 에셋 확장자 (path 캐시 재사용 시 실제 export와 불일치 방지) */
 function getDataUrlExt(dataUrl) {
     if (!dataUrl) return ".jpg"
     if (dataUrl.indexOf("image/svg+xml") >= 0) return ".svg"
     if (dataUrl.indexOf("image/png") >= 0) return ".png"
     if (dataUrl.indexOf("image/jpeg") >= 0) return ".jpg"
+    if (dataUrl.indexOf("image/webp") >= 0) return ".webp"
+    if (dataUrl.indexOf("image/gif") >= 0) return ".gif"
     return ".jpg"
 }
 
-/** assets 경로 문자열에서 래스터/SVG 확장자만 추출 (.jpeg → .jpg) */
-function pathExtFromAssetPath(path) {
-    var m = String(path || "").match(/\.(png|jpe?g|svg)$/i)
-    if (!m) return ""
-    var ext = m[0].toLowerCase()
-    return ext === ".jpeg" ? ".jpg" : ext
-}
-
-/** 문자열 해시 (동일 SVG 내용 → 동일 파일 재사용용) */
-function simpleHash(str) {
-    if (str == null || str.length === 0) return "0"
-    var h = 0
-    for (var i = 0; i < str.length; i++) {
-        h = ((h << 5) - h) + str.charCodeAt(i)
-        h = h & h
-    }
-    return (h >>> 0).toString(36)
-}
-
-/** nodeId당 1회 할당. page_{project}_sec{01}_img{01}.{ext} — dump walk는 호출하지 않음(build만 호출 → imgNN 연속) (SVG·imageHash·raster bytes 공유) */
-function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
+function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
     opts = opts || {}
     if (!cache) return ""
     if (!cache.imageName) cache.imageName = {}
     if (!cache.imgCountBySec) cache.imgCountBySec = {}
     if (!cache.imageList) cache.imageList = []
 
-    var key = nodeId != null ? nodeId : dataUrl ? "_" + (Math.random() + "") : null
-    if (key == null) return ""
+    if (opts.reuseAssetKey && cache.imageName[opts.reuseAssetKey]) {
+        var reusedPath = cache.imageName[opts.reuseAssetKey]
+        var ak = assetKey != null ? String(assetKey) : ""
+        if (ak && reusedPath) cache.imageName[ak] = reusedPath
+        return reusedPath
+    }
 
-    var isSvg = dataUrl && dataUrl.indexOf("image/svg+xml") >= 0
+    var key = assetKey != null ? String(assetKey) : ""
+    if (!key) return ""
+
     var secEarly = Number(secNo) || 1
-    var figmaImgHash = !opts || opts.imageHash == null || String(opts.imageHash) === "" ? "" : String(opts.imageHash)
-    var phKey = !isSvg && figmaImgHash ? secEarly + ":" + figmaImgHash : ""
-    var svgHash = isSvg && dataUrl ? simpleHash(dataUrl) : null
-    if (isSvg && !cache.svgByHash) cache.svgByHash = {}
-    if (svgHash && cache.svgByHash[svgHash]) {
-        cache.imageName[key] = cache.svgByHash[svgHash].name
-    }
-
-    /** 동일 피그마 IMAGE 소스(imageHash) — PC/MO export 픽셀이 달라도 같은 imgNN·파일 하나 (확장자는 현재 dataUrl과 일치할 때만 재사용) */
-    if (!cache.imageName[key] && phKey) {
-        if (!cache.pathByImageHash) cache.pathByImageHash = {}
-        var reusedPh = cache.pathByImageHash[phKey] || ""
-        if (reusedPh) {
-            var curExt = getDataUrlExt(dataUrl)
-            var reusedExt = pathExtFromAssetPath(reusedPh)
-            if (reusedExt && reusedExt === curExt) {
-                cache.imageName[key] = reusedPh
-            }
-        }
-    }
-
-    /** 동일 PNG/JPG/WebP export 결과 → 노드가 달라도 파일 하나 (피그마에서 같은 이미지를 여러 레이어에 쓴 경우) */
-    var rasterHash = !isSvg && dataUrl ? simpleHash(dataUrl) : null
-    if (rasterHash && !cache.rasterByHash) cache.rasterByHash = {}
-    if (!cache.imageName[key] && rasterHash && cache.rasterByHash[rasterHash]) {
-        var reusedRaster = cache.rasterByHash[rasterHash].name || ""
-        var curExtR = getDataUrlExt(dataUrl)
-        var reusedExtR = pathExtFromAssetPath(reusedRaster)
-        if (reusedExtR && reusedExtR === curExtR) {
-            cache.imageName[key] = reusedRaster
-        }
-    }
 
     if (!cache.imageName[key]) {
         if (!dataUrl || !String(dataUrl).trim()) return ""
@@ -110,16 +59,6 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
         var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + suffix + ext
 
         cache.imageName[key] = ASSETS_IMAGES_PREFIX + fileName
-        var isSvgMo = dataUrl && cache.imageSuffix === "_mo" && dataUrl.indexOf("image/svg+xml") >= 0
-        var skipExport = opts.skipExport || isSvgMo
-        if (dataUrl && !skipExport) {
-            if (svgHash && cache.svgByHash) cache.svgByHash[svgHash] = { name: cache.imageName[key], dataUrl: dataUrl }
-            if (rasterHash && cache.rasterByHash) cache.rasterByHash[rasterHash] = { name: cache.imageName[key], dataUrl: dataUrl }
-        }
-        if (phKey) {
-            if (!cache.pathByImageHash) cache.pathByImageHash = {}
-            cache.pathByImageHash[phKey] = cache.imageName[key]
-        }
     }
 
     var pathOut = cache.imageName[key] || ""
@@ -130,10 +69,6 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
     return pathOut
 }
 
-/**
- * PC imageList 항목의 경로 → 확장자 맵 (확장자 제외 stem → .jpg | .png).
- * MO(_mo) export 시 같은 sec/img 순서면 PC와 동일 확장자로 래스터를 맞춤.
- */
 function buildPcRasterExtByStemFromImageList(images) {
     var map = Object.create(null)
     if (!images || !images.length) return map
@@ -149,9 +84,6 @@ function buildPcRasterExtByStemFromImageList(images) {
     return map
 }
 
-/**
- * MO(_mo) imageList → PC 래스터 stem(확장자 제외 전체 경로) → 실제 MO 에셋 경로.
- */
 function buildMoRasterPathByPcStemFromMoImageList(moImages) {
     var map = Object.create(null)
     if (!moImages || !moImages.length) return map
@@ -165,4 +97,3 @@ function buildMoRasterPathByPcStemFromMoImageList(moImages) {
     }
     return map
 }
-

@@ -27,7 +27,6 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         usedFonts: {},
         text: {},
         textMeta: {},
-        image: {},
         imageName: {},
         imageList: [],
         imgCountBySec: {},
@@ -37,6 +36,21 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
     }
     if (options.pcRasterExtByStem && typeof options.pcRasterExtByStem === "object") {
         cache.pcRasterExtByStem = options.pcRasterExtByStem
+    }
+    ensureImagePipelineOnCache(cache)
+    cache.imagePipeline.mode = _currentExportWidth >= IMAGE_EXPORT_ZIP_WIDTH ? "zip" : "preview"
+    cache.imagePipeline.variant = options.phase === "mobile" ? "mo" : "pc"
+    if (options.inheritAssetStores) {
+        var ias = options.inheritAssetStores
+        for (var storeName in ias) {
+            if (!ias[storeName] || !cache.assetStores[storeName]) continue
+            var srcS = ias[storeName]
+            var dstS = cache.assetStores[storeName]
+            for (var ik in srcS) dstS[ik] = srcS[ik]
+        }
+    }
+    if (options.inheritedSlideAssetKeyBySlot) {
+        cache.slideAssetKeyBySlot = Object.assign(Object.create(null), options.inheritedSlideAssetKeyBySlot)
     }
 
     var rootBox = getAbs(root)
@@ -121,10 +135,16 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                 props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(section, 코드 생성 시 fill만 사용)")
                 return addChildren()
             }
-            var exportPromise = exportImagePreferSourceBytesAsync(node)
-            return exportPromise.then(function (dataUrl) {
-                if (node.id != null && dataUrl) cache.image[node.id] = dataUrl
-                /** assets 경로·imgNN(083), BEM 이미지 접미사(렌더 순서)는 buildCodeAsync */
+            var dumpImgCtx = { cache: cache, secNo: sectionIndex, slotIndex: 0, insideSwiperSlide: false }
+            var exportPromise = pipelineEnsureImageAsync(node, dumpImgCtx).then(function (meta) {
+                if (meta && meta.dataUrl) {
+                    getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, sectionIndex, {
+                        imageHash: getPrimaryImageFillHash(node),
+                        reuseAssetKey: meta.reuseAssetKey || undefined,
+                    })
+                }
+            })
+            return exportPromise.then(function () {
                 props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(HTML 생성 시 assets 경로)")
                 return addChildren()
             })
@@ -238,6 +258,12 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                     .filter(Boolean)
                     .sort()
                 _currentExportWidth = prevExportWidth
+                ensureImagePipelineOnCache(cache)
+                var assetStoresSnapshot = {
+                    preview: Object.assign({}, cache.assetStores.preview),
+                    export: Object.assign({}, cache.assetStores.export),
+                    zip: Object.assign({}, cache.assetStores.zip),
+                }
                 return {
                     text: text,
                     dataTree: dataTree,
@@ -248,6 +274,8 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                     images: cache.imageList || [],
                     vectorTypes: VECTOR_TYPES,
                     usedFonts: usedFonts,
+                    assetStoresSnapshot: assetStoresSnapshot,
+                    slideAssetKeyBySlot: cache.slideAssetKeyBySlot ? Object.assign(Object.create(null), cache.slideAssetKeyBySlot) : {},
                 }
             })
         })

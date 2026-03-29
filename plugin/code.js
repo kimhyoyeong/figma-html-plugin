@@ -937,12 +937,13 @@ function getLayoutVars(node) {
         else out.justify = ""
 
         var counter = String(node.counterAxisAlignItems || "").toUpperCase()
-        // MIN = CSS align-items:flex-start 와 동일 → 선언 생략(buildFlexDecl)
-        if (counter === "MIN") out.align = ""
+        // MIN → flex-start (생략 시 브라우저 기본은 stretch라 Figma와 어긋남)
+        if (counter === "MIN") out.align = "flex-start"
         else if (counter === "MAX") out.align = "flex-end"
         else if (counter === "CENTER") out.align = "center"
         else if (counter === "BASELINE") out.align = "baseline"
-        else out.align = "center"
+        else if (counter === "STRETCH" || counter === "") out.align = ""
+        else out.align = ""
 
         out.wrap = node.layoutWrap === "WRAP" ? "wrap" : "nowrap"
 
@@ -1019,9 +1020,8 @@ function buildFlexDecl(layoutVars, node) {
     if (wrap !== "nowrap") parts.push("flex-wrap:" + wrap)
     if (justify !== "flex-start") parts.push("justify-content:" + justify)
     var alignRaw = layoutVars.align
-    if (alignRaw !== "" && alignRaw !== "flex-start") {
-        var align = alignRaw || "stretch"
-        if (align !== "stretch") parts.push("align-items:" + align)
+    if (alignRaw !== "") {
+        if (alignRaw !== "stretch") parts.push("align-items:" + alignRaw)
     }
 
     var gap = Number(layoutVars.gap) || 0
@@ -1113,12 +1113,7 @@ function buildFlexDeclDiff(dLv, mLv, node) {
             direction: lv.direction || "row",
             wrap: lv.wrap || "nowrap",
             justify: lv.justify || "flex-start",
-            align:
-                lv.align === "" || lv.align === "flex-start"
-                    ? "flex-start"
-                    : lv.align == null
-                      ? "stretch"
-                      : lv.align,
+            align: lv.align == null || lv.align === "" ? "stretch" : lv.align,
             gap: layoutPxInt(lv.gap),
             pt: layoutPxInt(lv.pt),
             pr: layoutPxInt(lv.pr),
@@ -1292,7 +1287,6 @@ function getPrimaryImageFillHash(node) {
     return ""
 }
 
-
 /** section이 캔버스형 레이아웃이면 min-height 필요 */
 function needsMinHeight(sectionNode) {
     if (!sectionNode) return false
@@ -1438,198 +1432,175 @@ function buildStrokeDeclDiff(dNode, mNode) {
 
 
 /**
- * 070-image-export — 이미지 바이너리 판별·PNG/JPG 휴리스틱·export·노드 분류·nodeSel
- *
- * 시맨틱 BEM·inner 셀렉터·이름 기반 수집은 081. 지연 CSS·이미지 크기 var는 082.
- * readUint32BE … exportImagePreferSourceBytesAsync, isVectorOnlyTree 등 분류, nodeSel.
- * exportNodeImageAsync, exportNodeSvgAsync, getImageSizeDecl — 래스터/SVG·크기 선언
+ * 070-image-export — 벡터/이미지 후보 분류·PNG·JPG 휴리스틱 분석(067 export가 사용)
  */
-// ----- 8. Image Export Utils (포맷 판정, raster, 경로) -----
-/** 바이너리 헤더·PNG/WebP (bytes: Uint8Array) */
-function readUint32BE(bytes, offset) {
-    return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0
+// ----- 8. Image tree classification & format heuristics (export는 067) -----
+/** VECTOR 계열 타입 목록 (UI 필터와 공유) */
+var VECTOR_TYPES = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "LINE", "ELLIPSE", "POLYGON", "RECTANGLE"]
+function isVectorType(t) {
+    return VECTOR_TYPES.indexOf(t) >= 0
 }
-/** JPEG 시그니처(FF D8 FF) 여부 */
-function isJpegBytes(bytes) {
-    return !!(bytes && bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
-}
-/** PNG 시그니처 여부 */
-function isPngBytes(bytes) {
-    return !!(
-        bytes &&
-        bytes.length >= 8 &&
-        bytes[0] === 0x89 &&
-        bytes[1] === 0x50 &&
-        bytes[2] === 0x4e &&
-        bytes[3] === 0x47 &&
-        bytes[4] === 0x0d &&
-        bytes[5] === 0x0a &&
-        bytes[6] === 0x1a &&
-        bytes[7] === 0x0a
-    )
-}
-/** GIF 시그니처(GIF87a/89a) 여부 */
-function isGifBytes(bytes) {
-    return !!(
-        bytes &&
-        bytes.length >= 6 &&
-        bytes[0] === 0x47 &&
-        bytes[1] === 0x49 &&
-        bytes[2] === 0x46 &&
-        bytes[3] === 0x38 &&
-        (bytes[4] === 0x39 || bytes[4] === 0x37) &&
-        bytes[5] === 0x61
-    )
-}
-/** RIFF WEBP 시그니처 여부 */
-function isWebpBytes(bytes) {
-    return !!(
-        bytes &&
-        bytes.length >= 12 &&
-        bytes[0] === 0x52 &&
-        bytes[1] === 0x49 &&
-        bytes[2] === 0x46 &&
-        bytes[3] === 0x46 &&
-        bytes[8] === 0x57 &&
-        bytes[9] === 0x45 &&
-        bytes[10] === 0x42 &&
-        bytes[11] === 0x50
-    )
-}
-/**
- * PNG 알파 채널(타입 4·6) 또는 tRNS 청크 → 투명 사용 가능으로 간주
- * @param {Uint8Array} bytes
- */
-function pngBytesHasTransparency(bytes) {
-    if (!isPngBytes(bytes) || bytes.length < 33) return false
-    var pos = 8
-    while (pos + 12 <= bytes.length) {
-        var len = readUint32BE(bytes, pos)
-        var typeStr = String.fromCharCode(bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7])
-        if (len > 0x7fffffff || pos + 12 + len > bytes.length) break
-        if (typeStr === "IHDR" && len >= 13) {
-            var colorType = bytes[pos + 8 + 9]
-            if (colorType === 4 || colorType === 6) return true
-        }
-        if (typeStr === "tRNS") return true
-        if (typeStr === "IEND") break
-        pos += 12 + len
+function hasImageFillInSubtree(node) {
+    if (!node) return false
+    if (hasImageFill(node)) return true
+    if (!isContainer(node)) return false
+    for (var i = 0; i < node.children.length; i++) {
+        if (hasImageFillInSubtree(node.children[i])) return true
     }
     return false
 }
-/**
- * WebP: VP8X 알파 플래그, 또는 VP8L(로스리스·알파 가능) → PNG export 경로
- * @param {Uint8Array} bytes
- */
-function webpBytesHasTransparency(bytes) {
-    if (!isWebpBytes(bytes)) return false
-    var pos = 12
-    while (pos + 8 <= bytes.length) {
-        var chunk = String.fromCharCode(bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3])
-        var sz = bytes[pos + 4] | (bytes[pos + 5] << 8) | (bytes[pos + 6] << 16) | (bytes[pos + 7] << 24)
-        if (sz < 0 || pos + 8 + sz > bytes.length) break
-        if (chunk === "VP8X" && sz >= 10) {
-            return (bytes[pos + 8] & 0x10) !== 0
-        }
-        if (chunk === "VP8L") return true
-        pos += 8 + sz + (sz & 1)
+function isVectorOnlyTree(node) {
+    if (!node) return false
+    if (node.type === "TEXT") return false
+    if (hasImageFillInSubtree(node)) return false
+    if (!isContainer(node)) return isVectorType(node.type)
+    for (var i = 0; i < node.children.length; i++) {
+        if (!isVectorOnlyTree(node.children[i])) return false
+    }
+    return true
+}
+function isCompositeCandidate(node) {
+    if (!node || !isContainer(node)) return false
+    try {
+        return !!node.clipsContent
+    } catch (e) {
+        return false
+    }
+}
+function isImageCandidate(node) {
+    return !!(node && (hasImageFill(node) || isCompositeCandidate(node) || isCodeRasterNode(node)))
+}
+/** IMAGE fill 부모 위에 얹는 콘텐츠(TEXT·비디오·code-raster·벡터-only). 클립 KV+로고도 여기서 걸림 */
+function subtreeHasVectorOrTextOverlay(node) {
+    if (!node || !isContainer(node) || !node.children) return false
+    for (var i = 0; i < node.children.length; i++) {
+        if (subtreeOverlayWalk070(node.children[i], 0)) return true
     }
     return false
 }
-/** Graphic Control Extension: 투명 색 플래그
- * @param {Uint8Array} bytes
- */
-function gifBytesHasTransparency(bytes) {
-    if (!isGifBytes(bytes)) return false
-    for (var i = 0; i < bytes.length - 4; i++) {
-        if (bytes[i] === 0x21 && bytes[i + 1] === 0xf9 && bytes[i + 2] >= 4) {
-            if ((bytes[i + 3] & 1) !== 0) return true
+function subtreeOverlayWalk070(n, depth) {
+    if (!n || !isVisible(n) || depth > 32) return false
+    if (n.type === "TEXT") return true
+    if (isVideoNode(n)) return true
+    if (isCodeRasterNode(n)) return true
+    if (isVectorOnlyTree(n)) return true
+    if (isContainer(n) && n.children) {
+        for (var j = 0; j < n.children.length; j++) {
+            if (subtreeOverlayWalk070(n.children[j], depth + 1)) return true
         }
     }
     return false
 }
-/**
- * 첫 번째 보이는 IMAGE fill 원본 바이트 기준 투명도 여부 (Figma는 알파 메타 미제공)
- * @param {SceneNode} node
- * @returns {Promise<boolean>}
- */
-function imageFillSourceHasTransparencyAsync(node) {
-    if (!node) return Promise.resolve(false)
+function shouldExportAsSingleRasterImage(node) {
+    if (!node) return false
+    if (isCodeRasterNode(node)) return true
+    if (!isImageCandidate(node)) return false
+    if (isContainer(node) && hasTextInSubtree(node)) return false
+    // IMAGE fill + 자식: 전체 exportAsync 시 배경+오버레이가 한 PNG. 무클립이거나(항상) 클립이어도 벡터/텍스트 자식이 있으면 분리(KV+로고).
+    if (isContainer(node) && hasImageFill(node) && hasVisibleChildren(node)) {
+        if (!isCompositeCandidate(node) || subtreeHasVectorOrTextOverlay(node)) return false
+    }
+    if (isContainer(node) && shouldCompositeRasterGroup(node)) return true
+    if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node)) return false
+    // 클립 프레임(clipsContent): 겹친 래스터 2장도 부모 한 번 exportAsync로 합성 가능. 무클립 2장은 위 분기에서 이미 분리.
+    if (isContainer(node) && countDirectRasterImageChildren(node) >= 2 && !isCompositeCandidate(node)) return false
+    return true
+}
+function nodeWillRenderAsApImageFigure(node) {
+    if (!node || node.type === "TEXT") return false
+    if (isVideoNode(node)) return false
+    if (isCodeRasterNode(node)) return true
+    if (isVectorOnlyTree(node)) {
+        return !isLineLikeNode(node) && node.type !== "ELLIPSE"
+    }
+    if (!isImageCandidate(node)) return false
+    return shouldExportAsSingleRasterImage(node)
+}
+function hasVisibleFillWithOpacityLessThanOne(node) {
     try {
         var fills = node.fills
-        if (!fills || fills === figma.mixed) return Promise.resolve(false)
-        for (var i = fills.length - 1; i >= 0; i--) {
+        if (!fills || fills === figma.mixed) return false
+        for (var i = 0; i < fills.length; i++) {
             var f = fills[i]
-            if (f && f.visible !== false && f.type === "IMAGE" && f.imageHash) {
-                var imageObj = figma.getImageByHash(f.imageHash)
-                if (!imageObj) return Promise.resolve(false)
-                return imageObj
-                    .getBytesAsync()
-                    .then(function (bytes) {
-                        if (!bytes || bytes.length === 0) return false
-                        if (isJpegBytes(bytes)) return false
-                        if (isPngBytes(bytes)) return pngBytesHasTransparency(bytes)
-                        if (isWebpBytes(bytes)) return webpBytesHasTransparency(bytes)
-                        if (isGifBytes(bytes)) return gifBytesHasTransparency(bytes)
-                        return false
-                    })
-                    .catch(function () {
-                        return false
-                    })
-            }
+            if (f && f.visible !== false && typeof f.opacity === "number" && f.opacity < 1) return true
         }
     } catch (e) {}
-    return Promise.resolve(false)
+    return false
 }
-
-/**
- * 서브트리에 임베디드 IMAGE fill이 알파를 가지는지 순차 확인 (루트만 보면 하위 PNG 알파 누락 방지)
- * @param {SceneNode} node
- * @returns {Promise<boolean>}
- */
-function imageFillTransparencyInSubtreeAsync(node) {
-    if (!node || !isVisible(node)) return Promise.resolve(false)
-    return imageFillSourceHasTransparencyAsync(node).then(function (here) {
-        if (here) return true
-        if (!isContainer(node) || !node.children || !node.children.length) return false
-        var ci = 0
-        function nextChild() {
-            if (ci >= node.children.length) return Promise.resolve(false)
-            var ch = node.children[ci++]
-            return imageFillTransparencyInSubtreeAsync(ch).then(function (sub) {
-                return sub || nextChild()
-            })
-        }
-        return nextChild()
-    })
-}
-
-/** 서브트리 어딘가에서 노드·fill 불완전 불투명 → 실질 투명 (강제 PNG) */
-function hasTransparencyInSubtreeSync(node) {
-    if (!node || !isVisible(node)) return false
-    if (typeof node.opacity === "number" && node.opacity < 1) return true
-    if (hasVisibleFillWithOpacityLessThanOne(node)) return true
-    if (!isContainer(node) || !node.children) return false
+function hasMultipleImageLikeChildren(node) {
+    if (!node || !isContainer(node) || !node.children) return false
+    var list = []
     for (var i = 0; i < node.children.length; i++) {
-        if (hasTransparencyInSubtreeSync(node.children[i])) return true
+        var c = node.children[i]
+        if (!c || !isVisible(c)) continue
+        var imgLike = isImageCandidate(c) || hasImageFill(c) || (isVectorOnlyTree(c) && !isLineLikeNode(c) && c.type !== "ELLIPSE")
+        if (!imgLike) return false
+        list.push(c)
+    }
+    return list.length >= 2
+}
+/** 직계 자식만: 보이는 IMAGE fill 보유 레이어 수 */
+function countDirectRasterImageChildren(node) {
+    if (!node || !isContainer(node) || !node.children) return 0
+    var c = 0
+    for (var i = 0; i < node.children.length; i++) {
+        var ch = node.children[i]
+        if (!ch || !isVisible(ch) || ch.type === "TEXT") continue
+        if (hasImageFill(ch)) c++
+    }
+    return c
+}
+/** pipeline composite-raster: code-raster 제외 시 직계 래스터 이미지 3개 이상일 때만 */
+function shouldCompositeRasterGroup(node) {
+    return !!(node && isContainer(node) && countDirectRasterImageChildren(node) >= 3)
+}
+function hasTextInSubtree(node) {
+    if (!node) return false
+    if (node.type === "TEXT") return true
+    var kids = node.children
+    if (!kids || !kids.length) return false
+    for (var i = 0; i < kids.length; i++) {
+        if (hasTextInSubtree(kids[i])) return true
     }
     return false
 }
-
-/**
- * PNG/JPG 판단용 서브트리 1패스 분석 (동기)
- * @param {SceneNode} root
- * @returns {{
- *   gradientCount: number,
- *   effectPhotoLike: boolean,
- *   hasAutoLayout: boolean,
- *   maxImageFillArea: number,
- *   vectorCount: number,
- *   hasText: boolean,
- *   hasStroke: boolean,
- *   hasImageFillSubtree: boolean
- * }}
- */
+function hasVisibleSolidStrokeInSubtree(node) {
+    if (!node || !isVisible(node)) return false
+    try {
+        if (getFirstSolidStroke(node)) return true
+    } catch (e) {}
+    if (!isContainer(node) || !node.children) return false
+    for (var i = 0; i < node.children.length; i++) {
+        if (hasVisibleSolidStrokeInSubtree(node.children[i])) return true
+    }
+    return false
+}
+function subtreeUiVectorElementCount(node) {
+    var total = 0
+    function walk(x) {
+        if (!x || !isVisible(x)) return
+        var t = x.type
+        if (t === "BOOLEAN_OPERATION") {
+            total++
+            return
+        }
+        if (t === "VECTOR" || t === "STAR" || t === "POLYGON" || t === "LINE") {
+            total++
+        } else if (t === "ELLIPSE") {
+            if (!isLineLikeNode(x)) total++
+        } else if (t === "RECTANGLE") {
+            var hasImg = hasImageFill(x)
+            var st = getFirstSolidStroke(x)
+            if (st) total++
+            else if (!hasImg) total++
+        }
+        if (isContainer(x) && x.children) {
+            for (var i = 0; i < x.children.length; i++) walk(x.children[i])
+        }
+    }
+    walk(node)
+    return total
+}
 function analyzeExportFormatSubtree(root) {
     var gradientCount = 0
     var effectPhotoLike = false
@@ -1693,13 +1664,6 @@ function analyzeExportFormatSubtree(root) {
         hasImageFillSubtree: hasImageFillInSubtree(root),
     }
 }
-
-/**
- * 점수 기반 PNG vs JPG (동기). 최종은 imageExportNeedsPngAsync에서 투명 강제 후 적용.
- * @param {object} analysis analyzeExportFormatSubtree 결과
- * @param {SceneNode} rootNode
- * @returns {{ png: number, jpg: number }}
- */
 function computeExportFormatScores(analysis, rootNode) {
     var png = 0
     var jpg = 0
@@ -1721,404 +1685,14 @@ function computeExportFormatScores(analysis, rootNode) {
         var exportArea = rootBox.w * rootBox.h
         if (exportArea >= 800 * 800) jpg += 3
     }
-    return {png: png, jpg: jpg}
+    return { png: png, jpg: jpg }
 }
-
-/** 서브트리에 보이는 SOLID stroke가 있으면 true (JPG는 경계가 번질 수 있음) */
-function hasVisibleSolidStrokeInSubtree(node) {
-    if (!node || !isVisible(node)) return false
-    try {
-        if (getFirstSolidStroke(node)) return true
-    } catch (e) {}
-    if (!isContainer(node) || !node.children) return false
-    for (var i = 0; i < node.children.length; i++) {
-        if (hasVisibleSolidStrokeInSubtree(node.children[i])) return true
-    }
-    return false
-}
-
-/**
- * UI·아이콘성 벡터 개수 (사진판: RECT + IMAGE fill만·stroke 없음 → 제외)
- * BOOLEAN_OPERATION은 1개로만 센 뒤 자식은 이중 집계 안 함
- */
-function subtreeUiVectorElementCount(node) {
-    var total = 0
-    function walk(x) {
-        if (!x || !isVisible(x)) return
-        var t = x.type
-        if (t === "BOOLEAN_OPERATION") {
-            total++
-            return
-        }
-        if (t === "VECTOR" || t === "STAR" || t === "POLYGON" || t === "LINE") {
-            total++
-        } else if (t === "ELLIPSE") {
-            if (!isLineLikeNode(x)) total++
-        } else if (t === "RECTANGLE") {
-            var hasImg = hasImageFill(x)
-            var st = getFirstSolidStroke(x)
-            if (st) total++
-            else if (!hasImg) total++
-        }
-        if (isContainer(x) && x.children) {
-            for (var i = 0; i < x.children.length; i++) walk(x.children[i])
-        }
-    }
-    walk(node)
-    return total
-}
-
-/**
- * PNG vs JPG — 점수제 휴리스틱 + 강제 룰
- * 강제: 서브트리 실투명(opacity / fill opacity / 임베디드 이미지 알파) → 무조건 PNG
- * 그 외: computeExportFormatScores → png >= jpg 이면 PNG
- *
- * @param {SceneNode} node
- * @returns {Promise<boolean>}
- */
-function imageExportNeedsPngAsync(node) {
-    if (!node) return Promise.resolve(false)
-    if (hasTransparencyInSubtreeSync(node)) return Promise.resolve(true)
-    return imageFillTransparencyInSubtreeAsync(node).then(function (bitmapAlpha) {
-        if (bitmapAlpha) return true
-        var analysis = analyzeExportFormatSubtree(node)
-        var scores = computeExportFormatScores(analysis, node)
-        return scores.png >= scores.jpg
-    })
-}
-/**
- * imageHash 원본 그대로 반환(가능할 때).
- * JPEG·PNG는 포맷 유지. (예전에는 불투명 PNG만 null → 래스터 JPG로 바뀌어 "PNG 넣었는데 jpg" 이슈 발생)
- * WebP/GIF 등은 브라우저/HTML 호환·투명 이슈로 null → exportNodeImageAsync 경로
- */
-function exportImageFillOnlyAsync(node) {
-    if (!node) return Promise.resolve(null)
-    try {
-        var fills = node.fills
-        if (!fills || fills === figma.mixed) return Promise.resolve(null)
-        for (var i = fills.length - 1; i >= 0; i--) {
-            var f = fills[i]
-            if (f && f.visible !== false && f.type === "IMAGE" && f.imageHash) {
-                var img = figma.getImageByHash(f.imageHash)
-                if (!img) return Promise.resolve(null)
-                return img
-                    .getBytesAsync()
-                    .then(function (bytes) {
-                        if (!bytes || bytes.length === 0) return null
-                        if (isJpegBytes(bytes)) {
-                            return "data:image/jpeg;base64," + figma.base64Encode(bytes)
-                        }
-                        if (isPngBytes(bytes)) {
-                            return "data:image/png;base64," + figma.base64Encode(bytes)
-                        }
-                        if (webpBytesHasTransparency(bytes) || gifBytesHasTransparency(bytes)) {
-                            return null
-                        }
-                        if (isWebpBytes(bytes) || isGifBytes(bytes)) {
-                            return null
-                        }
-                        return null
-                    })
-                    .catch(function () {
-                        return null
-                    })
-            }
-        }
-    } catch (e) {}
-    return Promise.resolve(null)
-}
-
-/** 자식 제거한 복제본을 export → fill만 있는 이미지 (imageHash 실패 시 대안) */
-function exportNodeImageFillOnlyAsync(node, moAlignCtx) {
-    if (!node || !isContainer(node)) return Promise.resolve(null)
-    try {
-        var clone = node.clone()
-        while (clone.children && clone.children.length > 0) clone.removeChild(clone.children[0])
-        return exportNodeImageAsync(clone, moAlignCtx)
-            .then(function (dataUrl) {
-                clone.remove()
-                return dataUrl
-            })
-            .catch(function () {
-                try {
-                    clone.remove()
-                } catch (e) {}
-                return null
-            })
-    } catch (e) {
-        return Promise.resolve(null)
-    }
-}
-
-/** imageHash → (필요 시) 자식 제거 클론 래스터 → 전체 노드 export */
-function exportImageFillThenCloneFallbackAsync(node, moAlignCtx) {
-    moAlignCtx = moAlignCtx || {}
-    var forced = getForceRasterFormatForMoExport(moAlignCtx.cache, moAlignCtx.secNo)
-    if (forced === "JPG" || forced === "PNG") {
-        if (hasImageFill(node) && isContainer(node) && hasVisibleChildren(node)) {
-            return exportNodeImageFillOnlyAsync(node, moAlignCtx)
-        }
-        return exportNodeImageAsync(node, moAlignCtx)
-    }
-    return exportImageFillOnlyAsync(node).then(function (fromHash) {
-        if (fromHash) return fromHash
-        if (hasImageFill(node) && isContainer(node) && hasVisibleChildren(node)) return exportNodeImageFillOnlyAsync(node, moAlignCtx)
-        return exportNodeImageAsync(node, moAlignCtx)
-    })
-}
-
-/**
- * 배경/ap-image 공통. exportNodeImageAsync 는 자식 TEXT 까지 합쳐 래스터 → fill+TEXT 프레임은
- * mustStrip 경로에서 fill/클론만 사용.
- */
-function exportImagePreferSourceBytesAsync(node, moAlignCtx) {
-    moAlignCtx = moAlignCtx || {}
-    var mustStripChildrenForRaster = hasImageFill(node) && isContainer(node) && hasTextInSubtree(node)
-    if (mustStripChildrenForRaster) return exportImageFillThenCloneFallbackAsync(node, moAlignCtx)
-    return exportNodeImageAsync(node, moAlignCtx).then(function (dataUrl) {
-        if (dataUrl) return dataUrl
-        return exportImageFillThenCloneFallbackAsync(node, moAlignCtx)
-    })
-}
-
-/** VECTOR 계열 타입 목록 (UI 필터와 공유) */
-var VECTOR_TYPES = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "LINE", "ELLIPSE", "POLYGON", "RECTANGLE"]
-/** 타입이 VECTOR 계열인지 */
-function isVectorType(t) {
-    return VECTOR_TYPES.indexOf(t) >= 0
-}
-/** 서브트리 어딘가에 IMAGE fill이 있는지 */
-function hasImageFillInSubtree(node) {
-    if (!node) return false
-    if (hasImageFill(node)) return true
-    if (!isContainer(node)) return false
-    for (var i = 0; i < node.children.length; i++) {
-        if (hasImageFillInSubtree(node.children[i])) return true
-    }
-    return false
-}
-/** 이미지 fill 없이 벡터/도형만 있는 트리인지 (TEXT 제외) */
-function isVectorOnlyTree(node) {
-    if (!node) return false
-    if (node.type === "TEXT") return false
-    if (hasImageFillInSubtree(node)) return false
-    if (!isContainer(node)) return isVectorType(node.type)
-    for (var i = 0; i < node.children.length; i++) {
-        if (!isVectorOnlyTree(node.children[i])) return false
-    }
-    return true
-}
-/**
- * 한 장으로 래스터 합쳐야 하는 “합성” 후보.
- * 예전: 비텍스트 자식 2개 이상이면 그룹 전체를 이미지로 뽑음 → 텍스트/버튼이 있는 배너도 한 PNG로 뭉개짐.
- * 현재: clipsContent(마스크/클립)만 합성 후보. 그 외 그룹은 프레임으로 풀어 자식(이미지·텍스트) 각각 출력.
- */
-function isCompositeCandidate(node) {
-    if (!node || !isContainer(node)) return false
-    try {
-        return !!node.clipsContent
-    } catch (e) {
-        return false
-    }
-}
-/**
- * 이미지 export “후보” (시맨틱/배경 승격/덤프 등에서 사용).
- * 실제로 한 장 PNG/JPG로 뭉개는지는 shouldExportAsSingleRasterImage() 와 별개.
- *
- * - true: 레이어에 IMAGE fill 이 있음, 또는 clipsContent(마스크 합성)
- * - false: 이미지 fill 없고 클립 아님 → 일반 FRAME/GROUP (자식만 순회)
- */
-function isImageCandidate(node) {
-    return !!(node && (hasImageFill(node) || isCompositeCandidate(node) || isCodeRasterNode(node)))
-}
-
-/**
- * 노드를 단일 래스터(<img> 한 장)로 내보낼지 — renderImageNodeAsync 진입용.
- *
- * 1) isImageCandidate 가 false 이면 false (오토레이아웃 프레임에 텍스트만 있는 경우 등은 여기 해당 없음).
- * 2) 서브트리에 Figma TEXT 가 있으면 false — 텍스트는 HTML로 두고 프레임은 renderFrameNodeAsync.
- * 3) (1)(2) 로도 안 막히는 경우만 true — 예: 리프 사각형+이미지 fill, 클립 마스크만 있는 그룹+이미지만 등.
- */
-function shouldExportAsSingleRasterImage(node) {
-    if (!node) return false
-    if (isCodeRasterNode(node)) return true
-    if (!isImageCandidate(node)) return false
-    if (isContainer(node) && hasTextInSubtree(node)) return false
-    return true
-}
-
-/**
- * renderNodeAsync 최종 출력이 .ap-image(<img> 또는 SVG img)인지 — walkImg가 놓친 노드도
- * walkFillMissing에서 ap-section__layer 대신 ap-section__image 로 맞추기 위해 사용.
- * (이미지 2장 이상 분리 출력 프레임은 .ap-flex 등으로 나가므로 제외)
- */
-function nodeWillRenderAsApImageFigure(node) {
-    if (!node || node.type === "TEXT") return false
-    if (isVideoNode(node)) return false
-    if (isCodeRasterNode(node)) return true
-    if (isVectorOnlyTree(node)) {
-        return !isLineLikeNode(node) && node.type !== "ELLIPSE"
-    }
-    if (!isImageCandidate(node)) return false
-    if (isContainer(node) && hasTextInSubtree(node)) return false
-    if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node)) return false
-    return true
-}
-
-/** fill 중 하나라도 opacity < 1 이면 true (투명 필요) */
-function hasVisibleFillWithOpacityLessThanOne(node) {
-    try {
-        var fills = node.fills
-        if (!fills || fills === figma.mixed) return false
-        for (var i = 0; i < fills.length; i++) {
-            var f = fills[i]
-            if (f && f.visible !== false && typeof f.opacity === "number" && f.opacity < 1) return true
-        }
-    } catch (e) {}
-    return false
-}
-
-/** 컨테이너의 visible 자식이 2개 이상이고 전부 이미지류(ap-image로 나가는)인지. 분리된 이미지 판별용 */
-function hasMultipleImageLikeChildren(node) {
-    if (!node || !isContainer(node) || !node.children) return false
-    var list = []
-    for (var i = 0; i < node.children.length; i++) {
-        var c = node.children[i]
-        if (!c || !isVisible(c)) continue
-        var imgLike = isImageCandidate(c) || hasImageFill(c) || (isVectorOnlyTree(c) && !isLineLikeNode(c) && c.type !== "ELLIPSE")
-        if (!imgLike) return false
-        list.push(c)
-    }
-    return list.length >= 2
-}
-
-/** 서브트리 어딘가에 Figma TEXT 노드가 있는지 */
-function hasTextInSubtree(node) {
-    if (!node) return false
-    if (node.type === "TEXT") return true
-    var kids = node.children
-    if (!kids || !kids.length) return false
-    for (var i = 0; i < kids.length; i++) {
-        if (hasTextInSubtree(kids[i])) return true
-    }
-    return false
-}
-
-/** 클래스 기반 selector (섹션 스코프는 selInSection으로 접두) */
 function nodeSel(id) {
     return id ? "." + nodeUniqueClass(String(id)) : ".ap-missing"
 }
-
-var IMAGE_EXPORT_MAX_WIDTH = 200   // 미리보기
-var IMAGE_EXPORT_ZIP_WIDTH = 1200  // ZIP 내보내기
+var IMAGE_EXPORT_MAX_WIDTH = 200
+var IMAGE_EXPORT_ZIP_WIDTH = 1200
 var _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
-
-/** MO(_mo): 다음 imgNN stem 이 PC imageList 와 같을 때 PC 확장자로 래스터 export 우선 */
-function getForceRasterFormatForMoExport(cache, secNo) {
-    if (!cache || cache.imageSuffix !== "_mo" || !cache.pcRasterExtByStem) return null
-    var secEarly = Number(secNo) || 1
-    if (!cache.imgCountBySec) return null
-    var n = (cache.imgCountBySec[secEarly] || 0) + 1
-    var project = normalizeProjectName(cache.projectName)
-    var stemPrefix = typeof ASSETS_IMAGES_PREFIX !== "undefined" ? ASSETS_IMAGES_PREFIX : "assets/images/"
-    var stem = stemPrefix + "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n)
-    var ext = cache.pcRasterExtByStem[stem]
-    if (ext === ".jpg" || ext === ".jpeg") return "JPG"
-    if (ext === ".png") return "PNG"
-    return null
-}
-
-/** 노드 PNG/JPG export — imageExportNeedsPngAsync(투명 강제 + 점수제) 후 JPG 우선·실패 시 PNG */
-/** @param {{ cache?: object, secNo?: number }|null} moAlignCtx */
-function exportNodeImageAsync(node, moAlignCtx) {
-    moAlignCtx = moAlignCtx || {}
-    if (!node) return Promise.resolve(null)
-    try {
-        var w = _currentExportWidth
-        /** @param {"PNG"|"JPG"} format */
-        function doExport(format, widthOrNull, extraOpts) {
-            var opts = widthOrNull != null ? {constraint: {type: "WIDTH", value: widthOrNull}, format: format} : {format: format}
-            if (extraOpts && typeof extraOpts === "object") {
-                for (var k in extraOpts) {
-                    if (Object.prototype.hasOwnProperty.call(extraOpts, k)) opts[k] = extraOpts[k]
-                }
-            }
-            return node
-                .exportAsync(opts)
-                .then(function (bytes) {
-                    if (bytes && bytes.length > 0) {
-                        var b64 = figma.base64Encode(bytes)
-                        return format === "PNG" ? "data:image/png;base64," + b64 : "data:image/jpeg;base64," + b64
-                    }
-                    return null
-                })
-                .catch(function () {
-                    return null
-                })
-        }
-        // TEXT: useAbsoluteBounds false → 글리프에 가까운 시각적 bounds(좁은 PNG).
-        var exportBoundsOpts = {useAbsoluteBounds: false}
-        /** 동일 포맷으로 width → 800 → 제약 없음 순 시도 */
-        function tryFormatSequence(fmt) {
-            return doExport(fmt, w, exportBoundsOpts).then(function (result) {
-                if (result) return result
-                return doExport(fmt, 800, exportBoundsOpts)
-            }).then(function (result) {
-                if (result) return result
-                return doExport(fmt, null, exportBoundsOpts)
-            })
-        }
-        function trySequence(usePng) {
-            if (usePng) {
-                return tryFormatSequence("PNG")
-            }
-            return tryFormatSequence("JPG").then(function (result) {
-                if (result) return result
-                return tryFormatSequence("PNG")
-            })
-        }
-        var forced = getForceRasterFormatForMoExport(moAlignCtx.cache, moAlignCtx.secNo)
-        if (forced === "JPG") {
-            return tryFormatSequence("JPG").then(function (result) {
-                if (result) return result
-                return tryFormatSequence("PNG")
-            })
-        }
-        if (forced === "PNG") {
-            return tryFormatSequence("PNG").then(function (result) {
-                if (result) return result
-                return tryFormatSequence("JPG")
-            })
-        }
-        return imageExportNeedsPngAsync(node).then(function (usePng) {
-            return trySequence(usePng)
-        })
-    } catch (e) {
-        return Promise.resolve(null)
-    }
-}
-/** 벡터 전용 트리 노드 → SVG data URL */
-function exportNodeSvgAsync(node) {
-    if (!node || !isVectorOnlyTree(node)) return Promise.resolve(null)
-    try {
-        return node
-            .exportAsync({format: "SVG"})
-            .then(function (bytes) {
-                if (bytes && bytes.length > 0) {
-                    var b64 = figma.base64Encode(bytes)
-                    return "data:image/svg+xml;base64," + b64
-                }
-                return null
-            })
-            .catch(function () {
-                return null
-            })
-    } catch (e) {
-        return Promise.resolve(null)
-    }
-}
-
-/** 이미지 노드 크기로 img용 CSS var 선언 (TEXT 래스터는 시각적 bounds) */
 function getImageSizeDecl(node) {
     var box = node && node.type === "TEXT" ? getTextRasterBounds(node) : getAbs(node)
     if (!box || (box.w == null && box.h == null)) return ""
@@ -3059,6 +2633,10 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
                 for (var k2 = 0; k2 < (n.children || []).length; k2++) walkImg(n.children[k2])
                 return
             }
+            if (hasImageFill(n) && hasVisibleChildren(n) && (!isCompositeCandidate(n) || subtreeHasVectorOrTextOverlay(n))) {
+                for (var kBg = 0; kBg < (n.children || []).length; kBg++) walkImg(n.children[kBg])
+                return
+            }
             tagImageNode(n)
             return
         }
@@ -3780,15 +3358,10 @@ function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapper
 }
 
 /**
- * 083-assets-cache — ZIP 에셋 파일명·프로젝트 슬러그·이미지 경로 할당
- *
- * page_*_imgNN 파일 번호·해시 디듀프는 여기(에셋 단계). ap-section__image--NN BEM 번호는 084/096 렌더 순서와 별개.
- *
- * 의존: 010 pad2
+ * 083-assets-cache — ZIP 에셋 파일명 (assetKey → path).
+ * 경로는 assetKey(067에서 secNo·노드 id 포함)당 1개만. 내용/figma imageHash만으로 다른 노드에 경로를 재사용하지 않음.
  */
-// ----- Asset paths (cache.imageName, imageList, svgByHash) -----
 var ASSETS_IMAGES_PREFIX = "assets/images/"
-/** 프로젝트명 → 파일명에 쓸 수 있는 문자열 (공백·특수문자 제거) */
 function normalizeProjectName(s) {
     s = String(s || "").trim()
     if (!s) return "project"
@@ -3796,88 +3369,42 @@ function normalizeProjectName(s) {
     return s || "project"
 }
 
-/** 동일 경로는 imageList에 한 번만 (dump walk + build 이중 호출·재사용 안전) */
 function ensureImageInListOnce(cache, name, dataUrl) {
     if (!cache || !cache.imageList || !name || !dataUrl) return
     for (var i = 0; i < cache.imageList.length; i++) {
         if (cache.imageList[i].name === name) return
     }
-    cache.imageList.push({name: name, dataUrl: dataUrl})
+    cache.imageList.push({ name: name, dataUrl: dataUrl })
 }
 
-/** data: URL MIME → 에셋 확장자 (path 캐시 재사용 시 실제 export와 불일치 방지) */
 function getDataUrlExt(dataUrl) {
     if (!dataUrl) return ".jpg"
     if (dataUrl.indexOf("image/svg+xml") >= 0) return ".svg"
     if (dataUrl.indexOf("image/png") >= 0) return ".png"
     if (dataUrl.indexOf("image/jpeg") >= 0) return ".jpg"
+    if (dataUrl.indexOf("image/webp") >= 0) return ".webp"
+    if (dataUrl.indexOf("image/gif") >= 0) return ".gif"
     return ".jpg"
 }
 
-/** assets 경로 문자열에서 래스터/SVG 확장자만 추출 (.jpeg → .jpg) */
-function pathExtFromAssetPath(path) {
-    var m = String(path || "").match(/\.(png|jpe?g|svg)$/i)
-    if (!m) return ""
-    var ext = m[0].toLowerCase()
-    return ext === ".jpeg" ? ".jpg" : ext
-}
-
-/** 문자열 해시 (동일 SVG 내용 → 동일 파일 재사용용) */
-function simpleHash(str) {
-    if (str == null || str.length === 0) return "0"
-    var h = 0
-    for (var i = 0; i < str.length; i++) {
-        h = ((h << 5) - h) + str.charCodeAt(i)
-        h = h & h
-    }
-    return (h >>> 0).toString(36)
-}
-
-/** nodeId당 1회 할당. page_{project}_sec{01}_img{01}.{ext} — dump walk는 호출하지 않음(build만 호출 → imgNN 연속) (SVG·imageHash·raster bytes 공유) */
-function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
+function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
     opts = opts || {}
     if (!cache) return ""
     if (!cache.imageName) cache.imageName = {}
     if (!cache.imgCountBySec) cache.imgCountBySec = {}
     if (!cache.imageList) cache.imageList = []
 
-    var key = nodeId != null ? nodeId : dataUrl ? "_" + (Math.random() + "") : null
-    if (key == null) return ""
+    if (opts.reuseAssetKey && cache.imageName[opts.reuseAssetKey]) {
+        var reusedPath = cache.imageName[opts.reuseAssetKey]
+        var ak = assetKey != null ? String(assetKey) : ""
+        if (ak && reusedPath) cache.imageName[ak] = reusedPath
+        return reusedPath
+    }
 
-    var isSvg = dataUrl && dataUrl.indexOf("image/svg+xml") >= 0
+    var key = assetKey != null ? String(assetKey) : ""
+    if (!key) return ""
+
     var secEarly = Number(secNo) || 1
-    var figmaImgHash = !opts || opts.imageHash == null || String(opts.imageHash) === "" ? "" : String(opts.imageHash)
-    var phKey = !isSvg && figmaImgHash ? secEarly + ":" + figmaImgHash : ""
-    var svgHash = isSvg && dataUrl ? simpleHash(dataUrl) : null
-    if (isSvg && !cache.svgByHash) cache.svgByHash = {}
-    if (svgHash && cache.svgByHash[svgHash]) {
-        cache.imageName[key] = cache.svgByHash[svgHash].name
-    }
-
-    /** 동일 피그마 IMAGE 소스(imageHash) — PC/MO export 픽셀이 달라도 같은 imgNN·파일 하나 (확장자는 현재 dataUrl과 일치할 때만 재사용) */
-    if (!cache.imageName[key] && phKey) {
-        if (!cache.pathByImageHash) cache.pathByImageHash = {}
-        var reusedPh = cache.pathByImageHash[phKey] || ""
-        if (reusedPh) {
-            var curExt = getDataUrlExt(dataUrl)
-            var reusedExt = pathExtFromAssetPath(reusedPh)
-            if (reusedExt && reusedExt === curExt) {
-                cache.imageName[key] = reusedPh
-            }
-        }
-    }
-
-    /** 동일 PNG/JPG/WebP export 결과 → 노드가 달라도 파일 하나 (피그마에서 같은 이미지를 여러 레이어에 쓴 경우) */
-    var rasterHash = !isSvg && dataUrl ? simpleHash(dataUrl) : null
-    if (rasterHash && !cache.rasterByHash) cache.rasterByHash = {}
-    if (!cache.imageName[key] && rasterHash && cache.rasterByHash[rasterHash]) {
-        var reusedRaster = cache.rasterByHash[rasterHash].name || ""
-        var curExtR = getDataUrlExt(dataUrl)
-        var reusedExtR = pathExtFromAssetPath(reusedRaster)
-        if (reusedExtR && reusedExtR === curExtR) {
-            cache.imageName[key] = reusedRaster
-        }
-    }
 
     if (!cache.imageName[key]) {
         if (!dataUrl || !String(dataUrl).trim()) return ""
@@ -3891,16 +3418,6 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
         var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + suffix + ext
 
         cache.imageName[key] = ASSETS_IMAGES_PREFIX + fileName
-        var isSvgMo = dataUrl && cache.imageSuffix === "_mo" && dataUrl.indexOf("image/svg+xml") >= 0
-        var skipExport = opts.skipExport || isSvgMo
-        if (dataUrl && !skipExport) {
-            if (svgHash && cache.svgByHash) cache.svgByHash[svgHash] = { name: cache.imageName[key], dataUrl: dataUrl }
-            if (rasterHash && cache.rasterByHash) cache.rasterByHash[rasterHash] = { name: cache.imageName[key], dataUrl: dataUrl }
-        }
-        if (phKey) {
-            if (!cache.pathByImageHash) cache.pathByImageHash = {}
-            cache.pathByImageHash[phKey] = cache.imageName[key]
-        }
     }
 
     var pathOut = cache.imageName[key] || ""
@@ -3911,10 +3428,6 @@ function getOrAssignImagePath(cache, nodeId, dataUrl, secNo, opts) {
     return pathOut
 }
 
-/**
- * PC imageList 항목의 경로 → 확장자 맵 (확장자 제외 stem → .jpg | .png).
- * MO(_mo) export 시 같은 sec/img 순서면 PC와 동일 확장자로 래스터를 맞춤.
- */
 function buildPcRasterExtByStemFromImageList(images) {
     var map = Object.create(null)
     if (!images || !images.length) return map
@@ -3930,9 +3443,6 @@ function buildPcRasterExtByStemFromImageList(images) {
     return map
 }
 
-/**
- * MO(_mo) imageList → PC 래스터 stem(확장자 제외 전체 경로) → 실제 MO 에셋 경로.
- */
 function buildMoRasterPathByPcStemFromMoImageList(moImages) {
     var map = Object.create(null)
     if (!moImages || !moImages.length) return map
@@ -3947,6 +3457,640 @@ function buildMoRasterPathByPcStemFromMoImageList(moImages) {
     return map
 }
 
+/**
+ * 067-image-system — 정책·포맷·export·에셋 캐시 (node.id 기반 이미지 캐시 없음)
+ */
+function createImageAssetStores() {
+    return { preview: Object.create(null), export: Object.create(null), zip: Object.create(null) }
+}
+
+function ensureImagePipelineOnCache(cache) {
+    if (!cache.assetStores) cache.assetStores = createImageAssetStores()
+    if (!cache.imagePipeline) cache.imagePipeline = { mode: "export", variant: "pc" }
+}
+
+function getAssetStore(cache) {
+    ensureImagePipelineOnCache(cache)
+    var m = cache.imagePipeline.mode
+    if (m === "preview") return cache.assetStores.preview
+    if (m === "zip") return cache.assetStores.zip
+    return cache.assetStores.export
+}
+
+function getCachedAsset(cache, assetKey) {
+    var st = getAssetStore(cache)
+    return st[assetKey] || null
+}
+
+function setCachedAsset(cache, assetKey, data) {
+    var st = getAssetStore(cache)
+    st[assetKey] = data
+}
+
+function structuralSourceHash(node) {
+    if (!node) return "nil"
+    var box = getAbs(node)
+    var w = box && box.w != null ? Math.round(box.w * 100) : 0
+    var h = box && box.h != null ? Math.round(box.h * 100) : 0
+    var cc = 0
+    try {
+        cc = node.clipsContent ? 1 : 0
+    } catch (e) {}
+    return "st:" + (node.type || "?") + ":" + w + "x" + h + ":" + cc
+}
+
+function sourceHashForAssetKey(node, kind, ctx) {
+    var keyNode = ctx && ctx.pairPcNode && ctx.cache && ctx.cache.imageSuffix === "_mo" && ctx.insideSwiperSlide ? ctx.pairPcNode : node
+    var nid = node && node.id != null ? String(node.id).replace(/[^a-zA-Z0-9_-]/g, "_") : "noid"
+    var ih = getPrimaryImageFillHash(keyNode)
+    if (ih) return "ih:" + ih + ":n:" + nid
+    if (kind === "svg") return "svg:" + structuralSourceHash(keyNode) + ":n:" + nid
+    return structuralSourceHash(keyNode) + ":n:" + nid
+}
+
+function makeAssetKey(node, kind, format, ctx) {
+    ensureImagePipelineOnCache(ctx.cache)
+    var mode = ctx.cache.imagePipeline.mode
+    var variant = ctx.cache.imagePipeline.variant
+    if (ctx.cache.imageSuffix === "_mo") variant = "mo"
+    var fmt = format === "PNG" ? "png" : format === "JPG" ? "jpg" : "-"
+    var sh = sourceHashForAssetKey(node, kind, ctx)
+    // 같은 Figma 이미지 해시(ih)라도 섹션마다 별도 파일·export 캐시(083 imageName[key]가 섹션 간 공유되지 않게)
+    var secN = ctx && ctx.secNo != null && ctx.secNo !== "" ? Number(ctx.secNo) || 1 : 1
+    return mode + ":" + variant + ":" + kind + ":" + fmt + ":s" + secN + ":" + sh
+}
+
+function readUint32BEImg(bytes, offset) {
+    return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0
+}
+
+function isJpegBytesImg(bytes) {
+    return !!(bytes && bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
+}
+
+function isPngBytesImg(bytes) {
+    return !!(bytes && bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47)
+}
+
+function isGifBytesImg(bytes) {
+    return !!(
+        bytes &&
+        bytes.length >= 6 &&
+        bytes[0] === 0x47 &&
+        bytes[1] === 0x49 &&
+        bytes[2] === 0x46 &&
+        bytes[3] === 0x38 &&
+        (bytes[4] === 0x39 || bytes[4] === 0x37) &&
+        bytes[5] === 0x61
+    )
+}
+
+function isWebpBytesImg(bytes) {
+    return !!(
+        bytes &&
+        bytes.length >= 12 &&
+        bytes[0] === 0x52 &&
+        bytes[1] === 0x49 &&
+        bytes[2] === 0x46 &&
+        bytes[3] === 0x46 &&
+        bytes[8] === 0x57 &&
+        bytes[9] === 0x45 &&
+        bytes[10] === 0x42 &&
+        bytes[11] === 0x50
+    )
+}
+
+function pngBytesHasTransparencyImg(bytes) {
+    if (!isPngBytesImg(bytes) || bytes.length < 33) return false
+    var pos = 8
+    while (pos + 12 <= bytes.length) {
+        var len = readUint32BEImg(bytes, pos)
+        var typeStr = String.fromCharCode(bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7])
+        if (len > 0x7fffffff || pos + 12 + len > bytes.length) break
+        if (typeStr === "IHDR" && len >= 13) {
+            var colorType = bytes[pos + 8 + 9]
+            if (colorType === 4 || colorType === 6) return true
+        }
+        if (typeStr === "tRNS") return true
+        if (typeStr === "IEND") break
+        pos += 12 + len
+    }
+    return false
+}
+
+function webpBytesHasTransparencyImg(bytes) {
+    if (!isWebpBytesImg(bytes)) return false
+    var pos = 12
+    while (pos + 8 <= bytes.length) {
+        var chunk = String.fromCharCode(bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3])
+        var sz = bytes[pos + 4] | (bytes[pos + 5] << 8) | (bytes[pos + 6] << 16) | (bytes[pos + 7] << 24)
+        if (sz < 0 || pos + 8 + sz > bytes.length) break
+        if (chunk === "VP8X" && sz >= 10) return (bytes[pos + 8] & 0x10) !== 0
+        if (chunk === "VP8L") return true
+        pos += 8 + sz + (sz & 1)
+    }
+    return false
+}
+
+function gifBytesHasTransparencyImg(bytes) {
+    if (!isGifBytesImg(bytes)) return false
+    for (var i = 0; i < bytes.length - 4; i++) {
+        if (bytes[i] === 0x21 && bytes[i + 1] === 0xf9 && bytes[i + 2] >= 4) {
+            if ((bytes[i + 3] & 1) !== 0) return true
+        }
+    }
+    return false
+}
+
+function embeddedImageFillBytesTransparencyAsync(node) {
+    if (!node) return Promise.resolve(false)
+    try {
+        var fills = node.fills
+        if (!fills || fills === figma.mixed) return Promise.resolve(false)
+        for (var i = fills.length - 1; i >= 0; i--) {
+            var f = fills[i]
+            if (f && f.visible !== false && f.type === "IMAGE" && f.imageHash) {
+                var imageObj = figma.getImageByHash(f.imageHash)
+                if (!imageObj) return Promise.resolve(false)
+                return imageObj
+                    .getBytesAsync()
+                    .then(function (bytes) {
+                        if (!bytes || bytes.length === 0) return false
+                        if (isJpegBytesImg(bytes)) return false
+                        if (isPngBytesImg(bytes)) return pngBytesHasTransparencyImg(bytes)
+                        if (isWebpBytesImg(bytes)) return webpBytesHasTransparencyImg(bytes)
+                        if (isGifBytesImg(bytes)) return gifBytesHasTransparencyImg(bytes)
+                        return false
+                    })
+                    .catch(function () {
+                        return false
+                    })
+            }
+        }
+    } catch (e) {}
+    return Promise.resolve(false)
+}
+
+function scanSubtreeEmbeddedTransparencyAsync(node) {
+    if (!node || !isVisible(node)) return Promise.resolve(false)
+    return embeddedImageFillBytesTransparencyAsync(node).then(function (here) {
+        if (here) return true
+        if (!isContainer(node) || !node.children || !node.children.length) return false
+        var ci = 0
+        function nextChild() {
+            if (ci >= node.children.length) return Promise.resolve(false)
+            var ch = node.children[ci++]
+            return scanSubtreeEmbeddedTransparencyAsync(ch).then(function (sub) {
+                return sub || nextChild()
+            })
+        }
+        return nextChild()
+    })
+}
+
+function hasOpacityTransparencySubtreeSync(node) {
+    if (!node || !isVisible(node)) return false
+    if (typeof node.opacity === "number" && node.opacity < 1) return true
+    if (hasVisibleFillWithOpacityLessThanOne(node)) return true
+    if (!isContainer(node) || !node.children) return false
+    for (var i = 0; i < node.children.length; i++) {
+        if (hasOpacityTransparencySubtreeSync(node.children[i])) return true
+    }
+    return false
+}
+
+function nodeNeedsPngFromHeuristicAsync(node) {
+    if (!node) return Promise.resolve(false)
+    if (hasOpacityTransparencySubtreeSync(node)) return Promise.resolve(true)
+    return scanSubtreeEmbeddedTransparencyAsync(node).then(function (bitmapAlpha) {
+        if (bitmapAlpha) return true
+        var analysis = analyzeExportFormatSubtree(node)
+        var scores = computeExportFormatScores(analysis, node)
+        return scores.png >= scores.jpg
+    })
+}
+
+function decideRasterFormatFromPair(pcNode, moNode, ctx) {
+    var pPc = pcNode ? nodeNeedsPngFromHeuristicAsync(pcNode) : Promise.resolve(false)
+    var pMo = moNode ? nodeNeedsPngFromHeuristicAsync(moNode) : Promise.resolve(false)
+    return Promise.all([pPc, pMo]).then(function (arr) {
+        return arr[0] || arr[1] ? "PNG" : "JPG"
+    })
+}
+
+function precomputeRasterFormatsForOrderedNodePairsAsync(moNodes, pcNodesOrNull, secNo, cache) {
+    cache.rasterFormatBySlot = cache.rasterFormatBySlot || {}
+    cache.rasterFormatByNodeId = cache.rasterFormatByNodeId || {}
+    var proms = []
+    var n = moNodes.length
+    for (var i = 0; i < n; i++) {
+        ;(function (slot) {
+            var moN = moNodes[slot]
+            var pcN = pcNodesOrNull && pcNodesOrNull[slot] != null ? pcNodesOrNull[slot] : null
+            if (!moN && !pcN) {
+                proms.push(Promise.resolve())
+                return
+            }
+            var paired = !!pcNodesOrNull
+            var pcFor = paired && pcN ? pcN : moN
+            var moFor = paired && moN ? moN : null
+            if (!paired) {
+                pcFor = moN
+                moFor = null
+            }
+            proms.push(
+                decideRasterFormatFromPair(pcFor, moFor, {}).then(function (fmt) {
+                    var sk = secNo + ":" + slot
+                    cache.rasterFormatBySlot[sk] = fmt
+                    if (moN && moN.id != null) cache.rasterFormatByNodeId[String(moN.id)] = fmt
+                    if (pcN && pcN.id != null) cache.rasterFormatByNodeId[String(pcN.id)] = fmt
+                }),
+            )
+        })(i)
+    }
+    return Promise.all(proms)
+}
+
+function rasterFormatFromNodeOrSlotMaps(cache, ctx, node) {
+    var sk = slotRasterKey(ctx)
+    if (sk && cache.rasterFormatBySlot && cache.rasterFormatBySlot[sk]) return cache.rasterFormatBySlot[sk]
+    if (node && node.id != null && cache.rasterFormatByNodeId) {
+        var hid = String(node.id)
+        if (cache.rasterFormatByNodeId[hid]) return cache.rasterFormatByNodeId[hid]
+    }
+    var pc = ctx && ctx.pairPcNode
+    if (pc && pc.id != null && cache.rasterFormatByNodeId) {
+        var pid = String(pc.id)
+        if (cache.rasterFormatByNodeId[pid]) return cache.rasterFormatByNodeId[pid]
+    }
+    return null
+}
+
+function resolveRasterFormatOnceAsync(node, ctx) {
+    var cache = ctx.cache
+    var cached = rasterFormatFromNodeOrSlotMaps(cache, ctx, node)
+    if (cached) return Promise.resolve(cached)
+    var mo = cache && cache.imageSuffix === "_mo"
+    return decideRasterFormatFromPair(ctx.pairPcNode || node, mo ? node : null, ctx).then(function (fmt) {
+        cache.rasterFormatByNodeId = cache.rasterFormatByNodeId || {}
+        if (node && node.id != null) cache.rasterFormatByNodeId[String(node.id)] = fmt
+        if (ctx.pairPcNode && ctx.pairPcNode.id != null) cache.rasterFormatByNodeId[String(ctx.pairPcNode.id)] = fmt
+        var sk = slotRasterKey(ctx)
+        if (sk) {
+            cache.rasterFormatBySlot = cache.rasterFormatBySlot || {}
+            cache.rasterFormatBySlot[sk] = fmt
+        }
+        return fmt
+    })
+}
+
+function slotRasterKey(ctx) {
+    if (!ctx.fromPrefetchSlot) return ""
+    return (ctx.secNo || 1) + ":" + (ctx.slotIndex != null ? ctx.slotIndex : 0)
+}
+
+function decideImageKind(node, ctx) {
+    ctx = ctx || {}
+    if (!node) return Promise.resolve("skip")
+    var cache = ctx.cache
+    var mo = cache && cache.imageSuffix === "_mo"
+    var sk = slotRasterKey(ctx)
+    if (mo && ctx.insideSwiperSlide) {
+        var rkSlide = null
+        if (node.id != null && cache.slideAssetKeyByNodeId) rkSlide = cache.slideAssetKeyByNodeId[String(node.id)]
+        if (!rkSlide && sk && cache.slideAssetKeyBySlot) rkSlide = cache.slideAssetKeyBySlot[sk]
+        if (rkSlide) return Promise.resolve("pc-shared-slide")
+    }
+    if (node.type === "TEXT") {
+        return resolveRasterFormatOnceAsync(node, ctx).then(function (fmt) {
+            return fmt === "PNG" ? "raster-png" : "raster-jpg"
+        })
+    }
+    if (isCodeRasterNode(node)) return Promise.resolve("composite-raster")
+    if (ctx.sectionBackgroundImageFillOnly && hasImageFill(node)) {
+        return resolveRasterFormatOnceAsync(node, ctx).then(function (fmt) {
+            return fmt === "PNG" ? "raster-png" : "raster-jpg"
+        })
+    }
+    if (isVectorOnlyTree(node)) return Promise.resolve("svg")
+    if (isContainer(node) && shouldCompositeRasterGroup(node)) return Promise.resolve("composite-raster")
+    if (!shouldExportAsSingleRasterImage(node)) return Promise.resolve("skip")
+    return resolveRasterFormatOnceAsync(node, ctx).then(function (fmt) {
+        return fmt === "PNG" ? "raster-png" : "raster-jpg"
+    })
+}
+
+function rasterFormatFromKind(kind) {
+    if (kind === "raster-png") return "PNG"
+    if (kind === "raster-jpg") return "JPG"
+    return "JPG"
+}
+
+/** IMAGE fill만 있는 빈 프레임을 만들어 export (clone 불가·clone 결과 빈 경우) */
+function exportFillOnlySyntheticFrameAsync(node, format, ctx) {
+    if (!node || !hasImageFill(node)) return Promise.resolve(null)
+    var box = null
+    try {
+        box = getAbs(node)
+    } catch (e0) {}
+    if (!box || box.w == null || box.h == null) return Promise.resolve(null)
+    var w = Math.max(1, Math.round(Number(box.w)))
+    var h = Math.max(1, Math.round(Number(box.h)))
+    var fills = null
+    try {
+        fills = node.fills
+    } catch (e1) {}
+    if (!fills || fills === figma.mixed) return Promise.resolve(null)
+    var tmp = null
+    try {
+        tmp = figma.createFrame()
+        tmp.name = "__bg_fill_only__"
+        figma.currentPage.appendChild(tmp)
+        tmp.resize(w, h)
+        var dup = []
+        for (var fi = 0; fi < fills.length; fi++) dup.push(JSON.parse(JSON.stringify(fills[fi])))
+        tmp.fills = dup
+        try {
+            if (typeof node.cornerRadius === "number" && !isNaN(node.cornerRadius)) tmp.cornerRadius = node.cornerRadius
+        } catch (eCr) {}
+    } catch (e2) {
+        try {
+            if (tmp) tmp.remove()
+        } catch (e3) {}
+        return Promise.resolve(null)
+    }
+    return exportRasterAssetAsync(tmp, format, ctx).then(function (res) {
+        try {
+            if (tmp) tmp.remove()
+        } catch (e4) {}
+        return res
+    })
+}
+
+function exportFillOnlyRasterAsync(node, format, ctx) {
+    if (!node || !isContainer(node)) return Promise.resolve(null)
+    var clone = null
+    try {
+        clone = node.clone()
+        while (clone.children && clone.children.length > 0) clone.removeChild(clone.children[0])
+    } catch (e) {
+        return exportFillOnlySyntheticFrameAsync(node, format, ctx)
+    }
+    return exportRasterAssetAsync(clone, format, ctx).then(function (res) {
+        try {
+            if (clone) clone.remove()
+        } catch (e2) {}
+        if (res && res.dataUrl) return res
+        return exportFillOnlySyntheticFrameAsync(node, format, ctx)
+    })
+}
+
+/** 최상단 IMAGE fill의 원본 바이트만 (자식·벡터 없음). crop/scale은 프레임과 다를 수 있음 */
+function exportRasterFromEmbeddedImageFillBytesAsync(node) {
+    var hash = getPrimaryImageFillHash(node)
+    if (!hash) return Promise.resolve(null)
+    try {
+        var img = figma.getImageByHash(hash)
+        if (!img) return Promise.resolve(null)
+        return img.getBytesAsync().then(function (bytes) {
+            if (!bytes || bytes.length === 0) return null
+            var b64 = figma.base64Encode(bytes)
+            var mime = "image/png"
+            var fmtEff = "PNG"
+            if (isJpegBytesImg(bytes)) {
+                mime = "image/jpeg"
+                fmtEff = "JPG"
+            } else if (isPngBytesImg(bytes)) {
+                mime = "image/png"
+                fmtEff = "PNG"
+            } else if (isGifBytesImg(bytes)) {
+                mime = "image/gif"
+                fmtEff = "PNG"
+            } else if (isWebpBytesImg(bytes)) {
+                mime = "image/webp"
+                fmtEff = "PNG"
+            }
+            return { dataUrl: "data:" + mime + ";base64," + b64, format: fmtEff }
+        })
+    } catch (e) {
+        return Promise.resolve(null)
+    }
+}
+
+/** 섹션/프레임 배경: fill만(클론·합성 프레임·임베드 원본). 보이는 자식이 있으면 전체 exportAsync로 합치지 않음 */
+function exportSectionBackgroundImageRasterAsync(node, format, ctx) {
+    if (!node || !hasImageFill(node)) return Promise.resolve(null)
+    if (isContainer(node)) {
+        return exportFillOnlyRasterAsync(node, format, ctx).then(function (res) {
+            if (res && res.dataUrl) return res
+            if (hasVisibleChildren(node)) return exportRasterFromEmbeddedImageFillBytesAsync(node)
+            if (hasTextInSubtree(node)) return exportRasterWithoutTextSubtreeAsync(node, format, ctx)
+            return exportRasterAssetAsync(node, format, ctx)
+        })
+    }
+    if (hasTextInSubtree(node)) return exportRasterWithoutTextSubtreeAsync(node, format, ctx)
+    return exportRasterAssetAsync(node, format, ctx)
+}
+
+/** 배경 래스터: fill·비텍스트 레이어는 유지, TEXT 노드만 클론에서 제거 후 export */
+function exportRasterWithoutTextSubtreeAsync(node, format, ctx) {
+    if (!node) return Promise.resolve(null)
+    try {
+        var clone = node.clone()
+        function stripTextUnder(n) {
+            if (!n || !isContainer(n) || !n.children) return
+            var i = n.children.length
+            while (i-- > 0) {
+                var c = n.children[i]
+                if (!c) continue
+                if (c.type === "TEXT") {
+                    try {
+                        c.remove()
+                    } catch (e) {}
+                } else {
+                    stripTextUnder(c)
+                }
+            }
+        }
+        stripTextUnder(clone)
+        return exportRasterAssetAsync(clone, format, ctx).then(function (res) {
+            try {
+                clone.remove()
+            } catch (e2) {}
+            return res
+        })
+    } catch (e) {
+        return Promise.resolve(null)
+    }
+}
+
+function exportRasterAssetAsync(node, format, ctx) {
+    if (!node) return Promise.resolve(null)
+    var w = _currentExportWidth
+    var exportBoundsOpts = { useAbsoluteBounds: node.type !== "TEXT" }
+    function pack(dataUrl, fmtEff) {
+        return dataUrl ? { dataUrl: dataUrl, format: fmtEff } : null
+    }
+    function doExport(widthOrNull, fmtEff) {
+        var opts =
+            widthOrNull != null
+                ? { constraint: { type: "WIDTH", value: widthOrNull }, format: fmtEff }
+                : { format: fmtEff }
+        for (var k in exportBoundsOpts) {
+            if (Object.prototype.hasOwnProperty.call(exportBoundsOpts, k)) opts[k] = exportBoundsOpts[k]
+        }
+        return node
+            .exportAsync(opts)
+            .then(function (bytes) {
+                if (bytes && bytes.length > 0) {
+                    var b64 = figma.base64Encode(bytes)
+                    return pack(
+                        fmtEff === "PNG" ? "data:image/png;base64," + b64 : "data:image/jpeg;base64," + b64,
+                        fmtEff,
+                    )
+                }
+                return null
+            })
+            .catch(function () {
+                return null
+            })
+    }
+    function tryFmtSeq(fmtEff) {
+        return doExport(w, fmtEff).then(function (r) {
+            if (r) return r
+            return doExport(800, fmtEff)
+        }).then(function (r) {
+            if (r) return r
+            return doExport(null, fmtEff)
+        })
+    }
+    if (format === "PNG") return tryFmtSeq("PNG")
+    return tryFmtSeq("JPG").then(function (r) {
+        if (r) return r
+        return tryFmtSeq("PNG")
+    })
+}
+
+function exportSvgAssetAsync(node, ctx) {
+    if (!node || !isVectorOnlyTree(node)) return Promise.resolve(null)
+    try {
+        return node
+            .exportAsync({ format: "SVG" })
+            .then(function (bytes) {
+                if (bytes && bytes.length > 0) return "data:image/svg+xml;base64," + figma.base64Encode(bytes)
+                return null
+            })
+            .catch(function () {
+                return null
+            })
+    } catch (e) {
+        return Promise.resolve(null)
+    }
+}
+
+function exportCompositeRasterAsync(node, format, ctx) {
+    return exportRasterAssetAsync(node, format || "JPG", ctx)
+}
+
+function needsFillOnlyStrip(node) {
+    return !!(hasImageFill(node) && isContainer(node) && hasTextInSubtree(node))
+}
+
+function exportByKind(node, kind, format, ctx) {
+    if (!node || kind === "skip") return Promise.resolve(null)
+    if (kind === "pc-shared-slide") return Promise.resolve(null)
+    if (kind === "svg") return exportSvgAssetAsync(node, ctx)
+    var fmt = format || rasterFormatFromKind(kind)
+    if (ctx && ctx.sectionBackgroundImageFillOnly && hasImageFill(node)) {
+        return exportSectionBackgroundImageRasterAsync(node, fmt, ctx)
+    }
+    if (kind === "composite-raster") return exportCompositeRasterAsync(node, fmt, ctx)
+    if (needsFillOnlyStrip(node)) return exportFillOnlyRasterAsync(node, fmt, ctx)
+    if (hasImageFill(node) && isContainer(node) && hasVisibleChildren(node)) return exportFillOnlyRasterAsync(node, fmt, ctx)
+    return exportRasterAssetAsync(node, fmt, ctx)
+}
+
+function finishExport(node, kind, fmt, ctx) {
+    var cache = ctx.cache
+    var assetKey = makeAssetKey(node, kind, fmt, ctx)
+    var hit = getCachedAsset(cache, assetKey)
+    if (hit)
+        return Promise.resolve({
+            dataUrl: hit,
+            assetKey: assetKey,
+            kind: kind,
+            format: fmt,
+            reuseAssetKey: null,
+        })
+    return exportByKind(node, kind, fmt, ctx).then(function (exp) {
+        var dataUrl = null
+        var fmtFinal = fmt
+        if (exp && typeof exp === "object" && exp.dataUrl != null) {
+            dataUrl = exp.dataUrl
+            if (exp.format) fmtFinal = exp.format
+        } else if (typeof exp === "string") {
+            dataUrl = exp
+        }
+        if (fmtFinal && fmtFinal !== fmt) assetKey = makeAssetKey(node, kind, fmtFinal, ctx)
+        if (dataUrl) setCachedAsset(cache, assetKey, dataUrl)
+        return { dataUrl: dataUrl, assetKey: assetKey, kind: kind, format: fmtFinal, reuseAssetKey: null }
+    })
+}
+
+function pipelineEnsureImageAsync(node, ctx) {
+    if (!node) return Promise.resolve(null)
+    ensureImagePipelineOnCache(ctx.cache)
+    var cache = ctx.cache
+    return decideImageKind(node, ctx).then(function (kind) {
+        if (kind === "skip") return null
+        if (kind === "pc-shared-slide") {
+            var sk2 = slotRasterKey(ctx)
+            var rk = null
+            if (node.id != null && cache.slideAssetKeyByNodeId) rk = cache.slideAssetKeyByNodeId[String(node.id)]
+            if (!rk && sk2 && cache.slideAssetKeyBySlot) rk = cache.slideAssetKeyBySlot[sk2]
+            var dataUrlPc = rk ? getCachedAsset(cache, rk) : null
+            return {
+                dataUrl: dataUrlPc,
+                assetKey: rk || makeAssetKey(node, kind, null, ctx),
+                kind: kind,
+                format: null,
+                reuseAssetKey: rk,
+            }
+        }
+        if (kind === "svg") {
+            return finishExport(node, kind, null, ctx)
+        }
+        if (kind === "composite-raster") {
+            return resolveRasterFormatOnceAsync(node, ctx).then(function (f) {
+                return finishExport(node, kind, f, ctx)
+            })
+        }
+        return resolveRasterFormatOnceAsync(node, ctx).then(function (f) {
+            return finishExport(node, kind, f, ctx)
+        })
+    })
+}
+
+function resolvePipelineImageAsync(node, ctx) {
+    return pipelineEnsureImageAsync(node, ctx).then(function (r) {
+        return r && r.dataUrl ? r.dataUrl : null
+    })
+}
+
+function sendImagesToUI(images, ingestId) {
+    if (!images || !images.length) return
+    for (var i = 0; i < images.length; i++) {
+        var item = images[i]
+        figma.ui.postMessage({
+            type: "RESULT_IMAGES_CHUNK",
+            ingestId: ingestId,
+            index: i,
+            name: item.name,
+            dataUrl: item.dataUrl,
+        })
+    }
+    figma.ui.postMessage({ type: "RESULT_IMAGES_END", ingestId: ingestId })
+}
 
 /**
  * 084-image-render-order — 렌더 순서와 동일한 <img> 노드 id 수집·선행 export(에셋 경로/해시 디듀프는 083)
@@ -4194,65 +4338,78 @@ function collectImageFigureNodeIdsForSectionAsync(sectionNode, bg, slideData, ca
     })
 }
 
-function prefetchOneImageNodeAsync(node, cache, secNo) {
-    if (!node || node.id == null) return Promise.resolve()
-    var imgCtx = { cache: cache, secNo: secNo }
-    if (node.type === "TEXT") {
-        return exportNodeImageAsync(node, imgCtx).then(function (dataUrl) {
-            if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
-            if (cache && dataUrl) {
-                getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
-                    skipExport: isVideoNode(node),
-                    imageHash: getPrimaryImageFillHash(node),
-                })
-            }
-        })
+function precomputeRasterFormatsForSlotsAsync(sectionRoot, orderedIds, secNo, cache, pairedRoot, pairedIds) {
+    var moNodes = []
+    var pcNodes = pairedRoot && pairedIds ? [] : null
+    for (var i = 0; i < orderedIds.length; i++) {
+        moNodes.push(findNodeByIdInSubtree(sectionRoot, orderedIds[i]))
+        if (pcNodes) {
+            var pid = pairedIds[i]
+            pcNodes.push(pid != null ? findNodeByIdInSubtree(pairedRoot, pid) : null)
+        }
     }
-    if (isVectorOnlyTree(node) && !isLineLikeNode(node) && node.type !== "ELLIPSE") {
-        return exportNodeSvgAsync(node).then(function (dataUrl) {
-            if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
-            if (cache && dataUrl) {
-                getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
-                    skipExport: isVideoNode(node),
-                    imageHash: getPrimaryImageFillHash(node),
-                })
-            }
-        })
+    return precomputeRasterFormatsForOrderedNodePairsAsync(moNodes, pcNodes, secNo, cache)
+}
+
+function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotIndex, pairedDesktopSection, pcOrderedIds, slideData) {
+    if (!node) return Promise.resolve()
+    var slideIdSet = Object.create(null)
+    if (slideData && sectionNode) {
+        var sit = collectSwiperSlideItemNodes(sectionNode, bg.bgChildId)
+        for (var sj = 0; sj < sit.length; sj++) {
+            if (sit[sj] && sit[sj].id != null) slideIdSet[String(sit[sj].id)] = true
+        }
     }
-    return exportImagePreferSourceBytesAsync(node, imgCtx).then(function (dataUrl) {
-        if (dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
-        if (cache && dataUrl) {
-            getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
-                skipExport: isVideoNode(node),
-                imageHash: getPrimaryImageFillHash(node),
-            })
+    var pairPc = null
+    if (pairedDesktopSection && pcOrderedIds && pcOrderedIds[slotIndex] != null) {
+        pairPc = findNodeByIdInSubtree(pairedDesktopSection, pcOrderedIds[slotIndex])
+    }
+    if (pairPc && node && node.id != null && pairPc.id != null) {
+        cache.pairPcNodeIdByMoId = cache.pairPcNodeIdByMoId || Object.create(null)
+        cache.pairPcNodeIdByMoId[String(node.id)] = String(pairPc.id)
+    }
+    var imgCtx = {
+        cache: cache,
+        secNo: secNo,
+        slotIndex: slotIndex,
+        pairPcNode: pairPc,
+        insideSwiperSlide: !!slideIdSet[String(node.id)],
+        fromPrefetchSlot: true,
+    }
+    return pipelineEnsureImageAsync(node, imgCtx).then(function (meta) {
+        if (!meta) return
+        if (meta.kind === "pc-shared-slide" && meta.dataUrl && meta.assetKey) setCachedAsset(cache, meta.assetKey, meta.dataUrl)
+        var pathOpts = { skipExport: isVideoNode(node), imageHash: getPrimaryImageFillHash(node) }
+        if (meta.reuseAssetKey) pathOpts.reuseAssetKey = meta.reuseAssetKey
+        getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl || "", secNo, pathOpts)
+        if (slideData && slideIdSet[String(node.id)] && meta.assetKey) {
+            cache.slideAssetKeyByNodeId = cache.slideAssetKeyByNodeId || Object.create(null)
+            cache.slideAssetKeyByNodeId[String(node.id)] = meta.reuseAssetKey || meta.assetKey
+        }
+        if (slideData && !cache.imageSuffix && slideIdSet[String(node.id)] && meta.assetKey) {
+            if (!cache.slideAssetKeyBySlot) cache.slideAssetKeyBySlot = Object.create(null)
+            cache.slideAssetKeyBySlot[secNo + ":" + slotIndex] = meta.reuseAssetKey || meta.assetKey
         }
     })
 }
 
-/** 렌더 순서대로 이미지 바이너리·경로(083) 선할당 — 마크업 단계는 캐시 우선 */
-function prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo) {
+function prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo, bg, slideData, pairedDesktopSection, pcOrderedIds) {
     if (!orderedIds || !orderedIds.length) return Promise.resolve()
     var ix = 0
     function next() {
         if (ix >= orderedIds.length) return Promise.resolve()
+        var slot = ix
         var nid = orderedIds[ix++]
         var node = findNodeByIdInSubtree(sectionNode, nid)
         if (!node) return next()
-        return prefetchOneImageNodeAsync(node, cache, secNo).then(next)
+        return prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slot, pairedDesktopSection, pcOrderedIds, slideData).then(next)
     }
     return next()
 }
 
 /**
- * 085-section-background — 노드 fill 배경 선언 + 섹션 루트 풀블리드 이미지 승격
- *
- * buildBackgroundDeclAsync — 일반 노드 --bgc/--bg-img (060 fill·070 export·083 경로)
- * buildSectionBackgroundAsync — stroke/radius 포함, 90% 이상 덮는 직계 이미지 → --bg-img 승격
+ * 085-section-background — 섹션·노드 배경 fill → CSS (--bg-img 등)
  */
-// ----- Section background (fill → CSS vars, 풀블리드 자식 승격) -----
-
-/** fills 스택에서 최상단(마지막 visible) fill 1개만 반환 */
 function getTopmostVisibleFill(node, opts) {
     try {
         if (!node || !node.fills || node.fills === figma.mixed) return null
@@ -4277,7 +4434,38 @@ function getTopmostVisibleFill(node, opts) {
     return null
 }
 
-/** section이면 --bgc/--bg-img, 그 외는 background-color/background-image */
+function pipelineRasterBackgroundImageDeclAsync(node, useCssVarsForSection, cache, secNo) {
+    var bgCtx = { cache: cache, secNo: secNo, slotIndex: 0, insideSwiperSlide: false, sectionBackgroundImageFillOnly: true }
+    if (cache.imageSuffix === "_mo" && node && node.id != null && cache.pairPcNodeIdByMoId) {
+        var _pcBgId = cache.pairPcNodeIdByMoId[String(node.id)]
+        if (_pcBgId) {
+            try {
+                bgCtx.pairPcNode = figma.getNodeById(_pcBgId)
+            } catch (e) {}
+        }
+    }
+    return pipelineEnsureImageAsync(node, bgCtx).then(function (meta) {
+        if (!meta || !meta.dataUrl) return ""
+        var path = cache
+            ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl || "", secNo, {
+                  skipExport: isVideoNode(node),
+                  imageHash: getPrimaryImageFillHash(node),
+                  reuseAssetKey: meta.reuseAssetKey || undefined,
+              })
+            : ""
+        var imgUrl = (path && path.length) ? path : meta.dataUrl
+        if (!imgUrl) return ""
+        if (useCssVarsForSection) {
+            return "--bg-img:url(" + imgUrl + ")"
+        }
+        return (
+            "background-image:url(" +
+            imgUrl +
+            ");background-repeat:no-repeat;background-position:center;background-size:100% 100%"
+        )
+    })
+}
+
 function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts) {
     if (!node) return Promise.resolve("")
     if (node.type === "TEXT") return Promise.resolve("")
@@ -4288,8 +4476,10 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
 
     var parts = []
 
-    // 최상단이 SOLID면 색만 적용
     if (topFill.type === "SOLID") {
+        if (hasImageFill(node)) {
+            return pipelineRasterBackgroundImageDeclAsync(node, useCssVarsForSection, cache, secNo)
+        }
         var solid = topFill.fill
         var color = solid && solid.color ? rgbToHex(solid.color) : ""
         if (!color) return Promise.resolve("")
@@ -4306,105 +4496,70 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
         return Promise.resolve(parts.join(";"))
     }
 
-    // 최상단이 IMAGE면 이미지 1개만 적용
     if (topFill.type === "IMAGE") {
-        var dataUrlPromise
-        var moBgCtx = { cache: cache, secNo: secNo }
-        if (cache && cache.image && node.id != null && cache.image[node.id]) {
-            dataUrlPromise = Promise.resolve(cache.image[node.id])
-        } else {
-            dataUrlPromise = exportImagePreferSourceBytesAsync(node, moBgCtx)
-        }
-
-        return dataUrlPromise
-            .then(function (dataUrl) {
-                if (node.id != null && dataUrl && cache && cache.image) cache.image[node.id] = dataUrl
-
-                var path = cache
-                    ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, {
-                          skipExport: isVideoNode(node),
-                          imageHash: getPrimaryImageFillHash(node),
-                      })
-                    : ""
-                var imgUrl = (path && path.length) ? path : dataUrl
-                if (!imgUrl) return ""
-
-                if (useCssVarsForSection) {
-                    parts.push("--bg-img:url(" + imgUrl + ")")
-                } else {
-                    parts.push("background-image:url(" + imgUrl + ")")
-                    parts.push("background-repeat:no-repeat")
-                    parts.push("background-position:center")
-                    parts.push("background-size:100% 100%")
-                }
-                return parts.join(";")
-            })
-            .catch(function () {
-                return ""
-            })
+        return pipelineRasterBackgroundImageDeclAsync(node, useCssVarsForSection, cache, secNo)
     }
 
     return Promise.resolve("")
 }
 
-/** 섹션 배경: fill 또는 직계 자식 중 90% 이상 크기 이미지 → --bg-img 승격 (slide 섹션 제외) */
 function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
-  var slideData = getSlideItems(sectionNode)
+    var slideData = getSlideItems(sectionNode)
 
-  return buildBackgroundDeclAsync(sectionNode, true, cache, secNo).then(function (decl) {
-      var strokeDecl = buildStrokeDecl(sectionNode)
-      if (strokeDecl) decl = decl ? decl + ";" + strokeDecl : strokeDecl
-      var radiusDecl = buildCornerRadiusDecl(sectionNode)
-      if (radiusDecl) decl = decl ? decl + ";" + radiusDecl : radiusDecl
+    return buildBackgroundDeclAsync(sectionNode, true, cache, secNo).then(function (decl) {
+        var strokeDecl = buildStrokeDecl(sectionNode)
+        if (strokeDecl) decl = decl ? decl + ";" + strokeDecl : strokeDecl
+        var radiusDecl = buildCornerRadiusDecl(sectionNode)
+        if (radiusDecl) decl = decl ? decl + ";" + radiusDecl : radiusDecl
 
-      var topFillForBg = getTopmostVisibleFill(sectionNode)
-      if (topFillForBg && topFillForBg.type === "IMAGE") return {decl: decl, bgChildId: null}
-      if (slideData) return {decl: decl, bgChildId: null}
+        var topFillForBg = getTopmostVisibleFill(sectionNode)
+        if (topFillForBg && topFillForBg.type === "IMAGE") return { decl: decl, bgChildId: null }
+        if (topFillForBg && topFillForBg.type === "SOLID" && hasImageFill(sectionNode)) return { decl: decl, bgChildId: null }
+        if (slideData) return { decl: decl, bgChildId: null }
 
-      var children = sectionNode && sectionNode.children ? sectionNode.children : []
-      var sectionBox = getAbs(sectionNode)
-      if (!sectionBox || children.length === 0) return {decl: decl, bgChildId: null}
+        var children = sectionNode && sectionNode.children ? sectionNode.children : []
+        var sectionBox = getAbs(sectionNode)
+        if (!sectionBox || children.length === 0) return { decl: decl, bgChildId: null }
 
-      // 90% 이상 덮는 이미지만 배경 승격. 자식이 있는 프레임(배너 등)은 제외 → 내부 텍스트/버튼 누락 방지
-      var fullBleedChild = null
-      for (var i = 0; i < children.length; i++) {
-          var ch = children[i]
-          if (!ch || !isVisible(ch) || !isImageCandidate(ch)) continue
-          if (isContainer(ch) && ch.children && ch.children.length > 0) continue
-          var chBox = getAbs(ch)
-          if (!chBox) continue
-          if (chBox.w >= sectionBox.w * 0.9 && chBox.h >= sectionBox.h * 0.9) {
-              fullBleedChild = ch
-              break
-          }
-      }
-      if (!fullBleedChild) return {decl: decl, bgChildId: null}
+        var fullBleedChild = null
+        for (var i = 0; i < children.length; i++) {
+            var ch = children[i]
+            if (!ch || !isVisible(ch) || !isImageCandidate(ch)) continue
+            if (isContainer(ch) && ch.children && ch.children.length > 0) continue
+            var chBox = getAbs(ch)
+            if (!chBox) continue
+            if (chBox.w >= sectionBox.w * 0.9 && chBox.h >= sectionBox.h * 0.9) {
+                fullBleedChild = ch
+                break
+            }
+        }
+        if (!fullBleedChild) return { decl: decl, bgChildId: null }
 
-      var moBleedCtx = { cache: cache, secNo: secNo }
-      var dataUrlPromise =
-          cache && cache.image && fullBleedChild.id != null && cache.image[fullBleedChild.id]
-              ? Promise.resolve(cache.image[fullBleedChild.id])
-              : exportNodeImageAsync(fullBleedChild, moBleedCtx)
-
-      return dataUrlPromise
-          .then(function (dataUrl) {
-              if (fullBleedChild.id != null && dataUrl && cache && cache.image) cache.image[fullBleedChild.id] = dataUrl
-              var path = cache
-                  ? getOrAssignImagePath(cache, fullBleedChild.id, dataUrl, secNo, {
-                        skipExport: isVideoNode(fullBleedChild),
-                        imageHash: getPrimaryImageFillHash(fullBleedChild),
-                    })
-                  : ""
-              if (path && dataUrl) {
-                  var merged = decl ? decl + ";--bg-img:url(" + path + ")" : "--bg-img:url(" + path + ")"
-                  return {decl: merged, bgChildId: fullBleedChild.id}
-              }
-              return {decl: decl, bgChildId: null}
-          })
-          .catch(function () {
-              return {decl: decl, bgChildId: null}
-          })
-  })
+        var bleedCtx = { cache: cache, secNo: secNo, slotIndex: 0, insideSwiperSlide: false, sectionBackgroundImageFillOnly: true }
+        if (cache.imageSuffix === "_mo" && fullBleedChild && fullBleedChild.id != null && cache.pairPcNodeIdByMoId) {
+            var _pcBleedId = cache.pairPcNodeIdByMoId[String(fullBleedChild.id)]
+            if (_pcBleedId) {
+                try {
+                    bleedCtx.pairPcNode = figma.getNodeById(_pcBleedId)
+                } catch (e) {}
+            }
+        }
+        return pipelineEnsureImageAsync(fullBleedChild, bleedCtx).then(function (meta) {
+            if (!meta || !meta.dataUrl) return { decl: decl, bgChildId: null }
+            var path = cache
+                ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
+                      skipExport: isVideoNode(fullBleedChild),
+                      imageHash: getPrimaryImageFillHash(fullBleedChild),
+                      reuseAssetKey: meta.reuseAssetKey || undefined,
+                  })
+                : ""
+            if (path && meta.dataUrl) {
+                var merged = decl ? decl + ";--bg-img:url(" + path + ")" : "--bg-img:url(" + path + ")"
+                return { decl: merged, bgChildId: fullBleedChild.id }
+            }
+            return { decl: decl, bgChildId: null }
+        })
+    })
 }
 
 /**
@@ -5314,6 +5469,28 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         return opts && opts.visibilityWrapper ? String(opts.visibilityWrapper) : ""
     }
 
+    function pipelineImgCtx(node, secNo, opts) {
+        opts = opts || {}
+        var o = {
+            cache: cache,
+            secNo: secNo,
+            slotIndex: opts.slotIndex != null ? opts.slotIndex : 0,
+            insideSwiperSlide: !!opts.insideSwiperSlide,
+            fromPrefetchSlot: opts.fromPrefetchSlot === true,
+            pairPcNode: opts.pairPcNode || null,
+        }
+        if (cache.imageSuffix === "_mo" && node && node.id != null && cache.pairPcNodeIdByMoId) {
+            var pcid = cache.pairPcNodeIdByMoId[String(node.id)]
+            if (pcid) {
+                try {
+                    var pn = figma.getNodeById(pcid)
+                    if (pn) o.pairPcNode = pn
+                } catch (e) {}
+            }
+        }
+        return o
+    }
+
     /** 섹션 루트 한 줄 규칙용: `.ap-section--NN` 또는 `.pc-only .ap-section--NN` */
     function sectionRootSelector(secClass, visWrap) {
         var vw = visWrap ? String(visWrap).replace(/^\./, "") : ""
@@ -5371,45 +5548,19 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                 }
 
-                if (cache && cache.image && node.id != null && cache.image[node.id]) {
-                    var dataUrlPre = cache.image[node.id]
-                    var pathPre = cache
-                        ? getOrAssignImagePath(cache, node.id, dataUrlPre, secNo, {
-                              skipExport: isVideoNode(node),
-                              imageHash: getPrimaryImageFillHash(node),
-                          })
-                        : dataUrlPre
-                    var altTextPre = getImageAltText(node)
-                    if (id) ctx.ownImageNodeIds[id] = true
-                    var rasterOptsPre = optsWithRasterTextAsImageSemantics(id, opts)
-                    var imgWrapClsPre = apNodeClassList(("ap-image" + (textAbs ? " ap-abs" : "")).trim(), id, rasterOptsPre)
-                    if (textAbs && id) {
-                        var traDeclPre = buildAbsDeclTextRaster(node, parent)
-                        if (traDeclPre) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, rasterOptsPre, false), visWrapFromOpts(opts)), traDeclPre)
-                    }
-                    pushDeferredImageImgSizeVars(ctx, secClass, id, node, rasterOptsPre, textAbs, visWrapFromOpts(opts))
-                    return Promise.resolve(
-                        wrapIfBtn(
-                            node,
-                            indent(depth) + '<div class="' + imgWrapClsPre + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (pathPre || "") + '" alt="' + altTextPre + '" /></div>',
-                            depth
-                        )
-                    )
-                }
-
-                return exportNodeImageAsync(node, { cache: cache, secNo: secNo })
-                    .then(function (dataUrl) {
-                        if (!dataUrl) {
+                return pipelineEnsureImageAsync(node, pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide) }))
+                    .then(function (meta) {
+                        if (!meta || !meta.dataUrl) {
                             pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, true, opts)
                             return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                         }
-                        if (node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-                        var path = cache
-                            ? getOrAssignImagePath(cache, node.id, dataUrl, secNo, {
-                                  skipExport: isVideoNode(node),
-                                  imageHash: getPrimaryImageFillHash(node),
-                              })
-                            : dataUrl
+                        var path =
+                            cache &&
+                            getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
+                                skipExport: isVideoNode(node),
+                                imageHash: getPrimaryImageFillHash(node),
+                                reuseAssetKey: meta.reuseAssetKey || undefined,
+                            })
                         var altText = getImageAltText(node)
                         if (id) ctx.ownImageNodeIds[id] = true
                         var rasterOpts = optsWithRasterTextAsImageSemantics(id, opts)
@@ -5468,33 +5619,15 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             return Promise.resolve(wrapIfBtn(node, indent(depth) + ellipseHtml, depth))
         }
         var svgImgAbs = isAbsoluteLike(node, parent)
-        if (cache && cache.image && node.id != null && cache.image[node.id]) {
-            var dataUrlSv = cache.image[node.id]
-            var pathSv = cache
-                ? getOrAssignImagePath(cache, node.id, dataUrlSv || "", secNo, {
-                      skipExport: isVideoNode(node),
-                      imageHash: getPrimaryImageFillHash(node),
-                  })
-                : dataUrlSv || ""
-            if (svgImgAbs && id) {
-                var svgAbsDeclC = buildAbsDecl(node, parent)
-                if (svgAbsDeclC) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), svgAbsDeclC)
-            }
-            var altTextSv = getImageAltText(node)
-            if (id) ctx.ownImageNodeIds[id] = true
-            var svgImgClsC = apNodeClassList(("ap-image" + (svgImgAbs ? " ap-abs" : "")).trim(), id, opts)
-            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, svgImgAbs, visWrapFromOpts(opts))
-            var htmlSv = indent(depth) + '<div class="' + svgImgClsC + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (pathSv || "") + '" alt="' + altTextSv + '" /></div>'
-            return Promise.resolve(wrapIfBtn(node, htmlSv, depth))
-        }
-        return exportNodeSvgAsync(node).then(function (dataUrl) {
-            if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-            var path = cache
-                ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, {
-                      skipExport: isVideoNode(node),
-                      imageHash: getPrimaryImageFillHash(node),
-                  })
-                : dataUrl || ""
+        return pipelineEnsureImageAsync(node, pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide) })).then(function (meta) {
+            if (!meta || !meta.dataUrl) return ""
+            var path =
+                cache &&
+                getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
+                    skipExport: isVideoNode(node),
+                    imageHash: getPrimaryImageFillHash(node),
+                    reuseAssetKey: meta.reuseAssetKey || undefined,
+                })
             if (svgImgAbs && id) {
                 var svgAbsDecl = buildAbsDecl(node, parent)
                 if (svgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), svgAbsDecl)
@@ -5508,9 +5641,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         })
     }
 
-    // IMAGE (단일 이미지 또는 컴포지트 → 하나의 이미지로 export)
-    // 컨테이너에 텍스트가 있으면 이미지로보내지 않고 자식 재귀 렌더 (텍스트 유지)
-    // 겹친 composite(clipsContent)일 때만 한 장으로 export. 분리된 이미지 2개 이상이면 래퍼로 풀어서 각각 figure로
+    // IMAGE — shouldExportAsSingleRasterImage: 직계 래스터 3+는 composite-raster(067), 그 외 분리는 hasMultiple+CLIP(isCompositeCandidate) 등 070 규칙과 동일
     function renderImageNodeAsync(node, parent, secNo, secClass, depth, opts) {
         var id = node.id != null ? String(node.id) : ""
         if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node) && !isCodeRasterNode(node)) {
@@ -5558,33 +5689,15 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             })
         }
         var imgAbs = isAbsoluteLike(node, parent)
-        if (cache && cache.image && node.id != null && cache.image[node.id]) {
-            var dataUrlImg = cache.image[node.id]
-            var pathImg = cache
-                ? getOrAssignImagePath(cache, node.id, dataUrlImg || "", secNo, {
-                      skipExport: isVideoNode(node),
-                      imageHash: getPrimaryImageFillHash(node),
-                  })
-                : dataUrlImg || ""
-            if (imgAbs && id) {
-                var imgAbsDeclC = buildAbsDecl(node, parent)
-                if (imgAbsDeclC) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), imgAbsDeclC)
-            }
-            var altTextImg = getImageAltText(node)
-            if (id) ctx.ownImageNodeIds[id] = true
-            var figureClsC = apNodeClassList("ap-image" + (imgAbs ? " ap-abs" : ""), id, opts)
-            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs, visWrapFromOpts(opts))
-            var figureHtmlC = '<div class="' + figureClsC + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (pathImg || "") + '" alt="' + altTextImg + '" /></div>'
-            return Promise.resolve(wrapIfBtn(node, indent(depth) + figureHtmlC, depth))
-        }
-        return exportImagePreferSourceBytesAsync(node, { cache: cache, secNo: secNo }).then(function (dataUrl) {
-            if (dataUrl && node.id != null && cache && cache.image) cache.image[node.id] = dataUrl
-            var path = cache
-                ? getOrAssignImagePath(cache, node.id, dataUrl || "", secNo, {
-                      skipExport: isVideoNode(node),
-                      imageHash: getPrimaryImageFillHash(node),
-                  })
-                : dataUrl || ""
+        return pipelineEnsureImageAsync(node, pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide) })).then(function (meta) {
+            if (!meta || !meta.dataUrl) return ""
+            var path =
+                cache &&
+                getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
+                    skipExport: isVideoNode(node),
+                    imageHash: getPrimaryImageFillHash(node),
+                    reuseAssetKey: meta.reuseAssetKey || undefined,
+                })
             if (imgAbs && id) {
                 var imgAbsDecl = buildAbsDecl(node, parent)
                 if (imgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), imgAbsDecl)
@@ -5929,7 +6042,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
      * PC+MO 구조 불일치·비슬라이드: visWrap `pc-only` / `mo-only` 로 바깥 div → section (랜드마크는 section 유지).
      * 지연 CSS는 `.pc-only .ap-section--NN …` 자손 선택자(095 @media display 토글과 정합).
      */
-    function runSectionPipeline(sectionNode, bg, visWrap, secNo, secClass, slideData) {
+    function runSectionPipeline(sectionNode, bg, visWrap, secNo, secClass, slideData, pairedDesktopSection) {
         var slideSectionMeta = null
         var sectionSemantics = buildSectionSemanticClasses(sectionNode, geoStructure, bg.bgChildId)
         promoteRasterTextNodesToImageSemantics(sectionNode, sectionSemantics, allowedFontsForHtml, fontHtmlUnrestricted)
@@ -5951,7 +6064,26 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         return String(id)
                     })
                 }
-                return prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo)
+                var pcIdsPair = visWrap === "mo-only" && pairedDesktopSection ? sectionImageRenderOrderIds[secNo - 1] : null
+                return precomputeRasterFormatsForSlotsAsync(
+                    sectionNode,
+                    orderedIds,
+                    secNo,
+                    cache,
+                    visWrap === "mo-only" ? pairedDesktopSection : null,
+                    pcIdsPair,
+                ).then(function () {
+                    return prefetchSectionImageAssetsAsync(
+                        sectionNode,
+                        orderedIds,
+                        cache,
+                        secNo,
+                        bg,
+                        slideData,
+                        visWrap === "mo-only" ? pairedDesktopSection : null,
+                        pcIdsPair,
+                    )
+                })
             })
             .then(function () {
                 var vw = visWrap || ""
@@ -6197,7 +6329,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
                 return buildSectionBackgroundAsync(mNode, cache, secNo).then(function (mBg) {
                     var moSlideData = getSlideItems(mNode)
-                    return runSectionPipeline(mNode, mBg, "mo-only", secNo, secClass, moSlideData)
+                    return runSectionPipeline(mNode, mBg, "mo-only", secNo, secClass, moSlideData, sectionNode)
                 }).then(function () {
                     cache.imageSuffix = prevSuffix
                     if (prevImgCount === undefined) delete cache.imgCountBySec[secNo]
@@ -6340,7 +6472,6 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         usedFonts: {},
         text: {},
         textMeta: {},
-        image: {},
         imageName: {},
         imageList: [],
         imgCountBySec: {},
@@ -6350,6 +6481,21 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
     }
     if (options.pcRasterExtByStem && typeof options.pcRasterExtByStem === "object") {
         cache.pcRasterExtByStem = options.pcRasterExtByStem
+    }
+    ensureImagePipelineOnCache(cache)
+    cache.imagePipeline.mode = _currentExportWidth >= IMAGE_EXPORT_ZIP_WIDTH ? "zip" : "preview"
+    cache.imagePipeline.variant = options.phase === "mobile" ? "mo" : "pc"
+    if (options.inheritAssetStores) {
+        var ias = options.inheritAssetStores
+        for (var storeName in ias) {
+            if (!ias[storeName] || !cache.assetStores[storeName]) continue
+            var srcS = ias[storeName]
+            var dstS = cache.assetStores[storeName]
+            for (var ik in srcS) dstS[ik] = srcS[ik]
+        }
+    }
+    if (options.inheritedSlideAssetKeyBySlot) {
+        cache.slideAssetKeyBySlot = Object.assign(Object.create(null), options.inheritedSlideAssetKeyBySlot)
     }
 
     var rootBox = getAbs(root)
@@ -6434,10 +6580,16 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                 props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(section, 코드 생성 시 fill만 사용)")
                 return addChildren()
             }
-            var exportPromise = exportImagePreferSourceBytesAsync(node)
-            return exportPromise.then(function (dataUrl) {
-                if (node.id != null && dataUrl) cache.image[node.id] = dataUrl
-                /** assets 경로·imgNN(083), BEM 이미지 접미사(렌더 순서)는 buildCodeAsync */
+            var dumpImgCtx = { cache: cache, secNo: sectionIndex, slotIndex: 0, insideSwiperSlide: false }
+            var exportPromise = pipelineEnsureImageAsync(node, dumpImgCtx).then(function (meta) {
+                if (meta && meta.dataUrl) {
+                    getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, sectionIndex, {
+                        imageHash: getPrimaryImageFillHash(node),
+                        reuseAssetKey: meta.reuseAssetKey || undefined,
+                    })
+                }
+            })
+            return exportPromise.then(function () {
                 props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(HTML 생성 시 assets 경로)")
                 return addChildren()
             })
@@ -6551,6 +6703,12 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                     .filter(Boolean)
                     .sort()
                 _currentExportWidth = prevExportWidth
+                ensureImagePipelineOnCache(cache)
+                var assetStoresSnapshot = {
+                    preview: Object.assign({}, cache.assetStores.preview),
+                    export: Object.assign({}, cache.assetStores.export),
+                    zip: Object.assign({}, cache.assetStores.zip),
+                }
                 return {
                     text: text,
                     dataTree: dataTree,
@@ -6561,6 +6719,8 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                     images: cache.imageList || [],
                     vectorTypes: VECTOR_TYPES,
                     usedFonts: usedFonts,
+                    assetStoresSnapshot: assetStoresSnapshot,
+                    slideAssetKeyBySlot: cache.slideAssetKeyBySlot ? Object.assign(Object.create(null), cache.slideAssetKeyBySlot) : {},
                 }
             })
         })
@@ -6633,10 +6793,7 @@ figma.ui.onmessage = function (msg) {
                     usedFonts: payload.usedFonts || [],
                     mobileDataTree: undefined,
                 })
-                images.forEach(function (item, i) {
-                    figma.ui.postMessage({type: "RESULT_IMAGES_CHUNK", ingestId: ingestId, index: i, name: item.name, dataUrl: item.dataUrl})
-                })
-                figma.ui.postMessage({type: "RESULT_IMAGES_END", ingestId: ingestId})
+                sendImagesToUI(images, ingestId)
             })
             .catch(function (e) {
                 figma.ui.postMessage({type: "LOADING", value: false})
@@ -6675,6 +6832,8 @@ figma.ui.onmessage = function (msg) {
                         imageSuffix: "_mo",
                         fontHtmlFilterActive: fontHtmlFilterActiveMo,
                         pcRasterExtByStem: pcRasterExtByStem,
+                        inheritAssetStores: payload.assetStoresSnapshot,
+                        inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
                     }).then(function (moPayload) {
                         var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                         // 미리보기는 항상 단일 iframe + PC/MO 토글(@media·pc-only/mo-only 보정). 이중 탭은 사용하지 않음.
@@ -6740,14 +6899,10 @@ figma.ui.onmessage = function (msg) {
                     moBreakpoint: breakpoint,
                 })
                 try {
-                    for (var i = 0; i < images.length; i++) {
-                        var item = images[i]
-                        figma.ui.postMessage({type: "RESULT_IMAGES_CHUNK", ingestId: ingestId, index: i, name: item.name, dataUrl: item.dataUrl})
-                    }
+                    sendImagesToUI(images, ingestId)
                 } catch (chunkErr) {
                     figma.ui.postMessage({type: "ERROR", message: "이미지 전송 중 오류: " + String(chunkErr && chunkErr.message ? chunkErr.message : chunkErr)})
                 }
-                figma.ui.postMessage({type: "RESULT_IMAGES_END", ingestId: ingestId})
             })
             .catch(function (e) {
                 figma.ui.postMessage({type: "LOADING", value: false})
@@ -6809,6 +6964,8 @@ figma.ui.onmessage = function (msg) {
                             exportWidth: Math.min(2400, Math.round(2 * breakpoint)),
                             fontHtmlFilterActive: fontHtmlFilterActiveZip,
                             pcRasterExtByStem: pcRasterExtByStemZip,
+                            inheritAssetStores: payload.assetStoresSnapshot,
+                            inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
                         }).then(function (moPayload) {
                             var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                             // 구조 불일치 섹션: HTML·CSS는 096 래퍼+`.pc-only .ap-section--NN` — ZIP 경로도 동일 파이프라인
