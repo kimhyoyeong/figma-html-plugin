@@ -5,6 +5,7 @@
  *
  * getAbs — absoluteBoundingBox → {x,y,w,h}
  * getTextRasterBounds — TEXT는 렌더 bounds 우선(이미지 export·abs)
+ * getRasterExportBounds — 래스터 export·ap-abs와 동일하게 시각 영역(absoluteRenderBounds, 클립 반영) 우선
  * isContainer, isVisible, hasVisibleChildren — 트리 순회·export 필터
  * isFlex — layoutMode !== NONE
  * isAbsoluteInParent, isAbsolutePositioned, isAbsoluteByParentNotFlex, isAbsoluteLike — CSS ap-abs 판별
@@ -25,6 +26,17 @@ function getAbs(node) {
 /** TEXT 래스터: 프레임(absoluteBoundingBox)이 아니라 실제 그려진 영역(absoluteRenderBounds) — 넓은 텍스트 박스·여백 방지 */
 function getTextRasterBounds(node) {
     if (!node || node.type !== "TEXT") return null
+    try {
+        var rb = node.absoluteRenderBounds
+        if (rb && typeof rb.x === "number" && typeof rb.y === "number" && typeof rb.width === "number" && typeof rb.height === "number" && rb.width > 0 && rb.height > 0)
+            return {x: r2(rb.x), y: r2(rb.y), w: r2(rb.width), h: r2(rb.height)}
+    } catch (e) {}
+    return getAbs(node)
+}
+
+/** PNG/JPG export(useAbsoluteBounds false)와 동일: 그려진 시각 영역. 없거나 0이면 getAbs */
+function getRasterExportBounds(node) {
+    if (!node) return null
     try {
         var rb = node.absoluteRenderBounds
         if (rb && typeof rb.x === "number" && typeof rb.y === "number" && typeof rb.width === "number" && typeof rb.height === "number" && rb.width > 0 && rb.height > 0)

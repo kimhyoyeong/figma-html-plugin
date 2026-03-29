@@ -261,7 +261,7 @@ var IMAGE_EXPORT_MAX_WIDTH = 200
 var IMAGE_EXPORT_ZIP_WIDTH = 1200
 var _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
 function getImageSizeDecl(node) {
-    var box = node && node.type === "TEXT" ? getTextRasterBounds(node) : getAbs(node)
+    var box = node && node.type === "TEXT" ? getTextRasterBounds(node) : getRasterExportBounds(node)
     if (!box || (box.w == null && box.h == null)) return ""
     var parts = []
     if (box.w != null) parts.push("--ap-w:" + cssOutLayoutPx(box.w))

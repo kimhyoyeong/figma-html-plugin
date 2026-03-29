@@ -468,7 +468,8 @@ function exportRasterWithoutTextSubtreeAsync(node, format, ctx) {
 function exportRasterAssetAsync(node, format, ctx) {
     if (!node) return Promise.resolve(null)
     var w = _currentExportWidth
-    var exportBoundsOpts = { useAbsoluteBounds: node.type !== "TEXT" }
+    // false: 노드 선택 박스(클립된 시각 영역) 기준. true면 자손·오버플로가 절대 바운딩까지 PNG에 포함됨.
+    var exportBoundsOpts = { useAbsoluteBounds: false }
     function pack(dataUrl, fmtEff) {
         return dataUrl ? { dataUrl: dataUrl, format: fmtEff } : null
     }

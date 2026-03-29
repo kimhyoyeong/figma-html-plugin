@@ -117,32 +117,7 @@ figma.ui.onmessage = function (msg) {
                             moSectionImageRenderOrderIds: moPayload.sectionImageRenderOrderIds,
                             moImages: moPayload.images || [],
                         })
-                        var images = (payload.images || []).concat(moPayload.images || [])
-                        // MO 미리보기: 섹션 배경 --bg-img의 _mo 경로가 MO에서 export 안 됐을 수 있음 → PC 이미지로 채움
-                        var pcParts = parseCodeIntoParts(payload.code || "")
-                        var sectionStyles = pcParts.sectionStyles || ""
-                        var moNames = {}
-                        ;(moPayload.images || []).forEach(function (img) { moNames[img.name] = true })
-                        var moPathByPcStemPrev = buildMoRasterPathByPcStemFromMoImageList(moPayload.images || [])
-                        var pcByName = {}
-                        ;(payload.images || []).forEach(function (img) { pcByName[img.name] = img.dataUrl })
-                        sectionStyles.replace(/--bg-img\s*:\s*url\s*\(\s*["']?([^"'()]+\.(?:png|jpg|jpeg))["']?\s*\)/gi, function (_, path) {
-                            var p = String(path || "").trim()
-                            var extMatch = /\.(png|jpe?g)$/i.exec(p)
-                            var ext = extMatch ? extMatch[1].toLowerCase() : "jpg"
-                            if (ext === "jpeg") ext = "jpg"
-                            var stem = p.replace(/\.(png|jpe?g)$/i, "")
-                            var stemBase = stem.replace(/_mo$/i, "")
-                            var pathMo =
-                                moPathByPcStemPrev[stemBase] ||
-                                moPathByPcStemPrev[stem] ||
-                                (/_mo\.(png|jpe?g)$/i.test(p)
-                                    ? p
-                                    : p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext))
-                            if (!moNames[pathMo] && pcByName[p]) {
-                                images.push({ name: pathMo, dataUrl: pcByName[p] })
-                            }
-                        })
+                        var images = mergeImagesWithMoBackgroundFallback(code, payload.images || [], moPayload.images || [])
                         return {payload: payload, code: code, images: images, mobileDataTree: moPayload.dataTree, separateViews: separateViews, hybridMismatchSecs: (secMatch && secMatch.mismatchSecs) ? secMatch.mismatchSecs : []}
                     })
                 })
@@ -247,7 +222,7 @@ figma.ui.onmessage = function (msg) {
                                 moImages: moPayload.images || [],
                             })
 
-                            images = (images || []).concat(moPayload.images || [])
+                            images = mergeImagesWithMoBackgroundFallback(code, payload.images || [], moPayload.images || [])
                             return {code: code, images: images}
                         })
                     })

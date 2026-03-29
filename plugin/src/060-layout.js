@@ -144,7 +144,7 @@ function buildFlexDecl(layoutVars, node) {
 
 /** 절대 위치: 설계 좌표는 --ap-left/--ap-top/--ap-w/--ap-h (디자인 px). 실제 calc는 .ap-abs 공통 규칙. */
 function buildAbsDecl(childNode, parentNode) {
-    var box = getAbs(childNode)
+    var box = getRasterExportBounds(childNode)
     var parentBox = getAbs(parentNode)
     if (!box || !parentBox) return ""
     var relX = cssOutLayoutPx(box.x - parentBox.x)
@@ -252,9 +252,9 @@ function buildFlexDeclDiff(dLv, mLv, node) {
 }
 /** PC(d)와 MO(m) 절대 위치 비교 후 달라질 때만 MO 기준 선언 */
 function buildAbsDeclDiff(dChild, dParent, mChild, mParent) {
-    var dB = getAbs(dChild)
+    var dB = getRasterExportBounds(dChild)
     var dPB = getAbs(dParent)
-    var mB = getAbs(mChild)
+    var mB = getRasterExportBounds(mChild)
     var mPB = getAbs(mParent)
     if (!dB || !dPB || !mB || !mPB) return ""
     var dRelX = r2(dB.x - dPB.x),
@@ -272,9 +272,9 @@ function buildAbsDeclDiff(dChild, dParent, mChild, mParent) {
 
 /** ap-section__image figure: 크기는 getImageSizeDeclDiff 의 --ap-w/--ap-h 만 쓰고, MO 절대배치는 left/top 만 */
 function buildAbsDeclDiffPositionOnly(dChild, dParent, mChild, mParent) {
-    var dB = getAbs(dChild)
+    var dB = getRasterExportBounds(dChild)
     var dPB = getAbs(dParent)
-    var mB = getAbs(mChild)
+    var mB = getRasterExportBounds(mChild)
     var mPB = getAbs(mParent)
     if (!dB || !dPB || !mB || !mPB) return ""
     var dRelX = r2(dB.x - dPB.x),
@@ -287,8 +287,8 @@ function buildAbsDeclDiffPositionOnly(dChild, dParent, mChild, mParent) {
 
 /** PC(d)와 MO(m) 이미지 크기 비교 후 달라진 것만 MO 값으로 선언 */
 function getImageSizeDeclDiff(dNode, mNode) {
-    var dBox = dNode && dNode.type === "TEXT" ? getTextRasterBounds(dNode) : getAbs(dNode)
-    var mBox = mNode && mNode.type === "TEXT" ? getTextRasterBounds(mNode) : getAbs(mNode)
+    var dBox = dNode && dNode.type === "TEXT" ? getTextRasterBounds(dNode) : getRasterExportBounds(dNode)
+    var mBox = mNode && mNode.type === "TEXT" ? getTextRasterBounds(mNode) : getRasterExportBounds(mNode)
     if (!mBox || (mBox.w == null && mBox.h == null)) return ""
     var dw = dBox && dBox.w != null ? layoutPxNum(dBox.w) : null
     var dh = dBox && dBox.h != null ? layoutPxNum(dBox.h) : null

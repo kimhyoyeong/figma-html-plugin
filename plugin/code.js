@@ -799,6 +799,7 @@ function wrapChunksAsUlOrDiv(depth, cls, frameTag, frameTagOpen, isFrameBtn, chu
  *
  * getAbs — absoluteBoundingBox → {x,y,w,h}
  * getTextRasterBounds — TEXT는 렌더 bounds 우선(이미지 export·abs)
+ * getRasterExportBounds — 래스터 export·ap-abs와 동일하게 시각 영역(absoluteRenderBounds, 클립 반영) 우선
  * isContainer, isVisible, hasVisibleChildren — 트리 순회·export 필터
  * isFlex — layoutMode !== NONE
  * isAbsoluteInParent, isAbsolutePositioned, isAbsoluteByParentNotFlex, isAbsoluteLike — CSS ap-abs 판별
@@ -819,6 +820,17 @@ function getAbs(node) {
 /** TEXT 래스터: 프레임(absoluteBoundingBox)이 아니라 실제 그려진 영역(absoluteRenderBounds) — 넓은 텍스트 박스·여백 방지 */
 function getTextRasterBounds(node) {
     if (!node || node.type !== "TEXT") return null
+    try {
+        var rb = node.absoluteRenderBounds
+        if (rb && typeof rb.x === "number" && typeof rb.y === "number" && typeof rb.width === "number" && typeof rb.height === "number" && rb.width > 0 && rb.height > 0)
+            return {x: r2(rb.x), y: r2(rb.y), w: r2(rb.width), h: r2(rb.height)}
+    } catch (e) {}
+    return getAbs(node)
+}
+
+/** PNG/JPG export(useAbsoluteBounds false)와 동일: 그려진 시각 영역. 없거나 0이면 getAbs */
+function getRasterExportBounds(node) {
+    if (!node) return null
     try {
         var rb = node.absoluteRenderBounds
         if (rb && typeof rb.x === "number" && typeof rb.y === "number" && typeof rb.width === "number" && typeof rb.height === "number" && rb.width > 0 && rb.height > 0)
@@ -1042,7 +1054,7 @@ function buildFlexDecl(layoutVars, node) {
 
 /** 절대 위치: 설계 좌표는 --ap-left/--ap-top/--ap-w/--ap-h (디자인 px). 실제 calc는 .ap-abs 공통 규칙. */
 function buildAbsDecl(childNode, parentNode) {
-    var box = getAbs(childNode)
+    var box = getRasterExportBounds(childNode)
     var parentBox = getAbs(parentNode)
     if (!box || !parentBox) return ""
     var relX = cssOutLayoutPx(box.x - parentBox.x)
@@ -1150,9 +1162,9 @@ function buildFlexDeclDiff(dLv, mLv, node) {
 }
 /** PC(d)와 MO(m) 절대 위치 비교 후 달라질 때만 MO 기준 선언 */
 function buildAbsDeclDiff(dChild, dParent, mChild, mParent) {
-    var dB = getAbs(dChild)
+    var dB = getRasterExportBounds(dChild)
     var dPB = getAbs(dParent)
-    var mB = getAbs(mChild)
+    var mB = getRasterExportBounds(mChild)
     var mPB = getAbs(mParent)
     if (!dB || !dPB || !mB || !mPB) return ""
     var dRelX = r2(dB.x - dPB.x),
@@ -1170,9 +1182,9 @@ function buildAbsDeclDiff(dChild, dParent, mChild, mParent) {
 
 /** ap-section__image figure: 크기는 getImageSizeDeclDiff 의 --ap-w/--ap-h 만 쓰고, MO 절대배치는 left/top 만 */
 function buildAbsDeclDiffPositionOnly(dChild, dParent, mChild, mParent) {
-    var dB = getAbs(dChild)
+    var dB = getRasterExportBounds(dChild)
     var dPB = getAbs(dParent)
-    var mB = getAbs(mChild)
+    var mB = getRasterExportBounds(mChild)
     var mPB = getAbs(mParent)
     if (!dB || !dPB || !mB || !mPB) return ""
     var dRelX = r2(dB.x - dPB.x),
@@ -1185,8 +1197,8 @@ function buildAbsDeclDiffPositionOnly(dChild, dParent, mChild, mParent) {
 
 /** PC(d)와 MO(m) 이미지 크기 비교 후 달라진 것만 MO 값으로 선언 */
 function getImageSizeDeclDiff(dNode, mNode) {
-    var dBox = dNode && dNode.type === "TEXT" ? getTextRasterBounds(dNode) : getAbs(dNode)
-    var mBox = mNode && mNode.type === "TEXT" ? getTextRasterBounds(mNode) : getAbs(mNode)
+    var dBox = dNode && dNode.type === "TEXT" ? getTextRasterBounds(dNode) : getRasterExportBounds(dNode)
+    var mBox = mNode && mNode.type === "TEXT" ? getTextRasterBounds(mNode) : getRasterExportBounds(mNode)
     if (!mBox || (mBox.w == null && mBox.h == null)) return ""
     var dw = dBox && dBox.w != null ? layoutPxNum(dBox.w) : null
     var dh = dBox && dBox.h != null ? layoutPxNum(dBox.h) : null
@@ -1694,7 +1706,7 @@ var IMAGE_EXPORT_MAX_WIDTH = 200
 var IMAGE_EXPORT_ZIP_WIDTH = 1200
 var _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
 function getImageSizeDecl(node) {
-    var box = node && node.type === "TEXT" ? getTextRasterBounds(node) : getAbs(node)
+    var box = node && node.type === "TEXT" ? getTextRasterBounds(node) : getRasterExportBounds(node)
     if (!box || (box.w == null && box.h == null)) return ""
     var parts = []
     if (box.w != null) parts.push("--ap-w:" + cssOutLayoutPx(box.w))
@@ -3927,7 +3939,8 @@ function exportRasterWithoutTextSubtreeAsync(node, format, ctx) {
 function exportRasterAssetAsync(node, format, ctx) {
     if (!node) return Promise.resolve(null)
     var w = _currentExportWidth
-    var exportBoundsOpts = { useAbsoluteBounds: node.type !== "TEXT" }
+    // false: 노드 선택 박스(클립된 시각 영역) 기준. true면 자손·오버플로가 절대 바운딩까지 PNG에 포함됨.
+    var exportBoundsOpts = { useAbsoluteBounds: false }
     function pack(dataUrl, fmtEff) {
         return dataUrl ? { dataUrl: dataUrl, format: fmtEff } : null
     }
@@ -4691,7 +4704,9 @@ function getSectionNodes(root) {
  * buildMobileOverrides — 레이아웃 등은 인덱스 walk; 이미지 크기는 렌더순서(096)·슬롯·sourceNodeId 매칭
  * getSectionStructureMatch — 섹션별 구조 시그니처 일치 여부(하이브리드 경고용)
  * parseCodeIntoParts — 산출 HTML에서 base/section 스타일/article 분리
- * injectBgOverridesForMo — sectionStyles의 --bg-img를 MO용 _mo 경로로 덮어씀
+ * injectBgOverridesForMo — sectionStyles의 --bg-img를 MO용 _mo 경로로 @media에 병합
+ * rewriteMoOnlyRasterBgUrls — .mo-only 규칙 안 배경 URL만 MO 파일명·확장자에 맞춤
+ * mergeImagesWithMoBackgroundFallback — ZIP/미리보기 imageList에 누락된 _mo 배경 보강
  * apSlidePcImgAttr — 슬라이드 안 이미지는 picture 변환 생략 표시
  * combinePcMoAsBreakpoint — 위 요소 합쳐 최종 HTML 문자열
  */
@@ -5140,9 +5155,10 @@ function parseCodeIntoParts(code) {
 }
 
 /**
- * PC+MO 하이브리드 스타일에 남은 assets 경로를 MO imageList 실제 확장자로 통일
+ * MO 전용 선택자(.mo-only …) 블록 안의 배경 URL만 MO imageList 확장자·파일명에 맞춤.
+ * 전체 치환 금지: .pc-only·기본 .ap-section--NN 은 PC assets 유지 (이전 버그: 전부 _mo로 덮어 PC 배경 깨짐).
  */
-function rewriteMoRasterUrlsInSectionStyles(sectionStyles, moPathByPcStem) {
+function rewriteMoOnlyRasterBgUrls(sectionStyles, moPathByPcStem) {
     if (!sectionStyles || !moPathByPcStem) return sectionStyles || ""
     function resolvePath(pathRaw) {
         var p = String(pathRaw || "").trim()
@@ -5151,15 +5167,110 @@ function rewriteMoRasterUrlsInSectionStyles(sectionStyles, moPathByPcStem) {
         var stemBase = stem.replace(/_mo$/i, "")
         return moPathByPcStem[stemBase] || moPathByPcStem[stem] || null
     }
-    var out = sectionStyles.replace(/--bg-img\s*:\s*url\s*\(\s*["']?([^"'()]+)["']?\s*\)/gi, function (full, path) {
-        var r = resolvePath(path)
-        return r ? "--bg-img:url(" + r + ")" : full
-    })
-    out = out.replace(/(background-image\s*:\s*url\s*\(\s*["']?)([^"'()]+)(["']?\s*\))/gi, function (full, open, path, close) {
-        var r = resolvePath(path)
-        return r ? open + r + close : full
-    })
+    function replaceUrlsInDecl(decl) {
+        var d = String(decl || "").replace(/--bg-img\s*:\s*url\s*\(\s*["']?([^"'()]+)["']?\s*\)/gi, function (full, path) {
+            var r = resolvePath(path)
+            return r ? "--bg-img:url(" + r + ")" : full
+        })
+        d = d.replace(/(background-image\s*:\s*url\s*\(\s*["']?)([^"'()]+)(["']?\s*\))/gi, function (full, open, path, close) {
+            var r = resolvePath(path)
+            return r ? open + r + close : full
+        })
+        return d
+    }
+    var reStart = /\.mo-only\b/g
+    var out = ""
+    var last = 0
+    var m
+    while ((m = reStart.exec(sectionStyles)) !== null) {
+        var idx = m.index
+        if (idx < last) break
+        out += sectionStyles.slice(last, idx)
+        var openBrace = sectionStyles.indexOf("{", idx)
+        if (openBrace < 0) {
+            out += sectionStyles.slice(idx)
+            last = sectionStyles.length
+            break
+        }
+        var sel = sectionStyles.slice(idx, openBrace)
+        if (/\.pc-only\b/.test(sel)) {
+            var dPc = 0
+            var kPc = openBrace
+            for (; kPc < sectionStyles.length; kPc++) {
+                if (sectionStyles[kPc] === "{") dPc++
+                else if (sectionStyles[kPc] === "}") {
+                    dPc--
+                    if (dPc === 0) {
+                        kPc++
+                        break
+                    }
+                }
+            }
+            out += sectionStyles.slice(idx, kPc)
+            last = kPc
+            reStart.lastIndex = last
+            continue
+        }
+        var depth = 0
+        var k = openBrace
+        for (; k < sectionStyles.length; k++) {
+            var ch = sectionStyles[k]
+            if (ch === "{") depth++
+            else if (ch === "}") {
+                depth--
+                if (depth === 0) {
+                    k++
+                    break
+                }
+            }
+        }
+        out += sectionStyles.slice(idx, openBrace + 1)
+        out += replaceUrlsInDecl(sectionStyles.slice(openBrace + 1, k - 1))
+        out += "}"
+        last = k
+        reStart.lastIndex = last
+    }
+    out += sectionStyles.slice(last)
     return out
+}
+
+/**
+ * @media용 --bg-img: MO에서 export 안 된 경로는 PC dataUrl로 imageList 보강 (미리보기·ZIP 공통)
+ */
+function mergeImagesWithMoBackgroundFallback(code, pcImages, moImages) {
+    var list = (pcImages || []).concat(moImages || [])
+    var moArr = moImages || []
+    var moNames = {}
+    for (var mi = 0; mi < moArr.length; mi++) {
+        if (moArr[mi] && moArr[mi].name) moNames[String(moArr[mi].name).replace(/\\/g, "/")] = true
+    }
+    var moPathByPcStem = buildMoRasterPathByPcStemFromMoImageList(moArr)
+    var pcByName = {}
+    for (var pi = 0; pi < (pcImages || []).length; pi++) {
+        var im = pcImages[pi]
+        if (!im || !im.name || !im.dataUrl) continue
+        var n = String(im.name).replace(/\\/g, "/")
+        if (!/_mo\.(png|jpe?g)$/i.test(n)) pcByName[n] = im.dataUrl
+    }
+    var sectionStyles = (parseCodeIntoParts(code || "").sectionStyles) || ""
+    sectionStyles.replace(/--bg-img\s*:\s*url\s*\(\s*["']?([^"'()]+\.(?:png|jpg|jpeg))["']?\s*\)/gi, function (_, path) {
+        var p = String(path || "").trim()
+        var extMatch = /\.(png|jpe?g)$/i.exec(p)
+        var ext = extMatch ? extMatch[1].toLowerCase() : "jpg"
+        if (ext === "jpeg") ext = "jpg"
+        var stem = p.replace(/\.(png|jpe?g)$/i, "")
+        var stemBase = stem.replace(/_mo$/i, "")
+        var pathMo =
+            moPathByPcStem[stemBase] ||
+            moPathByPcStem[stem] ||
+            (/_mo\.(png|jpe?g)$/i.test(p) ? p : p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext))
+        if (!moNames[pathMo] && pcByName[p]) {
+            moNames[pathMo] = true
+            list.push({ name: pathMo, dataUrl: pcByName[p] })
+        }
+        return ""
+    })
+    return list
 }
 
 /** sectionStyles에서 --bg-img/background-image → @media에 _mo 이미지 오버라이드 병합 */
@@ -5270,7 +5381,7 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     var secStructMerge = getSectionStructureMatch(desktopRoot, mobileRoot)
     var skipMoWalkSecs = secStructMerge && secStructMerge.mismatchSecs ? secStructMerge.mismatchSecs : []
     var moPathByPcStem = buildMoRasterPathByPcStemFromMoImageList(options.moImages || [])
-    sectionStyles = rewriteMoRasterUrlsInSectionStyles(sectionStyles, moPathByPcStem)
+    sectionStyles = rewriteMoOnlyRasterBgUrls(sectionStyles, moPathByPcStem)
 
     var overrides = buildMobileOverrides(
         desktopRoot,
@@ -6849,32 +6960,7 @@ figma.ui.onmessage = function (msg) {
                             moSectionImageRenderOrderIds: moPayload.sectionImageRenderOrderIds,
                             moImages: moPayload.images || [],
                         })
-                        var images = (payload.images || []).concat(moPayload.images || [])
-                        // MO 미리보기: 섹션 배경 --bg-img의 _mo 경로가 MO에서 export 안 됐을 수 있음 → PC 이미지로 채움
-                        var pcParts = parseCodeIntoParts(payload.code || "")
-                        var sectionStyles = pcParts.sectionStyles || ""
-                        var moNames = {}
-                        ;(moPayload.images || []).forEach(function (img) { moNames[img.name] = true })
-                        var moPathByPcStemPrev = buildMoRasterPathByPcStemFromMoImageList(moPayload.images || [])
-                        var pcByName = {}
-                        ;(payload.images || []).forEach(function (img) { pcByName[img.name] = img.dataUrl })
-                        sectionStyles.replace(/--bg-img\s*:\s*url\s*\(\s*["']?([^"'()]+\.(?:png|jpg|jpeg))["']?\s*\)/gi, function (_, path) {
-                            var p = String(path || "").trim()
-                            var extMatch = /\.(png|jpe?g)$/i.exec(p)
-                            var ext = extMatch ? extMatch[1].toLowerCase() : "jpg"
-                            if (ext === "jpeg") ext = "jpg"
-                            var stem = p.replace(/\.(png|jpe?g)$/i, "")
-                            var stemBase = stem.replace(/_mo$/i, "")
-                            var pathMo =
-                                moPathByPcStemPrev[stemBase] ||
-                                moPathByPcStemPrev[stem] ||
-                                (/_mo\.(png|jpe?g)$/i.test(p)
-                                    ? p
-                                    : p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext))
-                            if (!moNames[pathMo] && pcByName[p]) {
-                                images.push({ name: pathMo, dataUrl: pcByName[p] })
-                            }
-                        })
+                        var images = mergeImagesWithMoBackgroundFallback(code, payload.images || [], moPayload.images || [])
                         return {payload: payload, code: code, images: images, mobileDataTree: moPayload.dataTree, separateViews: separateViews, hybridMismatchSecs: (secMatch && secMatch.mismatchSecs) ? secMatch.mismatchSecs : []}
                     })
                 })
@@ -6979,7 +7065,7 @@ figma.ui.onmessage = function (msg) {
                                 moImages: moPayload.images || [],
                             })
 
-                            images = (images || []).concat(moPayload.images || [])
+                            images = mergeImagesWithMoBackgroundFallback(code, payload.images || [], moPayload.images || [])
                             return {code: code, images: images}
                         })
                     })
