@@ -169,7 +169,7 @@ figma.ui.onmessage = function (msg) {
         var projectName2 = msg.projectName || "project"
         var allowedFonts2 = msg.allowedFonts || []
         var fontHtmlFilterActiveZip = msg.fontHtmlFilterActive === true
-        /** UI 코드 탭에 표시된 문자열(분석 직후·AI 정리 후 등). 있으면 ZIP _cms.html에 이걸 쓰고, 이미지만 피그마에서 다시 export */
+        /** UI 코드 탭(반영·수정 포함). 비어 있지 않으면 ZIP _cms.html에 항상 우선 사용 · 이미지만 피그마에서 ZIP 해상도로 재 export */
         var codeFromTab = msg.code != null && String(msg.code).trim() ? String(msg.code) : ""
 
         _currentExportWidth = IMAGE_EXPORT_ZIP_WIDTH
@@ -232,12 +232,7 @@ figma.ui.onmessage = function (msg) {
                 return {code: code, images: images}
             })
             .then(function (out) {
-                var zipHtml
-                if (hasMobile && rootMobile) {
-                    zipHtml = stripApAiAuditBlock((out && out.code) || codeFromTab || "")
-                } else {
-                    zipHtml = stripApAiAuditBlock(codeFromTab || (out && out.code) || "")
-                }
+                var zipHtml = stripApAiAuditBlock(codeFromTab || (out && out.code) || "")
                 finishExport(zipHtml, out.images || [])
             })
             .catch(function (e) {

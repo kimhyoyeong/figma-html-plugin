@@ -154,7 +154,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     // </style>는 deferred 스타일 합친 뒤에 한 번만 닫음
 
     var contentLines = []
-    contentLines.push('<article class="ap-post">')
+    var articleYear = new Date().getFullYear()
+    contentLines.push('<article class="ap-post" data-article-year="' + articleYear + '">')
     contentLines.push('  <div class="ap-post__inner">')
 
     // root children = sections
