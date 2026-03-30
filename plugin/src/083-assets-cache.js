@@ -28,6 +28,20 @@ function getDataUrlExt(dataUrl) {
     return ".jpg"
 }
 
+/** ZIP 이미지 파일명에 붙는 제작일 접미사 `_YYMMDD` (한 번의 export 세션마다 동일). */
+function getOrInitExportImageYymmddSuffix(cache) {
+    if (!cache) return ""
+    if (cache._exportImageYymmddSuffix != null) return cache._exportImageYymmddSuffix
+    var d = new Date()
+    var y = String(d.getFullYear()).slice(-2)
+    var mo = String(d.getMonth() + 1)
+    if (mo.length < 2) mo = "0" + mo
+    var da = String(d.getDate())
+    if (da.length < 2) da = "0" + da
+    cache._exportImageYymmddSuffix = "_" + y + mo + da
+    return cache._exportImageYymmddSuffix
+}
+
 function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
     opts = opts || {}
     if (!cache) return ""
@@ -56,7 +70,8 @@ function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
 
         var project = normalizeProjectName(cache.projectName)
         var suffix = cache.imageSuffix != null && cache.imageSuffix !== "" ? String(cache.imageSuffix) : ""
-        var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + suffix + ext
+        var dateStem = getOrInitExportImageYymmddSuffix(cache)
+        var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + suffix + dateStem + ext
 
         cache.imageName[key] = ASSETS_IMAGES_PREFIX + fileName
     }
@@ -74,7 +89,7 @@ function buildPcRasterExtByStemFromImageList(images) {
     if (!images || !images.length) return map
     for (var i = 0; i < images.length; i++) {
         var name = String((images[i] && images[i].name) || "").replace(/\\/g, "/")
-        if (!name || /_mo\.(png|jpe?g)$/i.test(name)) continue
+        if (!name || /_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(name)) continue
         var m = /^(.*)\.(png|jpe?g)$/i.exec(name)
         if (!m) continue
         var ext = "." + m[2].toLowerCase()
@@ -89,11 +104,25 @@ function buildMoRasterPathByPcStemFromMoImageList(moImages) {
     if (!moImages || !moImages.length) return map
     for (var i = 0; i < moImages.length; i++) {
         var name = String((moImages[i] && moImages[i].name) || "").replace(/\\/g, "/")
-        var m = /^(.*)_mo\.(png|jpe?g)$/i.exec(name)
+        var m = /^(.+)_mo(?:_(\d{6}))?\.(png|jpe?g)$/i.exec(name)
         if (!m) continue
-        var suf = m[2].toLowerCase()
-        if (suf === "jpeg") suf = "jpg"
-        map[m[1]] = m[1] + "_mo." + suf
+        var pcStem = m[2] ? m[1] + "_" + m[2] : m[1]
+        map[pcStem] = name
     }
     return map
+}
+
+/** PC 래스터 경로 → MO 경로 추정(moPathByPcStem 미스). `_YYMMDD`가 있으면 `_mo`를 날짜 앞에 둠. */
+function guessMoRasterPathFromPcRasterPath(pcPathWithExt, ext) {
+    var p = String(pcPathWithExt || "").trim()
+    ext = String(ext || "jpg").toLowerCase()
+    if (ext === "jpeg") ext = "jpg"
+    if (/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(p)) return p
+    var m = /^(.+)_(\d{6})\.(png|jpe?g)$/i.exec(p)
+    if (m) {
+        var ex = m[3].toLowerCase()
+        if (ex === "jpeg") ex = "jpg"
+        return m[1] + "_mo_" + m[2] + "." + ex
+    }
+    return p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext)
 }

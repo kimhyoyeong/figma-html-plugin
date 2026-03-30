@@ -572,7 +572,7 @@ function mergeImagesWithMoBackgroundFallback(code, pcImages, moImages) {
         var im = pcImages[pi]
         if (!im || !im.name || !im.dataUrl) continue
         var n = String(im.name).replace(/\\/g, "/")
-        if (!/_mo\.(png|jpe?g)$/i.test(n)) pcByName[n] = im.dataUrl
+        if (!/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(n)) pcByName[n] = im.dataUrl
     }
     var sectionStyles = (parseCodeIntoParts(code || "").sectionStyles) || ""
     sectionStyles.replace(/--bg-img\s*:\s*url\s*\(\s*["']?([^"'()]+\.(?:png|jpg|jpeg))["']?\s*\)/gi, function (_, path) {
@@ -585,7 +585,7 @@ function mergeImagesWithMoBackgroundFallback(code, pcImages, moImages) {
         var pathMo =
             moPathByPcStem[stemBase] ||
             moPathByPcStem[stem] ||
-            (/_mo\.(png|jpe?g)$/i.test(p) ? p : p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext))
+            (/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(p) ? p : guessMoRasterPathFromPcRasterPath(p, ext))
         if (!moNames[pathMo] && pcByName[p]) {
             moNames[pathMo] = true
             list.push({ name: pathMo, dataUrl: pcByName[p] })
@@ -609,8 +609,8 @@ function injectBgOverridesForMo(sectionStyles, overridesCss, excludedSecClasses,
             if (moPathByPcStem[stemBase]) return moPathByPcStem[stemBase]
             if (moPathByPcStem[stem]) return moPathByPcStem[stem]
         }
-        if (/_mo\.(png|jpe?g)$/i.test(p)) return p
-        return p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext)
+        if (/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(p)) return p
+        return guessMoRasterPathFromPcRasterPath(p, ext)
     }
 
     var reUrlAsset = "assets\\/images\\/[^\"')\\s]+\\.(?:png|jpg|jpeg)"
@@ -722,10 +722,10 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     var styleBlock = "<style>" + compressCssForStyleTag(mergedCss) + "</style>\n\n"
     var articleHtml = pc.articleHtml || ""
     var bp = Number(breakpoint) || 750
-    articleHtml = articleHtml.replace(/<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+)\.(png|jpg|jpeg)"([^>]*)>/gi, function (full, before, basePath, ext, after) {
+    articleHtml = articleHtml.replace(/<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(?:_\d{6})?)\.(png|jpg|jpeg)"([^>]*)>/gi, function (full, before, basePath, ext, after) {
         if (/\bdata-slide-pc-img\s*=\s*["']1["']/.test(before + after)) return full
         if (String(ext).toLowerCase() === "svg") { return "<img " + before + "src=\"" + basePath + "." + ext + "\"" + after + ">"; }
-        var moSrc = moPathByPcStem[basePath] || basePath + "_mo." + ext
+        var moSrc = moPathByPcStem[basePath] || guessMoRasterPathFromPcRasterPath(basePath + "." + ext, ext)
         return '<picture><source media="(max-width:' + bp + 'px)" srcset="' + moSrc + '"><img ' + before + 'src="' + basePath + "." + ext + '"' + after + "></picture>"
     })
     var headPrefix = (pc.headPrefix || "").trim()

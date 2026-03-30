@@ -3445,6 +3445,20 @@ function getDataUrlExt(dataUrl) {
     return ".jpg"
 }
 
+/** ZIP 이미지 파일명에 붙는 제작일 접미사 `_YYMMDD` (한 번의 export 세션마다 동일). */
+function getOrInitExportImageYymmddSuffix(cache) {
+    if (!cache) return ""
+    if (cache._exportImageYymmddSuffix != null) return cache._exportImageYymmddSuffix
+    var d = new Date()
+    var y = String(d.getFullYear()).slice(-2)
+    var mo = String(d.getMonth() + 1)
+    if (mo.length < 2) mo = "0" + mo
+    var da = String(d.getDate())
+    if (da.length < 2) da = "0" + da
+    cache._exportImageYymmddSuffix = "_" + y + mo + da
+    return cache._exportImageYymmddSuffix
+}
+
 function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
     opts = opts || {}
     if (!cache) return ""
@@ -3473,7 +3487,8 @@ function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
 
         var project = normalizeProjectName(cache.projectName)
         var suffix = cache.imageSuffix != null && cache.imageSuffix !== "" ? String(cache.imageSuffix) : ""
-        var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + suffix + ext
+        var dateStem = getOrInitExportImageYymmddSuffix(cache)
+        var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + suffix + dateStem + ext
 
         cache.imageName[key] = ASSETS_IMAGES_PREFIX + fileName
     }
@@ -3491,7 +3506,7 @@ function buildPcRasterExtByStemFromImageList(images) {
     if (!images || !images.length) return map
     for (var i = 0; i < images.length; i++) {
         var name = String((images[i] && images[i].name) || "").replace(/\\/g, "/")
-        if (!name || /_mo\.(png|jpe?g)$/i.test(name)) continue
+        if (!name || /_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(name)) continue
         var m = /^(.*)\.(png|jpe?g)$/i.exec(name)
         if (!m) continue
         var ext = "." + m[2].toLowerCase()
@@ -3506,13 +3521,27 @@ function buildMoRasterPathByPcStemFromMoImageList(moImages) {
     if (!moImages || !moImages.length) return map
     for (var i = 0; i < moImages.length; i++) {
         var name = String((moImages[i] && moImages[i].name) || "").replace(/\\/g, "/")
-        var m = /^(.*)_mo\.(png|jpe?g)$/i.exec(name)
+        var m = /^(.+)_mo(?:_(\d{6}))?\.(png|jpe?g)$/i.exec(name)
         if (!m) continue
-        var suf = m[2].toLowerCase()
-        if (suf === "jpeg") suf = "jpg"
-        map[m[1]] = m[1] + "_mo." + suf
+        var pcStem = m[2] ? m[1] + "_" + m[2] : m[1]
+        map[pcStem] = name
     }
     return map
+}
+
+/** PC 래스터 경로 → MO 경로 추정(moPathByPcStem 미스). `_YYMMDD`가 있으면 `_mo`를 날짜 앞에 둠. */
+function guessMoRasterPathFromPcRasterPath(pcPathWithExt, ext) {
+    var p = String(pcPathWithExt || "").trim()
+    ext = String(ext || "jpg").toLowerCase()
+    if (ext === "jpeg") ext = "jpg"
+    if (/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(p)) return p
+    var m = /^(.+)_(\d{6})\.(png|jpe?g)$/i.exec(p)
+    if (m) {
+        var ex = m[3].toLowerCase()
+        if (ex === "jpeg") ex = "jpg"
+        return m[1] + "_mo_" + m[2] + "." + ex
+    }
+    return p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext)
 }
 
 /**
@@ -5418,7 +5447,7 @@ function mergeImagesWithMoBackgroundFallback(code, pcImages, moImages) {
         var im = pcImages[pi]
         if (!im || !im.name || !im.dataUrl) continue
         var n = String(im.name).replace(/\\/g, "/")
-        if (!/_mo\.(png|jpe?g)$/i.test(n)) pcByName[n] = im.dataUrl
+        if (!/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(n)) pcByName[n] = im.dataUrl
     }
     var sectionStyles = (parseCodeIntoParts(code || "").sectionStyles) || ""
     sectionStyles.replace(/--bg-img\s*:\s*url\s*\(\s*["']?([^"'()]+\.(?:png|jpg|jpeg))["']?\s*\)/gi, function (_, path) {
@@ -5431,7 +5460,7 @@ function mergeImagesWithMoBackgroundFallback(code, pcImages, moImages) {
         var pathMo =
             moPathByPcStem[stemBase] ||
             moPathByPcStem[stem] ||
-            (/_mo\.(png|jpe?g)$/i.test(p) ? p : p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext))
+            (/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(p) ? p : guessMoRasterPathFromPcRasterPath(p, ext))
         if (!moNames[pathMo] && pcByName[p]) {
             moNames[pathMo] = true
             list.push({ name: pathMo, dataUrl: pcByName[p] })
@@ -5455,8 +5484,8 @@ function injectBgOverridesForMo(sectionStyles, overridesCss, excludedSecClasses,
             if (moPathByPcStem[stemBase]) return moPathByPcStem[stemBase]
             if (moPathByPcStem[stem]) return moPathByPcStem[stem]
         }
-        if (/_mo\.(png|jpe?g)$/i.test(p)) return p
-        return p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext)
+        if (/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(p)) return p
+        return guessMoRasterPathFromPcRasterPath(p, ext)
     }
 
     var reUrlAsset = "assets\\/images\\/[^\"')\\s]+\\.(?:png|jpg|jpeg)"
@@ -5568,10 +5597,10 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     var styleBlock = "<style>" + compressCssForStyleTag(mergedCss) + "</style>\n\n"
     var articleHtml = pc.articleHtml || ""
     var bp = Number(breakpoint) || 750
-    articleHtml = articleHtml.replace(/<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+)\.(png|jpg|jpeg)"([^>]*)>/gi, function (full, before, basePath, ext, after) {
+    articleHtml = articleHtml.replace(/<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(?:_\d{6})?)\.(png|jpg|jpeg)"([^>]*)>/gi, function (full, before, basePath, ext, after) {
         if (/\bdata-slide-pc-img\s*=\s*["']1["']/.test(before + after)) return full
         if (String(ext).toLowerCase() === "svg") { return "<img " + before + "src=\"" + basePath + "." + ext + "\"" + after + ">"; }
-        var moSrc = moPathByPcStem[basePath] || basePath + "_mo." + ext
+        var moSrc = moPathByPcStem[basePath] || guessMoRasterPathFromPcRasterPath(basePath + "." + ext, ext)
         return '<picture><source media="(max-width:' + bp + 'px)" srcset="' + moSrc + '"><img ' + before + 'src="' + basePath + "." + ext + '"' + after + "></picture>"
     })
     var headPrefix = (pc.headPrefix || "").trim()
@@ -5583,7 +5612,7 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
  *
  * compressCssForStyleTag — <style> 안 CSS 압축(주석·공백 제거, } 단위 줄바꿈)
  * compressEmbeddedStyleTagsInHtml — HTML 문자열 속 <style> 내용만 압축
- * buildCodeAsync — article·섹션·지연 스타일·Swiper 자산 포함 전체 코드 조립(내부에 render* 다수)
+ * buildCodeAsync — article·섹션·지연 스타일·슬라이드 마크업/CSS·Swiper 인라인 초기화 조립(Swiper CDN link/script 는 미리보기 ui.html 에서만 주입)
  *   PC+MO 구조 불일치·비슬라이드: `div.pc-only`/`div.mo-only` 래퍼 + section, 지연 CSS `.pc-only .ap-section--NN …`
  */
 // ----- 9. HTML Renderers / Code Builder (node-id 기반 HTML·CSS) -----
@@ -5634,7 +5663,6 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     var rootBox = getAbs(root)
     var baseWidth = rootBox && rootBox.w ? r2(rootBox.w) : 1920
 
-    codeLines.push("<!--CMS-->")
     codeLines.push("<style>")
     codeLines.push("")
     codeLines.push(".ap-post,")
@@ -6713,17 +6741,11 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         for (var k = 0; k < contentLines.length; k++) codeLines.push(contentLines[k])
         codeLines.push("  </div>")
         codeLines.push("</article>")
-        codeLines.push("<!--//CMS-->")
 
         var code = compressEmbeddedStyleTagsInHtml(codeLines.join("\n").replace(/\u2028/g, "\n").replace(/\u2029/g, "\n"))
         if (hasSlideSection) {
-            // manifest networkAccess: cdnjs.cloudflare.com 만 허용 → jsdelivr 는 플러그인 UI/미리보기에서 차단됨
-            var swiperCdnBase = "https://cdnjs.cloudflare.com/ajax/libs/Swiper/11.0.0"
-            var swiperCss = '<link rel="stylesheet" href="' + swiperCdnBase + '/swiper-bundle.min.css">'
-            var swiperScript =
-                '<script src="' +
-                swiperCdnBase +
-                '/swiper-bundle.min.js"><\/script>\n<script>\n' +
+            var swiperInitScript =
+                '<script>\n' +
                 'document.addEventListener("DOMContentLoaded", function () {\n' +
                 '  document.querySelectorAll(".swiper").forEach(function (el) {\n' +
                 '    if (typeof Swiper === "undefined") return;\n' +
@@ -6754,7 +6776,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 '  });\n' +
                 '});\n' +
                 '<\/script>'
-            code = swiperCss + "\n" + code + "\n" + swiperScript
+            code = code + "\n" + swiperInitScript
         }
 
         return {

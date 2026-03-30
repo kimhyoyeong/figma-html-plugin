@@ -3,7 +3,7 @@
  *
  * compressCssForStyleTag — <style> 안 CSS 압축(주석·공백 제거, } 단위 줄바꿈)
  * compressEmbeddedStyleTagsInHtml — HTML 문자열 속 <style> 내용만 압축
- * buildCodeAsync — article·섹션·지연 스타일·Swiper 자산 포함 전체 코드 조립(내부에 render* 다수)
+ * buildCodeAsync — article·섹션·지연 스타일·슬라이드 마크업/CSS·Swiper 인라인 초기화 조립(Swiper CDN link/script 는 미리보기 ui.html 에서만 주입)
  *   PC+MO 구조 불일치·비슬라이드: `div.pc-only`/`div.mo-only` 래퍼 + section, 지연 CSS `.pc-only .ap-section--NN …`
  */
 // ----- 9. HTML Renderers / Code Builder (node-id 기반 HTML·CSS) -----
@@ -54,7 +54,6 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     var rootBox = getAbs(root)
     var baseWidth = rootBox && rootBox.w ? r2(rootBox.w) : 1920
 
-    codeLines.push("<!--CMS-->")
     codeLines.push("<style>")
     codeLines.push("")
     codeLines.push(".ap-post,")
@@ -1133,17 +1132,11 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         for (var k = 0; k < contentLines.length; k++) codeLines.push(contentLines[k])
         codeLines.push("  </div>")
         codeLines.push("</article>")
-        codeLines.push("<!--//CMS-->")
 
         var code = compressEmbeddedStyleTagsInHtml(codeLines.join("\n").replace(/\u2028/g, "\n").replace(/\u2029/g, "\n"))
         if (hasSlideSection) {
-            // manifest networkAccess: cdnjs.cloudflare.com 만 허용 → jsdelivr 는 플러그인 UI/미리보기에서 차단됨
-            var swiperCdnBase = "https://cdnjs.cloudflare.com/ajax/libs/Swiper/11.0.0"
-            var swiperCss = '<link rel="stylesheet" href="' + swiperCdnBase + '/swiper-bundle.min.css">'
-            var swiperScript =
-                '<script src="' +
-                swiperCdnBase +
-                '/swiper-bundle.min.js"><\/script>\n<script>\n' +
+            var swiperInitScript =
+                '<script>\n' +
                 'document.addEventListener("DOMContentLoaded", function () {\n' +
                 '  document.querySelectorAll(".swiper").forEach(function (el) {\n' +
                 '    if (typeof Swiper === "undefined") return;\n' +
@@ -1174,7 +1167,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 '  });\n' +
                 '});\n' +
                 '<\/script>'
-            code = swiperCss + "\n" + code + "\n" + swiperScript
+            code = code + "\n" + swiperInitScript
         }
 
         return {
