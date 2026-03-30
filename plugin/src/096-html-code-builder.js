@@ -122,7 +122,6 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("")
     codeLines.push(".ap-video {")
     codeLines.push("  display:flex; align-items:center; justify-content:center;")
-    codeLines.push("  background:#eee;")
     codeLines.push("  width:calc(var(--ap-w, 0) / var(--ap-width) * 100cqi);")
     codeLines.push("  height:calc(var(--ap-h, 0) / var(--ap-width) * 100cqi);")
     codeLines.push("  aspect-ratio: calc(var(--ap-w, 1) / var(--ap-h, 1));")
