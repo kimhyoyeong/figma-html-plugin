@@ -4216,6 +4216,9 @@
       return String(html || "").replace(/<{2,}(?=h[1-6]\b)/gi, "<");
     }
 
+    /**
+     * @returns {{ html: string, stats: { wanted: number, applied: number } }}
+     */
     function applyHeadingPatchesToCode(html, patches) {
       var list = (Array.isArray(patches) ? patches : []).filter(function (p) {
         return (
@@ -4226,7 +4229,10 @@
           String(p.before) !== String(p.after)
         );
       });
-      if (!list.length) return String(html || "");
+      var stats = { wanted: list.length, applied: 0 };
+      if (!list.length) {
+        return { html: String(html || ""), stats: stats };
+      }
       var out = String(html || "");
 
       for (var k = 0; k < list.length; k++) {
@@ -4237,8 +4243,9 @@
         var pos = out.indexOf(before);
         if (pos === -1) continue;
         out = out.slice(0, pos) + after + out.slice(pos + before.length);
+        stats.applied++;
       }
-      return stripRepeatedAngleBracketsBeforeHeadingOpens(out);
+      return { html: stripRepeatedAngleBracketsBeforeHeadingOpens(out), stats: stats };
     }
 
     /**
@@ -4896,11 +4903,12 @@
               obj.altProposals = auditSnap.altProposals.slice();
             }
             var patches = obj.headingPatches;
-            code = applyHeadingPatchesToCode(code, patches);
+            var headApply = applyHeadingPatchesToCode(code, patches);
+            code = headApply.html;
             code = normalizeApHeadingSpanWrappers(code);
 
             var pApply = obj.altProposals.slice();
-            var didHeading = patches.length > 0;
+            var didHeading = headApply.stats.applied > 0;
             var didAlt = false;
 
             if (pApply.length > 0 && n > 0) {
@@ -4954,6 +4962,17 @@
               parts.length
                 ? parts.join(" · ")
                 : "변경 없음 또는 스킵";
+            if (headApply.stats.wanted > 0 && headApply.stats.applied === 0) {
+              oneLine +=
+                " · 헤딩 패치 미적용(모델이 준 before와 코드가 한 치도 같지 않거나 동일 문구가 2회 이상)";
+            } else if (headApply.stats.applied > 0 && headApply.stats.applied < headApply.stats.wanted) {
+              oneLine +=
+                " · 헤딩 " +
+                headApply.stats.applied +
+                "/" +
+                headApply.stats.wanted +
+                "건만 적용(나머지는 일치 위치 없음)";
+            }
             setAiStatus("반영 완료 · " + oneLine);
           })
           .catch(function (e) {
