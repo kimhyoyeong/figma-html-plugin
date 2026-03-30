@@ -2664,7 +2664,31 @@
       return out.replace(attrRe, "$1(max-width:0px)$3");
     }
 
-    /** ZIP·CMS 복붙용: `<style>` ~ `</article>` 만 (DOCTYPE/head/body·<!--//CMS-->·뒤쪽 스크립트 제외) */
+    /** script src가 http(s) 또는 // 이면 CDN으로 보고 ZIP에서 제외(로컬·상대 경로·인라인은 유지) */
+    function isExternalScriptSrcAttr(attrs) {
+      var m = /\bsrc\s*=\s*["']([^"']*)["']/i.exec(String(attrs || ""));
+      if (!m) return false;
+      var u = String(m[1] || "").trim();
+      return /^https?:\/\//i.test(u) || u.indexOf("//") === 0;
+    }
+
+    /** `</article>` 뒤에 이어진 스크립트 중, 인라인·비-CDN src만 수집(Swiper 초기화 등) */
+    function extractPostArticleScriptsForZip(fullHtml, articleEndPos) {
+      var tail = String(fullHtml || "").substring(articleEndPos);
+      var parts = [];
+      var re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+      var match;
+      while ((match = re.exec(tail)) !== null) {
+        if (isExternalScriptSrcAttr(match[1])) continue;
+        parts.push(match[0]);
+      }
+      return parts.length ? "\n" + parts.join("\n") : "";
+    }
+
+    /**
+     * ZIP·CMS 복붙용: `<style>` ~ `</article>` + 그 직후 인라인(또는 상대경로) `<script>`만.
+     * DOCTYPE/head/body·CDN script/link·그 밖 본문 뒤 잡다 텍스트는 제외.
+     */
     function extractCmsExportFragment(html) {
       var s = stripEmbeddedAuditReport(String(html || "").trim());
       if (!s) return "";
@@ -2672,7 +2696,9 @@
       if (start < 0) return s;
       var end = s.indexOf("</article>", start);
       if (end < 0) return s.substring(start);
-      return s.substring(start, end + "</article>".length).replace(/\s+$/, "");
+      var afterArticle = end + "</article>".length;
+      var core = s.substring(start, afterArticle).replace(/\s+$/, "");
+      return core + extractPostArticleScriptsForZip(s, afterArticle);
     }
 
     function getPreviewHtml(forExport, forceViewportWidth, previewStripMoMq, previewRole) {
