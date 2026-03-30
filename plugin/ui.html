@@ -3013,6 +3013,12 @@
         }
         return "API 한도·속도 제한." + wait + " 사용 중인 서비스 대시보드에서 플랜을 확인하세요.";
       }
+      if (/after property value in json|json at position|unexpected token in json/i.test(lower)) {
+        return (
+          "AI 응답 JSON이 깨져 파싱하지 못했습니다(출력 잘림, 말미 쉼표, 문자열 안 따옴표/줄바꿈 등). " +
+          "분석을 다시 시도하거나 코드·이미지 분량을 줄인 뒤 재시도해 보세요."
+        );
+      }
       return raw;
     }
 
@@ -3779,17 +3785,140 @@
       return null;
     }
 
+    /** BOM 제거 + 모델이 쓴 스마트 따옴표를 ASCII " 로(균형 추출·키 구분에 필요). */
+    function normalizeAiJsonQuotesAndBom(s) {
+      s = String(s || "").replace(/^\uFEFF/, "");
+      return s.replace(/[\u201C\u201D\u201E\u00AB\u00BB]/g, '"');
+    }
+
+    /** JSON 문자열 리터럴 안의 실제 줄바꿈/CR을 \\n 으로 바꿔 parse 가능하게 함 */
+    function escapeRawNewlinesInsideJsonStrings(s) {
+      var out = "";
+      var i = 0;
+      var inStr = false;
+      while (i < s.length) {
+        var c = s.charAt(i);
+        if (!inStr) {
+          if (c === '"') {
+            inStr = true;
+            out += c;
+          } else {
+            out += c;
+          }
+          i++;
+          continue;
+        }
+        if (c === "\\") {
+          out += c;
+          i++;
+          if (i < s.length) out += s.charAt(i++);
+          continue;
+        }
+        if (c === '"') {
+          inStr = false;
+          out += c;
+          i++;
+          continue;
+        }
+        if (c === "\r") {
+          var nl = s.charAt(i + 1) === "\n";
+          out += "\\n";
+          i += nl ? 2 : 1;
+          continue;
+        }
+        if (c === "\n") {
+          out += "\\n";
+          i++;
+          continue;
+        }
+        out += c;
+        i++;
+      }
+      return out;
+    }
+
+    /** 문자열 밖에서만 `,` + 공백 + `}`/`]` 패턴의 말미 쉼표 제거(LLM 흔한 오류) */
+    function stripTrailingCommasInJsonScan(s) {
+      var out = "";
+      var i = 0;
+      var inStr = false;
+      while (i < s.length) {
+        var c = s.charAt(i);
+        if (inStr) {
+          if (c === "\\") {
+            out += c;
+            i++;
+            if (i < s.length) out += s.charAt(i++);
+            continue;
+          }
+          if (c === '"') {
+            inStr = false;
+            out += c;
+            i++;
+            continue;
+          }
+          out += c;
+          i++;
+          continue;
+        }
+        if (c === '"') {
+          inStr = true;
+          out += c;
+          i++;
+          continue;
+        }
+        if (c === ",") {
+          var j = i + 1;
+          while (j < s.length) {
+            var w = s.charAt(j);
+            if (w === " " || w === "\n" || w === "\r" || w === "\t") j++;
+            else break;
+          }
+          if (j < s.length && (s.charAt(j) === "}" || s.charAt(j) === "]")) {
+            i++;
+            continue;
+          }
+        }
+        out += c;
+        i++;
+      }
+      return out;
+    }
+
+    function stripTrailingCommasInJsonIter(s) {
+      var prev;
+      var cur = s;
+      var guard = 0;
+      do {
+        prev = cur;
+        cur = stripTrailingCommasInJsonScan(prev);
+        guard++;
+      } while (cur !== prev && guard < 48);
+      return cur;
+    }
+
+    /** Gemini/OpenAI가 흔히 깨뜨리는 JSON을 parse 직전에 정리 */
+    function repairAiJsonLooseSyntax(raw) {
+      var s = normalizeAiJsonQuotesAndBom(raw);
+      s = escapeRawNewlinesInsideJsonStrings(s);
+      s = stripTrailingCommasInJsonIter(s);
+      return s;
+    }
+
     function extractJsonFromText(text) {
       var s = String(text || "").trim();
       if (!s) throw new Error("empty");
       var lastErr = null;
       function tryParse(raw) {
-        try {
-          return JSON.parse(raw);
-        } catch (e) {
-          lastErr = e;
-          return null;
+        var candidates = [raw, repairAiJsonLooseSyntax(raw)];
+        for (var ci = 0; ci < candidates.length; ci++) {
+          try {
+            return JSON.parse(candidates[ci]);
+          } catch (e) {
+            lastErr = e;
+          }
         }
+        return null;
       }
       var out = tryParse(s);
       if (out !== null) return out;
@@ -3805,6 +3934,11 @@
       var balanced = extractBalancedJsonObjectSubstring(s);
       if (balanced) {
         out = tryParse(balanced);
+        if (out !== null) return out;
+      }
+      var balancedRep = extractBalancedJsonObjectSubstring(repairAiJsonLooseSyntax(s));
+      if (balancedRep) {
+        out = tryParse(balancedRep);
         if (out !== null) return out;
       }
       var msg = lastErr && lastErr.message ? String(lastErr.message) : "JSON 파싱 실패";
