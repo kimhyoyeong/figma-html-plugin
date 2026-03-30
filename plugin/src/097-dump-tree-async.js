@@ -14,6 +14,9 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
 
     var cache = {
         projectName: normalizeProjectName(projectName),
+        exportCountryCode: normalizeExportCountryCode(options.exportCountryCode),
+        /** PC+MO(데스크톱 단계)에서 래스터 파일명에 `_pc` 접미사 — 슬라이드 공유 에셋은 omitPcMoVariant로 제외 */
+        usePcMoImageFilenameVariants: !!(options.mobileRoot && options.phase === "desktop"),
         allowedFonts: Array.isArray(allowedFonts)
             ? allowedFonts
                   .map(function (f) {
@@ -135,19 +138,12 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                 props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(section, 코드 생성 시 fill만 사용)")
                 return addChildren()
             }
-            var dumpImgCtx = { cache: cache, secNo: sectionIndex, slotIndex: 0, insideSwiperSlide: false }
-            var exportPromise = pipelineEnsureImageAsync(node, dumpImgCtx).then(function (meta) {
-                if (meta && meta.dataUrl) {
-                    getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, sectionIndex, {
-                        imageHash: getPrimaryImageFillHash(node),
-                        reuseAssetKey: meta.reuseAssetKey || undefined,
-                    })
-                }
-            })
-            return exportPromise.then(function () {
-                props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(HTML 생성 시 assets 경로)")
-                return addChildren()
-            })
+            // 레이어 트리 워크에서는 export·getOrAssignImagePath 금지:
+            // 예전엔 slotIndex=0 고정으로 pipeline을 돌려 rasterFormatBySlot[sec:0]을 오염시키고,
+            // makeAssetKey(fmt 불일치)로 동일 노드가 img 두 장으로 중복 export 되는 경우가 있었음.
+            // 실제 에셋·경로는 buildCodeAsync prefetch/렌더만 담당.
+            props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(코드 생성 시 export·assets 경로)")
+            return addChildren()
         }
 
         if (isVectorOnlyTree(node) && node.id != null) {

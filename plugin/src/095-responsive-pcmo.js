@@ -486,7 +486,7 @@ function rewriteMoOnlyRasterBgUrls(sectionStyles, moPathByPcStem) {
         var p = String(pathRaw || "").trim()
         if (p.indexOf("assets/images/") !== 0 || !/\.(png|jpe?g)$/i.test(p)) return null
         var stem = p.replace(/\.(png|jpe?g)$/i, "")
-        var stemBase = stem.replace(/_mo$/i, "")
+        var stemBase = apAssetStemToPcRasterLookupKey(stem)
         return moPathByPcStem[stemBase] || moPathByPcStem[stem] || null
     }
     function replaceUrlsInDecl(decl) {
@@ -572,7 +572,7 @@ function mergeImagesWithMoBackgroundFallback(code, pcImages, moImages) {
         var im = pcImages[pi]
         if (!im || !im.name || !im.dataUrl) continue
         var n = String(im.name).replace(/\\/g, "/")
-        if (!/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(n)) pcByName[n] = im.dataUrl
+        if (!/_mo(?:_[a-z]{2})?(?:_\d{6})?\.(png|jpe?g)$/i.test(n)) pcByName[n] = im.dataUrl
     }
     var sectionStyles = (parseCodeIntoParts(code || "").sectionStyles) || ""
     sectionStyles.replace(/--bg-img\s*:\s*url\s*\(\s*["']?([^"'()]+\.(?:png|jpg|jpeg))["']?\s*\)/gi, function (_, path) {
@@ -581,11 +581,11 @@ function mergeImagesWithMoBackgroundFallback(code, pcImages, moImages) {
         var ext = extMatch ? extMatch[1].toLowerCase() : "jpg"
         if (ext === "jpeg") ext = "jpg"
         var stem = p.replace(/\.(png|jpe?g)$/i, "")
-        var stemBase = stem.replace(/_mo$/i, "")
+        var stemBase = apAssetStemToPcRasterLookupKey(stem)
         var pathMo =
             moPathByPcStem[stemBase] ||
             moPathByPcStem[stem] ||
-            (/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(p) ? p : guessMoRasterPathFromPcRasterPath(p, ext))
+            (/_mo(?:_[a-z]{2})?(?:_\d{6})?\.(png|jpe?g)$/i.test(p) ? p : guessMoRasterPathFromPcRasterPath(p, ext))
         if (!moNames[pathMo] && pcByName[p]) {
             moNames[pathMo] = true
             list.push({ name: pathMo, dataUrl: pcByName[p] })
@@ -604,12 +604,12 @@ function injectBgOverridesForMo(sectionStyles, overridesCss, excludedSecClasses,
     function resolveMoAssetPath(pcPathWithExt, ext) {
         var p = String(pcPathWithExt || "").trim()
         var stem = p.replace(/\.(png|jpe?g)$/i, "")
-        var stemBase = stem.replace(/_mo$/i, "")
+        var stemBase = apAssetStemToPcRasterLookupKey(stem)
         if (moPathByPcStem) {
             if (moPathByPcStem[stemBase]) return moPathByPcStem[stemBase]
             if (moPathByPcStem[stem]) return moPathByPcStem[stem]
         }
-        if (/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(p)) return p
+        if (/_mo(?:_[a-z]{2})?(?:_\d{6})?\.(png|jpe?g)$/i.test(p)) return p
         return guessMoRasterPathFromPcRasterPath(p, ext)
     }
 
@@ -722,7 +722,9 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     var styleBlock = "<style>" + compressCssForStyleTag(mergedCss) + "</style>\n\n"
     var articleHtml = pc.articleHtml || ""
     var bp = Number(breakpoint) || 750
-    articleHtml = articleHtml.replace(/<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(?:_\d{6})?)\.(png|jpg|jpeg)"([^>]*)>/gi, function (full, before, basePath, ext, after) {
+    var reApRasterImgSrc =
+        /<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(?:(?:_pc|_mo)(?:_[a-z]{2})?|_[a-z]{2})?(?:_\d{6})?)\.(png|jpg|jpeg)"([^>]*)>/gi
+    articleHtml = articleHtml.replace(reApRasterImgSrc, function (full, before, basePath, ext, after) {
         if (/\bdata-slide-pc-img\s*=\s*["']1["']/.test(before + after)) return full
         if (String(ext).toLowerCase() === "svg") { return "<img " + before + "src=\"" + basePath + "." + ext + "\"" + after + ">"; }
         var moSrc = moPathByPcStem[basePath] || guessMoRasterPathFromPcRasterPath(basePath + "." + ext, ext)

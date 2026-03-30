@@ -287,6 +287,9 @@ function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotInde
         if (meta.kind === "pc-shared-slide" && meta.dataUrl && meta.assetKey) setCachedAsset(cache, meta.assetKey, meta.dataUrl)
         var pathOpts = { skipExport: isVideoNode(node), imageHash: getPrimaryImageFillHash(node) }
         if (meta.reuseAssetKey) pathOpts.reuseAssetKey = meta.reuseAssetKey
+        if (cache.usePcMoImageFilenameVariants && !cache.imageSuffix && slideData && imgCtx.insideSwiperSlide) {
+            pathOpts.omitPcMoVariant = true
+        }
         getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl || "", secNo, pathOpts)
         if (slideData && slideIdSet[String(node.id)] && meta.assetKey) {
             cache.slideAssetKeyByNodeId = cache.slideAssetKeyByNodeId || Object.create(null)

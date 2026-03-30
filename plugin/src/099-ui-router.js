@@ -44,6 +44,7 @@ figma.ui.onmessage = function (msg) {
             phase: "desktop",
             geoStructure: msg.geoStructure || null,
             fontHtmlFilterActive: fontHtmlFilterActive,
+            exportCountryCode: msg.exportCountryCode,
         })
             .then(function (payload) {
                 figma.ui.postMessage({type: "LOADING", value: false})
@@ -91,6 +92,7 @@ figma.ui.onmessage = function (msg) {
             geoStructure: msg.geoStructure || null,
             fontHtmlFilterActive: fontHtmlFilterActiveMo,
             mobileRoot: rootMobile,
+            exportCountryCode: msg.exportCountryCode,
         })
             .then(function (payload) {
                 return loadFontsForMobileTreeAsync(rootMobile).then(function () {
@@ -102,6 +104,7 @@ figma.ui.onmessage = function (msg) {
                         pcRasterExtByStem: pcRasterExtByStem,
                         inheritAssetStores: payload.assetStoresSnapshot,
                         inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
+                        exportCountryCode: msg.exportCountryCode,
                     }).then(function (moPayload) {
                         var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                         // 미리보기는 항상 단일 iframe + PC/MO 토글(@media·pc-only/mo-only 보정). 이중 탭은 사용하지 않음.
@@ -187,7 +190,7 @@ figma.ui.onmessage = function (msg) {
         }
 
         // 1) PC dump (MO 루트 있으면 PC 코드 생성 시점에 MO characters와 줄바꿈 비교)
-        var zipDeskOpts = {phase: "desktop", fontHtmlFilterActive: fontHtmlFilterActiveZip}
+        var zipDeskOpts = {phase: "desktop", fontHtmlFilterActive: fontHtmlFilterActiveZip, exportCountryCode: msg.exportCountryCode}
         if (hasMobile && rootMobile) {
             zipDeskOpts.mobileRoot = rootMobile
             zipDeskOpts.moBreakpoint = breakpoint
@@ -209,6 +212,7 @@ figma.ui.onmessage = function (msg) {
                             pcRasterExtByStem: pcRasterExtByStemZip,
                             inheritAssetStores: payload.assetStoresSnapshot,
                             inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
+                            exportCountryCode: msg.exportCountryCode,
                         }).then(function (moPayload) {
                             var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                             // 구조 불일치 섹션: HTML·CSS는 096 래퍼+`.pc-only .ap-section--NN` — ZIP 경로도 동일 파이프라인

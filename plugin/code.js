@@ -3427,6 +3427,27 @@ function normalizeProjectName(s) {
     return s || "project"
 }
 
+/** 이미지 파일명용 국가 코드 (소문자 2자, 예: kr, jp). 비우면 파일명에 국가 접미사 없음. */
+function normalizeExportCountryCode(s) {
+    s = String(s || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z]/g, "")
+    if (s.length !== 2) return ""
+    return s
+}
+
+/**
+ * MO 전용 CSS 등에 들어간 stem → moPathByPcStem 조회용 PC stem.
+ * 예: …_img01_mo_kr_260330 → …_img01_pc_kr_260330
+ */
+function apAssetStemToPcRasterLookupKey(stem) {
+    stem = String(stem || "")
+    var m = /^(.+_img\d+)_mo((?:_[a-z]{2})?)(_\d{6})$/.exec(stem)
+    if (m) return m[1] + "_pc" + m[2] + m[3]
+    return stem.replace(/_mo$/i, "")
+}
+
 function ensureImageInListOnce(cache, name, dataUrl) {
     if (!cache || !cache.imageList || !name || !dataUrl) return
     for (var i = 0; i < cache.imageList.length; i++) {
@@ -3486,9 +3507,19 @@ function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
         cache.imgCountBySec[secEarly] = n
 
         var project = normalizeProjectName(cache.projectName)
-        var suffix = cache.imageSuffix != null && cache.imageSuffix !== "" ? String(cache.imageSuffix) : ""
         var dateStem = getOrInitExportImageYymmddSuffix(cache)
-        var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + suffix + dateStem + ext
+        var country = normalizeExportCountryCode(cache.exportCountryCode)
+        var countrySeg = country ? "_" + country : ""
+        var variantSeg = ""
+        var isSvg = ext === ".svg"
+        if (!isSvg && !opts.omitPcMoVariant) {
+            if (cache.imageSuffix === "_mo") {
+                variantSeg = "_mo"
+            } else if (cache.usePcMoImageFilenameVariants) {
+                variantSeg = "_pc"
+            }
+        }
+        var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + variantSeg + countrySeg + dateStem + ext
 
         cache.imageName[key] = ASSETS_IMAGES_PREFIX + fileName
     }
@@ -3506,7 +3537,7 @@ function buildPcRasterExtByStemFromImageList(images) {
     if (!images || !images.length) return map
     for (var i = 0; i < images.length; i++) {
         var name = String((images[i] && images[i].name) || "").replace(/\\/g, "/")
-        if (!name || /_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(name)) continue
+        if (!name || /_mo(?:_[a-z]{2})?(?:_\d{6})?\.(png|jpe?g)$/i.test(name)) continue
         var m = /^(.*)\.(png|jpe?g)$/i.exec(name)
         if (!m) continue
         var ext = "." + m[2].toLowerCase()
@@ -3521,6 +3552,12 @@ function buildMoRasterPathByPcStemFromMoImageList(moImages) {
     if (!moImages || !moImages.length) return map
     for (var i = 0; i < moImages.length; i++) {
         var name = String((moImages[i] && moImages[i].name) || "").replace(/\\/g, "/")
+        var mNew = /^(.+_img\d+)_mo(?:_([a-z]{2}))?(_\d{6})\.(png|jpe?g)$/i.exec(name)
+        if (mNew) {
+            var cc = mNew[2] ? "_" + mNew[2] : ""
+            map[mNew[1] + "_pc" + cc + mNew[3]] = name
+            continue
+        }
         var m = /^(.+)_mo(?:_(\d{6}))?\.(png|jpe?g)$/i.exec(name)
         if (!m) continue
         var pcStem = m[2] ? m[1] + "_" + m[2] : m[1]
@@ -3534,12 +3571,19 @@ function guessMoRasterPathFromPcRasterPath(pcPathWithExt, ext) {
     var p = String(pcPathWithExt || "").trim()
     ext = String(ext || "jpg").toLowerCase()
     if (ext === "jpeg") ext = "jpg"
-    if (/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(p)) return p
+    if (/_mo(?:_[a-z]{2})?(?:_\d{6})?\.(png|jpe?g)$/i.test(p)) return p
+    var mPc = /^(.+_img\d+)_pc(?:_([a-z]{2}))?(_\d{6})\.(png|jpe?g)$/i.exec(p)
+    if (mPc) {
+        var ex = mPc[4].toLowerCase()
+        if (ex === "jpeg") ex = "jpg"
+        var cc = mPc[2] ? "_" + mPc[2] : ""
+        return mPc[1] + "_mo" + cc + mPc[3] + "." + ex
+    }
     var m = /^(.+)_(\d{6})\.(png|jpe?g)$/i.exec(p)
     if (m) {
-        var ex = m[3].toLowerCase()
-        if (ex === "jpeg") ex = "jpg"
-        return m[1] + "_mo_" + m[2] + "." + ex
+        var ex2 = m[3].toLowerCase()
+        if (ex2 === "jpeg") ex2 = "jpg"
+        return m[1] + "_mo_" + m[2] + "." + ex2
     }
     return p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext)
 }
@@ -4469,6 +4513,9 @@ function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotInde
         if (meta.kind === "pc-shared-slide" && meta.dataUrl && meta.assetKey) setCachedAsset(cache, meta.assetKey, meta.dataUrl)
         var pathOpts = { skipExport: isVideoNode(node), imageHash: getPrimaryImageFillHash(node) }
         if (meta.reuseAssetKey) pathOpts.reuseAssetKey = meta.reuseAssetKey
+        if (cache.usePcMoImageFilenameVariants && !cache.imageSuffix && slideData && imgCtx.insideSwiperSlide) {
+            pathOpts.omitPcMoVariant = true
+        }
         getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl || "", secNo, pathOpts)
         if (slideData && slideIdSet[String(node.id)] && meta.assetKey) {
             cache.slideAssetKeyByNodeId = cache.slideAssetKeyByNodeId || Object.create(null)
@@ -5361,7 +5408,7 @@ function rewriteMoOnlyRasterBgUrls(sectionStyles, moPathByPcStem) {
         var p = String(pathRaw || "").trim()
         if (p.indexOf("assets/images/") !== 0 || !/\.(png|jpe?g)$/i.test(p)) return null
         var stem = p.replace(/\.(png|jpe?g)$/i, "")
-        var stemBase = stem.replace(/_mo$/i, "")
+        var stemBase = apAssetStemToPcRasterLookupKey(stem)
         return moPathByPcStem[stemBase] || moPathByPcStem[stem] || null
     }
     function replaceUrlsInDecl(decl) {
@@ -5447,7 +5494,7 @@ function mergeImagesWithMoBackgroundFallback(code, pcImages, moImages) {
         var im = pcImages[pi]
         if (!im || !im.name || !im.dataUrl) continue
         var n = String(im.name).replace(/\\/g, "/")
-        if (!/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(n)) pcByName[n] = im.dataUrl
+        if (!/_mo(?:_[a-z]{2})?(?:_\d{6})?\.(png|jpe?g)$/i.test(n)) pcByName[n] = im.dataUrl
     }
     var sectionStyles = (parseCodeIntoParts(code || "").sectionStyles) || ""
     sectionStyles.replace(/--bg-img\s*:\s*url\s*\(\s*["']?([^"'()]+\.(?:png|jpg|jpeg))["']?\s*\)/gi, function (_, path) {
@@ -5456,11 +5503,11 @@ function mergeImagesWithMoBackgroundFallback(code, pcImages, moImages) {
         var ext = extMatch ? extMatch[1].toLowerCase() : "jpg"
         if (ext === "jpeg") ext = "jpg"
         var stem = p.replace(/\.(png|jpe?g)$/i, "")
-        var stemBase = stem.replace(/_mo$/i, "")
+        var stemBase = apAssetStemToPcRasterLookupKey(stem)
         var pathMo =
             moPathByPcStem[stemBase] ||
             moPathByPcStem[stem] ||
-            (/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(p) ? p : guessMoRasterPathFromPcRasterPath(p, ext))
+            (/_mo(?:_[a-z]{2})?(?:_\d{6})?\.(png|jpe?g)$/i.test(p) ? p : guessMoRasterPathFromPcRasterPath(p, ext))
         if (!moNames[pathMo] && pcByName[p]) {
             moNames[pathMo] = true
             list.push({ name: pathMo, dataUrl: pcByName[p] })
@@ -5479,12 +5526,12 @@ function injectBgOverridesForMo(sectionStyles, overridesCss, excludedSecClasses,
     function resolveMoAssetPath(pcPathWithExt, ext) {
         var p = String(pcPathWithExt || "").trim()
         var stem = p.replace(/\.(png|jpe?g)$/i, "")
-        var stemBase = stem.replace(/_mo$/i, "")
+        var stemBase = apAssetStemToPcRasterLookupKey(stem)
         if (moPathByPcStem) {
             if (moPathByPcStem[stemBase]) return moPathByPcStem[stemBase]
             if (moPathByPcStem[stem]) return moPathByPcStem[stem]
         }
-        if (/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(p)) return p
+        if (/_mo(?:_[a-z]{2})?(?:_\d{6})?\.(png|jpe?g)$/i.test(p)) return p
         return guessMoRasterPathFromPcRasterPath(p, ext)
     }
 
@@ -5597,7 +5644,9 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     var styleBlock = "<style>" + compressCssForStyleTag(mergedCss) + "</style>\n\n"
     var articleHtml = pc.articleHtml || ""
     var bp = Number(breakpoint) || 750
-    articleHtml = articleHtml.replace(/<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(?:_\d{6})?)\.(png|jpg|jpeg)"([^>]*)>/gi, function (full, before, basePath, ext, after) {
+    var reApRasterImgSrc =
+        /<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(?:(?:_pc|_mo)(?:_[a-z]{2})?|_[a-z]{2})?(?:_\d{6})?)\.(png|jpg|jpeg)"([^>]*)>/gi
+    articleHtml = articleHtml.replace(reApRasterImgSrc, function (full, before, basePath, ext, after) {
         if (/\bdata-slide-pc-img\s*=\s*["']1["']/.test(before + after)) return full
         if (String(ext).toLowerCase() === "svg") { return "<img " + before + "src=\"" + basePath + "." + ext + "\"" + after + ">"; }
         var moSrc = moPathByPcStem[basePath] || guessMoRasterPathFromPcRasterPath(basePath + "." + ext, ext)
@@ -5758,6 +5807,28 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("  border:calc(var(--ap-ellipse-bd, 0)/var(--ap-width)*100cqi) solid var(--ap-ellipse-bdc,transparent);")
     codeLines.push("}")
     codeLines.push(".ap-ellipse.ap-abs { width:100%; height:100%; box-sizing:border-box; }")
+    codeLines.push("")
+    codeLines.push("/* 슬라이드: 다음 장 피크·카드 폭이 슬라이드 셀보다 클 때 섹션/셀 overflow로 잘리지 않게 */")
+    codeLines.push(".ap-section--swiper { overflow: visible; height: auto; min-height: auto; }")
+    codeLines.push(".ap-post .swiper {")
+    codeLines.push("  overflow: hidden; width:100%; ")
+    codeLines.push("  --swiper-navigation-color:#000;")
+    codeLines.push("  --swiper-theme-color:#000;")
+    codeLines.push("  --swiper-pagination-bullet-size:8px;")
+    codeLines.push("}")
+    codeLines.push(".ap-post .swiper-pagination { width:100%; }")
+    codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after { content:none; }")
+    codeLines.push(".ap-post .swiper-button-prev,")
+    codeLines.push(".ap-post .swiper-button-next {")
+    codeLines.push("  width: clamp(0px, calc(40 / var(--ap-width) * 100cqi), 40px);")
+    codeLines.push("  height: clamp(0px, calc(80 / var(--ap-width) * 100cqi), 80px);")
+    codeLines.push(
+        '  background-image: url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 27 44\'%3E%3Cpath d=\'M27,22L27,22L5,44l-2.1-2.1L22.8,22L2.9,2.1L5,0L27,22L27,22z\' fill=\'%23007aff\' style=\'&%2310; fill: black;&%2310;\'/%3E%3C/svg%3E");'
+    )
+    codeLines.push("  background-repeat: no-repeat;")
+    codeLines.push("  background-size: contain;")
+    codeLines.push("}")
+    codeLines.push(".ap-post .swiper-button-prev { transform: rotate(180deg); }")
     codeLines.push("")
     // </style>는 deferred 스타일 합친 뒤에 한 번만 닫음
 
@@ -6711,30 +6782,6 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             }
             codeLines.push("")
         }
-        if (hasSlideSection) {
-            codeLines.push("")
-            codeLines.push("/* 슬라이드: 다음 장 피크·카드 폭이 슬라이드 셀보다 클 때 섹션/셀 overflow로 잘리지 않게 */")
-            codeLines.push(".ap-section--swiper { overflow: visible; height: auto; min-height: auto; }")
-            codeLines.push(".ap-post .swiper {")
-            codeLines.push("  width:100%; ")
-            codeLines.push("  --swiper-navigation-color:#000;")
-            codeLines.push("  --swiper-theme-color:#000;")
-            codeLines.push("  --swiper-pagination-bullet-size:8px;")
-            codeLines.push("}")
-            codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after { content:none; }")
-            codeLines.push(".ap-post .swiper-button-prev,")
-            codeLines.push(".ap-post .swiper-button-next {")
-            codeLines.push("  width: clamp(0px, calc(40 / var(--ap-width) * 100cqi), 40px);")
-            codeLines.push("  height: clamp(0px, calc(80 / var(--ap-width) * 100cqi), 80px);")
-            codeLines.push(
-                '  background-image: url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 27 44\'%3E%3Cpath d=\'M27,22L27,22L5,44l-2.1-2.1L22.8,22L2.9,2.1L5,0L27,22L27,22z\' fill=\'%23007aff\' style=\'&%2310; fill: black;&%2310;\'/%3E%3C/svg%3E");'
-            )
-            codeLines.push("  background-repeat: no-repeat;")
-            codeLines.push("  background-size: contain;")
-            codeLines.push("}")
-            codeLines.push(".ap-post .swiper-button-prev { transform: rotate(180deg); }")
-            codeLines.push("")
-        }
         codeLines.push("</style>")
         codeLines.push("")
 
@@ -6805,6 +6852,9 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
 
     var cache = {
         projectName: normalizeProjectName(projectName),
+        exportCountryCode: normalizeExportCountryCode(options.exportCountryCode),
+        /** PC+MO(데스크톱 단계)에서 래스터 파일명에 `_pc` 접미사 — 슬라이드 공유 에셋은 omitPcMoVariant로 제외 */
+        usePcMoImageFilenameVariants: !!(options.mobileRoot && options.phase === "desktop"),
         allowedFonts: Array.isArray(allowedFonts)
             ? allowedFonts
                   .map(function (f) {
@@ -6926,19 +6976,12 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                 props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(section, 코드 생성 시 fill만 사용)")
                 return addChildren()
             }
-            var dumpImgCtx = { cache: cache, secNo: sectionIndex, slotIndex: 0, insideSwiperSlide: false }
-            var exportPromise = pipelineEnsureImageAsync(node, dumpImgCtx).then(function (meta) {
-                if (meta && meta.dataUrl) {
-                    getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, sectionIndex, {
-                        imageHash: getPrimaryImageFillHash(node),
-                        reuseAssetKey: meta.reuseAssetKey || undefined,
-                    })
-                }
-            })
-            return exportPromise.then(function () {
-                props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(HTML 생성 시 assets 경로)")
-                return addChildren()
-            })
+            // 레이어 트리 워크에서는 export·getOrAssignImagePath 금지:
+            // 예전엔 slotIndex=0 고정으로 pipeline을 돌려 rasterFormatBySlot[sec:0]을 오염시키고,
+            // makeAssetKey(fmt 불일치)로 동일 노드가 img 두 장으로 중복 export 되는 경우가 있었음.
+            // 실제 에셋·경로는 buildCodeAsync prefetch/렌더만 담당.
+            props.push(indent(depth + 1) + dumpPadKey("bgImage") + "(코드 생성 시 export·assets 경로)")
+            return addChildren()
         }
 
         if (isVectorOnlyTree(node) && node.id != null) {
@@ -7122,6 +7165,7 @@ figma.ui.onmessage = function (msg) {
             phase: "desktop",
             geoStructure: msg.geoStructure || null,
             fontHtmlFilterActive: fontHtmlFilterActive,
+            exportCountryCode: msg.exportCountryCode,
         })
             .then(function (payload) {
                 figma.ui.postMessage({type: "LOADING", value: false})
@@ -7169,6 +7213,7 @@ figma.ui.onmessage = function (msg) {
             geoStructure: msg.geoStructure || null,
             fontHtmlFilterActive: fontHtmlFilterActiveMo,
             mobileRoot: rootMobile,
+            exportCountryCode: msg.exportCountryCode,
         })
             .then(function (payload) {
                 return loadFontsForMobileTreeAsync(rootMobile).then(function () {
@@ -7180,6 +7225,7 @@ figma.ui.onmessage = function (msg) {
                         pcRasterExtByStem: pcRasterExtByStem,
                         inheritAssetStores: payload.assetStoresSnapshot,
                         inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
+                        exportCountryCode: msg.exportCountryCode,
                     }).then(function (moPayload) {
                         var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                         // 미리보기는 항상 단일 iframe + PC/MO 토글(@media·pc-only/mo-only 보정). 이중 탭은 사용하지 않음.
@@ -7265,7 +7311,7 @@ figma.ui.onmessage = function (msg) {
         }
 
         // 1) PC dump (MO 루트 있으면 PC 코드 생성 시점에 MO characters와 줄바꿈 비교)
-        var zipDeskOpts = {phase: "desktop", fontHtmlFilterActive: fontHtmlFilterActiveZip}
+        var zipDeskOpts = {phase: "desktop", fontHtmlFilterActive: fontHtmlFilterActiveZip, exportCountryCode: msg.exportCountryCode}
         if (hasMobile && rootMobile) {
             zipDeskOpts.mobileRoot = rootMobile
             zipDeskOpts.moBreakpoint = breakpoint
@@ -7287,6 +7333,7 @@ figma.ui.onmessage = function (msg) {
                             pcRasterExtByStem: pcRasterExtByStemZip,
                             inheritAssetStores: payload.assetStoresSnapshot,
                             inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
+                            exportCountryCode: msg.exportCountryCode,
                         }).then(function (moPayload) {
                             var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                             // 구조 불일치 섹션: HTML·CSS는 096 래퍼+`.pc-only .ap-section--NN` — ZIP 경로도 동일 파이프라인

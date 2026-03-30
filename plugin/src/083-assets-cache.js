@@ -10,6 +10,27 @@ function normalizeProjectName(s) {
     return s || "project"
 }
 
+/** 이미지 파일명용 국가 코드 (소문자 2자, 예: kr, jp). 비우면 파일명에 국가 접미사 없음. */
+function normalizeExportCountryCode(s) {
+    s = String(s || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z]/g, "")
+    if (s.length !== 2) return ""
+    return s
+}
+
+/**
+ * MO 전용 CSS 등에 들어간 stem → moPathByPcStem 조회용 PC stem.
+ * 예: …_img01_mo_kr_260330 → …_img01_pc_kr_260330
+ */
+function apAssetStemToPcRasterLookupKey(stem) {
+    stem = String(stem || "")
+    var m = /^(.+_img\d+)_mo((?:_[a-z]{2})?)(_\d{6})$/.exec(stem)
+    if (m) return m[1] + "_pc" + m[2] + m[3]
+    return stem.replace(/_mo$/i, "")
+}
+
 function ensureImageInListOnce(cache, name, dataUrl) {
     if (!cache || !cache.imageList || !name || !dataUrl) return
     for (var i = 0; i < cache.imageList.length; i++) {
@@ -69,9 +90,19 @@ function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
         cache.imgCountBySec[secEarly] = n
 
         var project = normalizeProjectName(cache.projectName)
-        var suffix = cache.imageSuffix != null && cache.imageSuffix !== "" ? String(cache.imageSuffix) : ""
         var dateStem = getOrInitExportImageYymmddSuffix(cache)
-        var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + suffix + dateStem + ext
+        var country = normalizeExportCountryCode(cache.exportCountryCode)
+        var countrySeg = country ? "_" + country : ""
+        var variantSeg = ""
+        var isSvg = ext === ".svg"
+        if (!isSvg && !opts.omitPcMoVariant) {
+            if (cache.imageSuffix === "_mo") {
+                variantSeg = "_mo"
+            } else if (cache.usePcMoImageFilenameVariants) {
+                variantSeg = "_pc"
+            }
+        }
+        var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + variantSeg + countrySeg + dateStem + ext
 
         cache.imageName[key] = ASSETS_IMAGES_PREFIX + fileName
     }
@@ -89,7 +120,7 @@ function buildPcRasterExtByStemFromImageList(images) {
     if (!images || !images.length) return map
     for (var i = 0; i < images.length; i++) {
         var name = String((images[i] && images[i].name) || "").replace(/\\/g, "/")
-        if (!name || /_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(name)) continue
+        if (!name || /_mo(?:_[a-z]{2})?(?:_\d{6})?\.(png|jpe?g)$/i.test(name)) continue
         var m = /^(.*)\.(png|jpe?g)$/i.exec(name)
         if (!m) continue
         var ext = "." + m[2].toLowerCase()
@@ -104,6 +135,12 @@ function buildMoRasterPathByPcStemFromMoImageList(moImages) {
     if (!moImages || !moImages.length) return map
     for (var i = 0; i < moImages.length; i++) {
         var name = String((moImages[i] && moImages[i].name) || "").replace(/\\/g, "/")
+        var mNew = /^(.+_img\d+)_mo(?:_([a-z]{2}))?(_\d{6})\.(png|jpe?g)$/i.exec(name)
+        if (mNew) {
+            var cc = mNew[2] ? "_" + mNew[2] : ""
+            map[mNew[1] + "_pc" + cc + mNew[3]] = name
+            continue
+        }
         var m = /^(.+)_mo(?:_(\d{6}))?\.(png|jpe?g)$/i.exec(name)
         if (!m) continue
         var pcStem = m[2] ? m[1] + "_" + m[2] : m[1]
@@ -117,12 +154,19 @@ function guessMoRasterPathFromPcRasterPath(pcPathWithExt, ext) {
     var p = String(pcPathWithExt || "").trim()
     ext = String(ext || "jpg").toLowerCase()
     if (ext === "jpeg") ext = "jpg"
-    if (/_mo(?:_\d{6})?\.(png|jpe?g)$/i.test(p)) return p
+    if (/_mo(?:_[a-z]{2})?(?:_\d{6})?\.(png|jpe?g)$/i.test(p)) return p
+    var mPc = /^(.+_img\d+)_pc(?:_([a-z]{2}))?(_\d{6})\.(png|jpe?g)$/i.exec(p)
+    if (mPc) {
+        var ex = mPc[4].toLowerCase()
+        if (ex === "jpeg") ex = "jpg"
+        var cc = mPc[2] ? "_" + mPc[2] : ""
+        return mPc[1] + "_mo" + cc + mPc[3] + "." + ex
+    }
     var m = /^(.+)_(\d{6})\.(png|jpe?g)$/i.exec(p)
     if (m) {
-        var ex = m[3].toLowerCase()
-        if (ex === "jpeg") ex = "jpg"
-        return m[1] + "_mo_" + m[2] + "." + ex
+        var ex2 = m[3].toLowerCase()
+        if (ex2 === "jpeg") ex2 = "jpg"
+        return m[1] + "_mo_" + m[2] + "." + ex2
     }
     return p.replace(new RegExp("\\." + ext + "$", "i"), "_mo." + ext)
 }

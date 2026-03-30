@@ -1190,6 +1190,8 @@
         <button id="runAnalyze" type="button" class="btnRun">분석 실행</button>
         <label class="appFieldLabel" for="projectName">프로젝트 이름</label>
         <input id="projectName" class="field field--full" type="text" placeholder="예: signia_serum" autocomplete="off" />
+        <label class="appFieldLabel" for="exportCountryCode">국가 코드 (이미지 파일명)</label>
+        <input id="exportCountryCode" class="field field--full" type="text" placeholder="예: kr, jp" maxlength="8" autocomplete="off" />
         <p class="appHelp" id="rootHint">ROOT 1개: PC 한 벌 · ROOT 2개: PC+MO(가로 큰 쪽=PC) @media 오버라이드</p>
       </section>
 
@@ -1776,6 +1778,13 @@
       var v = ($("#projectName") && $("#projectName").value) || "";
       return v.trim() || "project";
     }
+
+    /** 플러그인에서 소문자 2자로 정규화. 비우면 파일명에 국가 코드 없음. */
+    function getExportCountryCode() {
+      var el = $("#exportCountryCode");
+      var v = el && el.value != null ? String(el.value).trim() : "";
+      return v;
+    }
     var usedFonts = [];
     var fontChecked = {};
     var hasAnalyzedOnce = false;
@@ -1919,6 +1928,7 @@
         pluginMessage: {
           type: "RUN_ANALYZE",
           projectName: getProjectName(),
+          exportCountryCode: getExportCountryCode(),
           allowedFonts: allowedFontsForAnalyze,
           fontHtmlFilterActive: hasAnalyzedOnce,
         },
@@ -2579,8 +2589,9 @@
             stemToDataUrl[stem.toLowerCase()] = du;
           }
         });
+        /** 코드 탭·combinePcMo와 동일: _pc / _mo / 국가코드 / _YYMMDD 조합 (미리보기 data: 치환) */
         var imgRe =
-          /\b((?:\.\/)?assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(?:_mo)?(?:_\d{6})?\.(?:png|jpg|jpeg|svg))\b/gi;
+          /\b((?:\.\/)?assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(?:(?:_pc|_mo)(?:_[a-z]{2})?|_[a-z]{2})?(?:_\d{6})?\.(?:png|jpg|jpeg|svg))\b/gi;
         function normApPath(p) {
           return String(p || "").replace(/^\.\//, "");
         }
@@ -2588,6 +2599,14 @@
           var norm = normApPath(m);
           var data = pathToDataUrl[norm] || pathToDataUrl[norm.toLowerCase()];
           if (data) return data;
+          var pcEquiv = toPcAssetPath(norm);
+          if (pcEquiv && pcEquiv !== norm) {
+            data = pathToDataUrl[pcEquiv] || pathToDataUrl[pcEquiv.toLowerCase()];
+            if (data) return data;
+            var stemEq = pcEquiv.replace(/\.(png|jpe?g|svg)$/i, "");
+            data = stemToDataUrl[stemEq] || stemToDataUrl[stemEq.toLowerCase()];
+            if (data) return data;
+          }
           if (/_mo(?:_\d{6})?\.(png|jpg|jpeg|svg)$/i.test(norm)) {
             var pcPath = norm.replace(/_mo(?:_\d{6})?\.(png|jpg|jpeg|svg)$/i, ".$1");
             data = pathToDataUrl[pcPath] || pathToDataUrl[pcPath.toLowerCase()];
@@ -3445,15 +3464,18 @@
       var m = s.match(/((?:\.\/)?assets\/images(?:_qa)?\/[^"'?#\s]+\.(?:png|jpg|jpeg|svg))/i);
       if (m) return m[1].replace(/^\.\//, "");
       m = s.match(
-        /(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(?:_mo)?(?:_\d{6})?\.(?:png|jpg|jpeg|svg))/i
+        /(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(?:(?:_pc|_mo)(?:_[a-z]{2})?|_[a-z]{2})?(?:_\d{6})?\.(?:png|jpg|jpeg|svg))/i
       );
       return m ? m[1] : "";
     }
 
-    /** `_mo` → PC 파일명 (비전 첨부는 PC 에셋만 사용) */
+    /** MO 래스터 경로 → 대응 PC 경로 (비전 첨부·미리보기 매칭). `_mo_kr_` ↔ `_pc_kr_`, 구형 `_mo_YYMMDD`는 `_mo` 제거. */
     function toPcAssetPath(relativePath) {
       if (!relativePath) return "";
       var p = String(relativePath);
+      if (/_mo_[a-z]{2}_\d{6}\.(png|jpg|jpeg|svg)$/i.test(p)) {
+        return p.replace(/_mo(_[a-z]{2}_\d{6}\.(png|jpg|jpeg|svg))$/i, "_pc$1");
+      }
       if (/_mo(?:_\d{6})?\.(png|jpg|jpeg|svg)$/i.test(p)) {
         return p.replace(/_mo(?:_\d{6})?\.(png|jpg|jpeg|svg)$/i, ".$1");
       }
@@ -4953,6 +4975,7 @@
         pluginMessage: {
           type: "EXPORT_ZIP",
           projectName: getProjectName(),
+          exportCountryCode: getExportCountryCode(),
           allowedFonts: getAllowedFonts(),
           fontHtmlFilterActive: hasAnalyzedOnce,
           code: code,

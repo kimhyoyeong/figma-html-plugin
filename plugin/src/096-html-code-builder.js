@@ -150,6 +150,28 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("}")
     codeLines.push(".ap-ellipse.ap-abs { width:100%; height:100%; box-sizing:border-box; }")
     codeLines.push("")
+    codeLines.push("/* 슬라이드: 다음 장 피크·카드 폭이 슬라이드 셀보다 클 때 섹션/셀 overflow로 잘리지 않게 */")
+    codeLines.push(".ap-section--swiper { overflow: visible; height: auto; min-height: auto; }")
+    codeLines.push(".ap-post .swiper {")
+    codeLines.push("  overflow: hidden; width:100%; ")
+    codeLines.push("  --swiper-navigation-color:#000;")
+    codeLines.push("  --swiper-theme-color:#000;")
+    codeLines.push("  --swiper-pagination-bullet-size:8px;")
+    codeLines.push("}")
+    codeLines.push(".ap-post .swiper-pagination { width:100%; }")
+    codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after { content:none; }")
+    codeLines.push(".ap-post .swiper-button-prev,")
+    codeLines.push(".ap-post .swiper-button-next {")
+    codeLines.push("  width: clamp(0px, calc(40 / var(--ap-width) * 100cqi), 40px);")
+    codeLines.push("  height: clamp(0px, calc(80 / var(--ap-width) * 100cqi), 80px);")
+    codeLines.push(
+        '  background-image: url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 27 44\'%3E%3Cpath d=\'M27,22L27,22L5,44l-2.1-2.1L22.8,22L2.9,2.1L5,0L27,22L27,22z\' fill=\'%23007aff\' style=\'&%2310; fill: black;&%2310;\'/%3E%3C/svg%3E");'
+    )
+    codeLines.push("  background-repeat: no-repeat;")
+    codeLines.push("  background-size: contain;")
+    codeLines.push("}")
+    codeLines.push(".ap-post .swiper-button-prev { transform: rotate(180deg); }")
+    codeLines.push("")
     // </style>는 deferred 스타일 합친 뒤에 한 번만 닫음
 
     var contentLines = []
@@ -1100,30 +1122,6 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 if (!d) continue
                 codeLines.push(r.sel + " { " + d + " }")
             }
-            codeLines.push("")
-        }
-        if (hasSlideSection) {
-            codeLines.push("")
-            codeLines.push("/* 슬라이드: 다음 장 피크·카드 폭이 슬라이드 셀보다 클 때 섹션/셀 overflow로 잘리지 않게 */")
-            codeLines.push(".ap-section--swiper { overflow: visible; height: auto; min-height: auto; }")
-            codeLines.push(".ap-post .swiper {")
-            codeLines.push("  width:100%; ")
-            codeLines.push("  --swiper-navigation-color:#000;")
-            codeLines.push("  --swiper-theme-color:#000;")
-            codeLines.push("  --swiper-pagination-bullet-size:8px;")
-            codeLines.push("}")
-            codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after { content:none; }")
-            codeLines.push(".ap-post .swiper-button-prev,")
-            codeLines.push(".ap-post .swiper-button-next {")
-            codeLines.push("  width: clamp(0px, calc(40 / var(--ap-width) * 100cqi), 40px);")
-            codeLines.push("  height: clamp(0px, calc(80 / var(--ap-width) * 100cqi), 80px);")
-            codeLines.push(
-                '  background-image: url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 27 44\'%3E%3Cpath d=\'M27,22L27,22L5,44l-2.1-2.1L22.8,22L2.9,2.1L5,0L27,22L27,22z\' fill=\'%23007aff\' style=\'&%2310; fill: black;&%2310;\'/%3E%3C/svg%3E");'
-            )
-            codeLines.push("  background-repeat: no-repeat;")
-            codeLines.push("  background-size: contain;")
-            codeLines.push("}")
-            codeLines.push(".ap-post .swiper-button-prev { transform: rotate(180deg); }")
             codeLines.push("")
         }
         codeLines.push("</style>")
