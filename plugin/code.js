@@ -804,6 +804,7 @@ function wrapChunksAsUlOrDiv(depth, cls, frameTag, frameTagOpen, isFrameBtn, chu
  * isFlex — layoutMode !== NONE
  * isAbsoluteInParent, isAbsolutePositioned, isAbsoluteByParentNotFlex, isAbsoluteLike — CSS ap-abs 판별
  * containerNeedsRelativeForAbsoluteChildren — 비-flex 부모에 position:relative 필요 여부
+ * containerAllVisibleChildrenAreAbsolute — 보이는 직계 자식이 1개 이상이며 전부 ap-abs 계열이면 true (플로우 높이 0 방지용)
  */
 // ----- 2. Core Node Utils (bounds, visibility, flex/abs; 레이어명·slide 판별은 상단) -----
 /** 노드 absoluteBoundingBox → {x,y,w,h} (r2 적용) */
@@ -905,6 +906,20 @@ function containerNeedsRelativeForAbsoluteChildren(node) {
         if (isAbsoluteLike(ch, node)) return true
     }
     return false
+}
+
+/** 보이는 직계 자식이 모두 절대 배치면 컨테이너는 플로우 높이가 없어짐 → Figma 박스 높이를 min-height로 줄 때 사용 */
+function containerAllVisibleChildrenAreAbsolute(node) {
+    if (!node) return false
+    var kids = node.children || []
+    var seen = false
+    for (var i = 0; i < kids.length; i++) {
+        var ch = kids[i]
+        if (!ch || !isVisible(ch)) continue
+        seen = true
+        if (!isAbsoluteLike(ch, node)) return false
+    }
+    return seen
 }
 
 
@@ -6045,11 +6060,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (radiusDecl) declParts.push(radiusDecl)
             // min-height: Auto Layout+HUG 세로면 콘텐츠 높이 우선 → 프레임 고정 높이 min-height 생략
             // ・배경(fill/이미지): bgDecl · 테두리: strokeDecl · radius (박스 느낌)
+            // ・직계 자식이 전부 absolute면 플로우 높이 없음 → Figma 프레임 높이로 잘림 방지
+            var allAbsKids = containerAllVisibleChildrenAreAbsolute(node)
             if (
                 box &&
                 box.h != null &&
-                (bgDecl || strokeDecl || radiusDecl) &&
-                (!flex || node.layoutSizingVertical === "FIXED")
+                (bgDecl || strokeDecl || radiusDecl || allAbsKids) &&
+                (!flex || node.layoutSizingVertical === "FIXED" || allAbsKids)
             )
                 declParts.push("min-height:calc(" + cssOutLayoutPx(box.h) + "/var(--ap-width)*100cqi)")
 
@@ -6183,6 +6200,17 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             else if (!abs2 && !nodeHasApSectionImageSemantic(node.id, opts)) {
                 var sameWGrp = getSameWidthAsParentDecl(node, parent)
                 if (sameWGrp) declParts2Flex.push(sameWGrp)
+            }
+
+            var boxGrp = getAbs(node)
+            var allAbsChildrenGrp = containerAllVisibleChildrenAreAbsolute(node)
+            if (
+                boxGrp &&
+                boxGrp.h != null &&
+                (declParts2Visual.length > 0 || allAbsChildrenGrp) &&
+                (!flex || node.layoutSizingVertical === "FIXED" || allAbsChildrenGrp)
+            ) {
+                declParts2Visual.push("min-height:calc(" + cssOutLayoutPx(boxGrp.h) + "/var(--ap-width)*100cqi)")
             }
 
             var children2 = node.children || []

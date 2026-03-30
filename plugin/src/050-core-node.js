@@ -10,6 +10,7 @@
  * isFlex — layoutMode !== NONE
  * isAbsoluteInParent, isAbsolutePositioned, isAbsoluteByParentNotFlex, isAbsoluteLike — CSS ap-abs 판별
  * containerNeedsRelativeForAbsoluteChildren — 비-flex 부모에 position:relative 필요 여부
+ * containerAllVisibleChildrenAreAbsolute — 보이는 직계 자식이 1개 이상이며 전부 ap-abs 계열이면 true (플로우 높이 0 방지용)
  */
 // ----- 2. Core Node Utils (bounds, visibility, flex/abs; 레이어명·slide 판별은 상단) -----
 /** 노드 absoluteBoundingBox → {x,y,w,h} (r2 적용) */
@@ -111,5 +112,19 @@ function containerNeedsRelativeForAbsoluteChildren(node) {
         if (isAbsoluteLike(ch, node)) return true
     }
     return false
+}
+
+/** 보이는 직계 자식이 모두 절대 배치면 컨테이너는 플로우 높이가 없어짐 → Figma 박스 높이를 min-height로 줄 때 사용 */
+function containerAllVisibleChildrenAreAbsolute(node) {
+    if (!node) return false
+    var kids = node.children || []
+    var seen = false
+    for (var i = 0; i < kids.length; i++) {
+        var ch = kids[i]
+        if (!ch || !isVisible(ch)) continue
+        seen = true
+        if (!isAbsoluteLike(ch, node)) return false
+    }
+    return seen
 }
 
