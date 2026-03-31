@@ -996,7 +996,7 @@ function containerAllVisibleChildrenAreAbsolute(node) {
  *
  * 경계: CSS 선언 조립(레이아웃·칠·테두리). 노드 판별은 050, 최종 HTML 문자열은 096.
  *
- * getLayoutVars, flexColumnSpaceBetweenNeedsMinHeight, applySectionSingleChildAlignOverride, buildFlexDecl, buildFlexPaddingDecl — ap-flex
+ * getLayoutVars, flexFrameFixedWidthPreferMinWidth, flexColumnSpaceBetweenNeedsMinHeight, applySectionSingleChildAlignOverride, buildFlexDecl, buildFlexPaddingDecl — ap-flex
  * buildAbsDecl, buildAbsDeclTextRaster, *Diff — 절대 위치·TEXT 래스터·PC/MO 차이
  * getImageSizeDeclDiff, getVideoSizeDeclDiff — figure/비디오 크기 MO 오버라이드
  * toHex2, rgbToHex, hexToRgba, getFirstSolidColorFromPaints — 색 문자열
@@ -1030,6 +1030,19 @@ function rowFlexVisibleChildrenEqualHeight(node) {
     } catch (e) {
         return false
     }
+}
+
+/**
+ * ap-flex 프레임이 row·주축 center 또는 column·교차축 center 이면 FIXED 설계 폭을 width 대신 min-width 로 두기 좋음
+ * (Figma 패딩 유지 + 콘텐츠/패딩이 넓을 때 박스가 좁아지지 않게 최소 폭만 보장)
+ */
+function flexFrameFixedWidthPreferMinWidth(lv) {
+    if (!lv || !lv.direction) return false
+    try {
+        if (lv.direction === "row" && lv.justify === "center") return true
+        if (lv.direction === "column" && lv.align === "center") return true
+    } catch (e) {}
+    return false
 }
 
 /** Auto Layout 설정을 CSS 변수용 객체로 추출. isFlex(node)일 때만 값 채움 */
@@ -1073,7 +1086,11 @@ function getLayoutVars(node) {
         var fixedH = node.layoutSizingVertical === "FIXED" || (typeof node.height === "number" && node.height > 0)
         var allCenter = out.justify === "center" && out.align === "center"
         var hasPadding = (Number(out.pt) || 0) > 0 || (Number(out.pr) || 0) > 0 || (Number(out.pb) || 0) > 0 || (Number(out.pl) || 0) > 0
-        var hasFrameVisual = !!(getFirstSolidStroke(node) || getFirstSolidFill(node) || hasImageFill(node))
+        var hasStrokeOnly = false
+        try {
+            hasStrokeOnly = !!getFirstSolidStroke(node)
+        } catch (eSt) {}
+        var hasFrameVisual = !!(hasStrokeOnly || getFirstSolidFill(node) || hasImageFill(node))
         if (fixedW && fixedH && allCenter && hasPadding && !hasFrameVisual) {
             out.pt = out.pr = out.pb = out.pl = "0"
         }
@@ -6416,12 +6433,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
         // style decl for this frame: flex vars + bg (frame는 background-image 가능)
         var declParts = []
+        var frameLv = null
         /** 자기 자신이 ap-abs면 position은 클래스에만 있음 — relative를 deferred로 넣으면 섹션 셀렉터가 덮어써 깨짐 */
         if (!useFlex && !abs && containerNeedsRelativeForAbsoluteChildren(node)) declParts.push("position:relative")
 
         if (useFlex) {
-            var lv = getLayoutVars(node)
-            var flexDecl = buildFlexDecl(lv, node, abs)
+            frameLv = getLayoutVars(node)
+            var flexDecl = buildFlexDecl(frameLv, node, abs)
             if (flexDecl) declParts.push(flexDecl)
         }
 
@@ -6430,7 +6448,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
         /** 전폭: ap-abs 는 .ap-abs + --ap-w 가 width 담당 — 지연 규칙에 width:100% 넣으면 특이도로 absolute 박스가 깨짐 */
         if (effFullWidth && !abs && !nodeHasApSectionImageSemantic(node.id, opts)) {
-            declParts.push("width:100%")
+            if (flexFrameFixedWidthPreferMinWidth(frameLv))
+                declParts.push("min-width:100%")
+            else declParts.push("width:100%")
         }
 
         if (!effFullWidth) {
@@ -6441,7 +6461,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 var sizingH = node.layoutSizingHorizontal
                 if (sizingH === "FIXED" && box && box.w != null) {
                     declParts.push("--ap-w:" + cssOutLayoutPx(box.w))
-                    declParts.push("width:calc(var(--ap-w)/var(--ap-width)*100cqi)")
+                    var wCalc = "calc(var(--ap-w)/var(--ap-width)*100cqi)"
+                    if (
+                        !nodeHasApSectionImageSemantic(node.id, opts) &&
+                        flexFrameFixedWidthPreferMinWidth(frameLv)
+                    )
+                        declParts.push("min-width:" + wCalc)
+                    else declParts.push("width:" + wCalc)
                 }
             }
         }
@@ -6452,7 +6478,11 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 declParts.push(bgDecl)
                 var hasWidth = declParts.some(function (s) {
                     var t = String(s)
-                    return t.indexOf("width:") !== -1 || t.indexOf("--ap-w:") !== -1
+                    return (
+                        t.indexOf("width:") !== -1 ||
+                        t.indexOf("min-width:") !== -1 ||
+                        t.indexOf("--ap-w:") !== -1
+                    )
                 })
                 if (
                     box &&
@@ -6462,7 +6492,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     !nodeHasApSectionImageSemantic(node.id, opts)
                 ) {
                     declParts.push("--ap-w:" + cssOutLayoutPx(box.w))
-                    declParts.push("width:calc(var(--ap-w)/var(--ap-width)*100cqi)")
+                    var wCalcBg = "calc(var(--ap-w)/var(--ap-width)*100cqi)"
+                    if (flexFrameFixedWidthPreferMinWidth(frameLv)) declParts.push("min-width:" + wCalcBg)
+                    else declParts.push("width:" + wCalcBg)
                 }
             }
             var strokeDecl = buildStrokeDecl(node)

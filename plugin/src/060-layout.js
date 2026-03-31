@@ -3,7 +3,7 @@
  *
  * 경계: CSS 선언 조립(레이아웃·칠·테두리). 노드 판별은 050, 최종 HTML 문자열은 096.
  *
- * getLayoutVars, flexColumnSpaceBetweenNeedsMinHeight, applySectionSingleChildAlignOverride, buildFlexDecl, buildFlexPaddingDecl — ap-flex
+ * getLayoutVars, flexFrameFixedWidthPreferMinWidth, flexColumnSpaceBetweenNeedsMinHeight, applySectionSingleChildAlignOverride, buildFlexDecl, buildFlexPaddingDecl — ap-flex
  * buildAbsDecl, buildAbsDeclTextRaster, *Diff — 절대 위치·TEXT 래스터·PC/MO 차이
  * getImageSizeDeclDiff, getVideoSizeDeclDiff — figure/비디오 크기 MO 오버라이드
  * toHex2, rgbToHex, hexToRgba, getFirstSolidColorFromPaints — 색 문자열
@@ -37,6 +37,19 @@ function rowFlexVisibleChildrenEqualHeight(node) {
     } catch (e) {
         return false
     }
+}
+
+/**
+ * ap-flex 프레임이 row·주축 center 또는 column·교차축 center 이면 FIXED 설계 폭을 width 대신 min-width 로 두기 좋음
+ * (Figma 패딩 유지 + 콘텐츠/패딩이 넓을 때 박스가 좁아지지 않게 최소 폭만 보장)
+ */
+function flexFrameFixedWidthPreferMinWidth(lv) {
+    if (!lv || !lv.direction) return false
+    try {
+        if (lv.direction === "row" && lv.justify === "center") return true
+        if (lv.direction === "column" && lv.align === "center") return true
+    } catch (e) {}
+    return false
 }
 
 /** Auto Layout 설정을 CSS 변수용 객체로 추출. isFlex(node)일 때만 값 채움 */
@@ -80,7 +93,11 @@ function getLayoutVars(node) {
         var fixedH = node.layoutSizingVertical === "FIXED" || (typeof node.height === "number" && node.height > 0)
         var allCenter = out.justify === "center" && out.align === "center"
         var hasPadding = (Number(out.pt) || 0) > 0 || (Number(out.pr) || 0) > 0 || (Number(out.pb) || 0) > 0 || (Number(out.pl) || 0) > 0
-        var hasFrameVisual = !!(getFirstSolidStroke(node) || getFirstSolidFill(node) || hasImageFill(node))
+        var hasStrokeOnly = false
+        try {
+            hasStrokeOnly = !!getFirstSolidStroke(node)
+        } catch (eSt) {}
+        var hasFrameVisual = !!(hasStrokeOnly || getFirstSolidFill(node) || hasImageFill(node))
         if (fixedW && fixedH && allCenter && hasPadding && !hasFrameVisual) {
             out.pt = out.pr = out.pb = out.pl = "0"
         }
