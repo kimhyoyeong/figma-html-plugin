@@ -454,9 +454,9 @@ function moOverrideSelectorIsLive(sel, usedBySection) {
 }
 
 /** 래퍼(.ap-image .ap-section__image--XX)에 --ap-w/--ap-h만 넣음. 기존 .ap-image img 규칙이 var()로 활용 (ap-abs 래퍼는 생략) */
-function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapperIsApAbs, visibilityWrapper) {
+function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapperIsApAbs, visibilityWrapper, clipParent) {
     if (!nodeId || wrapperIsApAbs) return
-    var decl = getImageSizeDecl(node)
+    var decl = getImageSizeDecl(node, clipParent)
     if (!decl) return
     var innerSel = cssInnerSelForNode(String(nodeId), opts, false)
     var vw = visibilityWrapper ? String(visibilityWrapper).replace(/^\./, "") : ""

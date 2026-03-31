@@ -148,8 +148,9 @@ function buildFlexPaddingDecl(pt, pr, pb, pl) {
     )
 }
 
-/** ap-flex 노드용 flex CSS 변수 선언 */
-function buildFlexDecl(layoutVars, node) {
+/** ap-flex 노드용 flex CSS. absSelf: 이 노드가 ap-abs이면 자식 absolute용 position:relative 를 넣지 않음(지연 CSS가 absolute 덮어쓰기 방지) */
+function buildFlexDecl(layoutVars, node, absSelf) {
+    if (absSelf === undefined) absSelf = false
     if (!layoutVars) return ""
     var parts = []
 
@@ -159,8 +160,8 @@ function buildFlexDecl(layoutVars, node) {
 
     parts.push("display:flex")
 
-    // ✅ 자식에 absolute 있을 때만
-    if (hasAbsoluteChild(node)) {
+    // ✅ 자식에 absolute 있을 때만 (자기 자신이 absolute 면 제외)
+    if (hasAbsoluteChild(node) && !absSelf) {
         parts.push("position:relative")
     }
 
@@ -188,9 +189,18 @@ function buildFlexDecl(layoutVars, node) {
     return parts.join(";")
 }
 
+/** ap-abs·diff 공통: 직계 부모면 부모 영역으로 클립된 bounds */
+function getBoundsForAbsDeclChild(childNode, parentNode) {
+    if (!childNode) return null
+    if (childNode.type === "TEXT") return getTextRasterBounds(childNode) || getAbs(childNode)
+    if (parentNode && isFigmaDirectParent(parentNode, childNode))
+        return getRasterExportBoundsClippedToParent(childNode, parentNode)
+    return getRasterExportBounds(childNode)
+}
+
 /** 절대 위치: 설계 좌표는 --ap-left/--ap-top/--ap-w/--ap-h (디자인 px). 실제 calc는 .ap-abs 공통 규칙. */
 function buildAbsDecl(childNode, parentNode) {
-    var box = getRasterExportBounds(childNode)
+    var box = getBoundsForAbsDeclChild(childNode, parentNode)
     var parentBox = getAbs(parentNode)
     if (!box || !parentBox) return ""
     var relX = cssOutLayoutPx(box.x - parentBox.x)
@@ -240,7 +250,9 @@ function hasAbsoluteChild(node) {
 }
 
 /** PC(d)와 MO(m) 레이아웃 변수 비교 후 달라진 것만 MO 값으로 선언 */
-function buildFlexDeclDiff(dLv, mLv, node) {
+/** moAbsSelf: MO 노드가 ap-abs 이면 position:relative 생략 */
+function buildFlexDeclDiff(dLv, mLv, node, moAbsSelf) {
+    if (moAbsSelf === undefined) moAbsSelf = false
     if (!mLv) return ""
 
     function norm(lv) {
@@ -276,7 +288,7 @@ function buildFlexDeclDiff(dLv, mLv, node) {
 
     parts.push("display:flex")
 
-    if (hasAbsoluteChild(node)) {
+    if (hasAbsoluteChild(node) && !moAbsSelf) {
         parts.push("position:relative")
     }
 
@@ -298,9 +310,9 @@ function buildFlexDeclDiff(dLv, mLv, node) {
 }
 /** PC(d)와 MO(m) 절대 위치 비교 후 달라질 때만 MO 기준 선언 */
 function buildAbsDeclDiff(dChild, dParent, mChild, mParent) {
-    var dB = getRasterExportBounds(dChild)
+    var dB = getBoundsForAbsDeclChild(dChild, dParent)
     var dPB = getAbs(dParent)
-    var mB = getRasterExportBounds(mChild)
+    var mB = getBoundsForAbsDeclChild(mChild, mParent)
     var mPB = getAbs(mParent)
     if (!dB || !dPB || !mB || !mPB) return ""
     var dRelX = r2(dB.x - dPB.x),
@@ -318,9 +330,9 @@ function buildAbsDeclDiff(dChild, dParent, mChild, mParent) {
 
 /** ap-section__image figure: 크기는 getImageSizeDeclDiff 의 --ap-w/--ap-h 만 쓰고, MO 절대배치는 left/top 만 */
 function buildAbsDeclDiffPositionOnly(dChild, dParent, mChild, mParent) {
-    var dB = getRasterExportBounds(dChild)
+    var dB = getBoundsForAbsDeclChild(dChild, dParent)
     var dPB = getAbs(dParent)
-    var mB = getRasterExportBounds(mChild)
+    var mB = getBoundsForAbsDeclChild(mChild, mParent)
     var mPB = getAbs(mParent)
     if (!dB || !dPB || !mB || !mPB) return ""
     var dRelX = r2(dB.x - dPB.x),

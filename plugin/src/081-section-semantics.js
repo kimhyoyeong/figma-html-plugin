@@ -371,7 +371,12 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
             return
         }
         if (isContainer(n) && isImageCandidate(n)) {
-            if (hasMultipleImageLikeChildren(n) && !isCompositeCandidate(n) && !isCodeRasterNode(n)) {
+            if (
+                hasMultipleImageLikeChildren(n) &&
+                !isCompositeCandidate(n) &&
+                !isCodeRasterNode(n) &&
+                !isMaskImageRasterGroup(n)
+            ) {
                 for (var k2 = 0; k2 < (n.children || []).length; k2++) walkImg(n.children[k2])
                 return
             }

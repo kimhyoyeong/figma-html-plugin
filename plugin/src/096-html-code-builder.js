@@ -119,7 +119,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("  height:calc(var(--ap-h, 0) / var(--ap-width) * 100cqi);")
     codeLines.push("  display:block;")
     codeLines.push("}")
-    codeLines.push(".ap-image.ap-abs img { width:100%; height:100%; object-fit:contain; }")
+    codeLines.push(".ap-image.ap-abs img { width:100%; height:100%; object-fit:cover; }")
     codeLines.push("")
     codeLines.push(".ap-video {")
     codeLines.push("  display:flex; align-items:center; justify-content:center;")
@@ -215,6 +215,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 } catch (e) {}
             }
         }
+        if (opts && opts.clipExportParent) o.clipExportParent = opts.clipExportParent
         return o
     }
 
@@ -279,7 +280,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                 }
 
-                return pipelineEnsureImageAsync(node, pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide) }))
+                return pipelineEnsureImageAsync(
+                        node,
+                        pipelineImgCtx(node, secNo, {
+                            insideSwiperSlide: !!(opts && opts.insideSwiperSlide),
+                            clipExportParent: parent,
+                        })
+                    )
                     .then(function (meta) {
                         if (!meta || !meta.dataUrl) {
                             pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, true, opts)
@@ -300,7 +307,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                             var traDecl = buildAbsDeclTextRaster(node, parent)
                             if (traDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, rasterOpts, false), visWrapFromOpts(opts)), traDecl)
                         }
-                        pushDeferredImageImgSizeVars(ctx, secClass, id, node, rasterOpts, textAbs, visWrapFromOpts(opts))
+                        pushDeferredImageImgSizeVars(ctx, secClass, id, node, rasterOpts, textAbs, visWrapFromOpts(opts), parent)
                         return wrapIfBtn(
                             node,
                             indent(depth) + '<div class="' + imgWrapCls + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (path || "") + '" alt="' + altText + '" /></div>',
@@ -350,7 +357,10 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             return Promise.resolve(wrapIfBtn(node, indent(depth) + ellipseHtml, depth))
         }
         var svgImgAbs = isAbsoluteLike(node, parent)
-        return pipelineEnsureImageAsync(node, pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide) })).then(function (meta) {
+        return pipelineEnsureImageAsync(
+            node,
+            pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide), clipExportParent: parent })
+        ).then(function (meta) {
             if (!meta || !meta.dataUrl) return ""
             var path =
                 cache &&
@@ -366,7 +376,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var altText = getImageAltText(node)
             if (id) ctx.ownImageNodeIds[id] = true
             var svgImgCls = apNodeClassList(("ap-image" + (svgImgAbs ? " ap-abs" : "")).trim(), id, opts)
-            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, svgImgAbs, visWrapFromOpts(opts))
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, svgImgAbs, visWrapFromOpts(opts), parent)
             var html = indent(depth) + '<div class="' + svgImgCls + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (path || "") + '" alt="' + altText + '" /></div>'
             return wrapIfBtn(node, html, depth)
         })
@@ -375,7 +385,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     // IMAGE — shouldExportAsSingleRasterImage: 직계 래스터 3+는 composite-raster(067), 그 외 분리는 hasMultiple+CLIP(isCompositeCandidate) 등 070 규칙과 동일
     function renderImageNodeAsync(node, parent, secNo, secClass, depth, opts) {
         var id = node.id != null ? String(node.id) : ""
-        if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node) && !isCodeRasterNode(node)) {
+        if (
+            isContainer(node) &&
+            hasMultipleImageLikeChildren(node) &&
+            !isCompositeCandidate(node) &&
+            !isCodeRasterNode(node) &&
+            !isMaskImageRasterGroup(node)
+        ) {
             var absImgGrp = isAbsoluteLike(node, parent)
             var useFlexImg = useApFlexClass(node, absImgGrp, isFlex(node))
             var declPartsImgGrp = []
@@ -389,7 +405,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 }
                 if (useFlexImg) {
                     var lvImgGrp = getLayoutVars(node)
-                    var flexImgGrp = buildFlexDecl(lvImgGrp, node)
+                    var flexImgGrp = buildFlexDecl(lvImgGrp, node, absImgGrp)
                     if (flexImgGrp) declPartsImgGrp.push(flexImgGrp)
                 }
                 var fillWImgGrp = getFillFlexStartWidthDecl(node, parent)
@@ -425,7 +441,10 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             })
         }
         var imgAbs = isAbsoluteLike(node, parent)
-        return pipelineEnsureImageAsync(node, pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide) })).then(function (meta) {
+        return pipelineEnsureImageAsync(
+            node,
+            pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide), clipExportParent: parent })
+        ).then(function (meta) {
             if (!meta || !meta.dataUrl) return ""
             var path =
                 cache &&
@@ -441,7 +460,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var altText = getImageAltText(node)
             if (id) ctx.ownImageNodeIds[id] = true
             var figureCls = apNodeClassList("ap-image" + (imgAbs ? " ap-abs" : ""), id, opts)
-            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs, visWrapFromOpts(opts))
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs, visWrapFromOpts(opts), parent)
             var figureHtml = '<div class="' + figureCls + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (path || "") + '" alt="' + altText + '" /></div>'
             return wrapIfBtn(node, indent(depth) + figureHtml, depth)
         })
@@ -469,7 +488,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
         if (useFlex) {
             var lv = getLayoutVars(node)
-            var flexDecl = buildFlexDecl(lv, node)
+            var flexDecl = buildFlexDecl(lv, node, abs)
             if (flexDecl) declParts.push(flexDecl)
         }
 
@@ -581,7 +600,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     (function () {
                         if (!isFlex(ch)) return Promise.resolve("")
                         var lv2 = getLayoutVars(ch)
-                        return Promise.resolve(buildFlexDecl(lv2, ch))
+                        return Promise.resolve(buildFlexDecl(lv2, ch, chAbs))
                     })(),
                 ]).then(function (res) {
                     var itemDeclParts = [res[2], res[0]].filter(Boolean)
@@ -644,7 +663,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
             if (useFlex) {
                 var lv3 = getLayoutVars(node)
-                var flexDecl3 = buildFlexDecl(lv3, node)
+                var flexDecl3 = buildFlexDecl(lv3, node, abs2)
                 if (flexDecl3) declParts2Flex.push(flexDecl3)
             }
 

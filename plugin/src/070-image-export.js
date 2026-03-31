@@ -1,5 +1,7 @@
 /**
  * 070-image-export — 벡터/이미지 후보 분류·PNG·JPG 휴리스틱 분석(067 export가 사용)
+ *
+ * isMaskImageRasterGroup — 직계 마스크 1 + IMAGE fill 서브트리 → 단일 래스터 export
  */
 // ----- 8. Image tree classification & format heuristics (export는 067) -----
 /** VECTOR 계열 타입 목록 (UI 필터와 공유) */
@@ -34,8 +36,40 @@ function isCompositeCandidate(node) {
         return false
     }
 }
+/** 직계 자식의 isMask (API 미지원 타입은 false) */
+function nodeIsMaskLayer070(n) {
+    if (!n) return false
+    try {
+        return n.isMask === true
+    } catch (e) {
+        return false
+    }
+}
+/** 마스크 레이어 1개 + 서브트리에 IMAGE fill — exportAsync 한 번에 합쳐야 하는 그룹 */
+function isMaskImageRasterGroup(node) {
+    if (!node || !isContainer(node) || !node.children) return false
+    var maskDirect = 0
+    for (var i = 0; i < node.children.length; i++) {
+        var c = node.children[i]
+        if (!c || !isVisible(c)) continue
+        if (nodeIsMaskLayer070(c)) maskDirect++
+    }
+    if (maskDirect !== 1) return false
+    if (!hasImageFillInSubtree(node)) return false
+    return true
+}
+function subtreeHasVideo070(n) {
+    if (!n || !isVisible(n)) return false
+    if (isVideoNode(n)) return true
+    var kids = n.children
+    if (!kids) return false
+    for (var j = 0; j < kids.length; j++) {
+        if (subtreeHasVideo070(kids[j])) return true
+    }
+    return false
+}
 function isImageCandidate(node) {
-    return !!(node && (hasImageFill(node) || isCompositeCandidate(node) || isCodeRasterNode(node)))
+    return !!(node && (hasImageFill(node) || isCompositeCandidate(node) || isCodeRasterNode(node) || isMaskImageRasterGroup(node)))
 }
 /** IMAGE fill 부모 위에 얹는 콘텐츠(TEXT·비디오·code-raster·벡터-only). 클립 KV+로고도 여기서 걸림 */
 function subtreeHasVectorOrTextOverlay(node) {
@@ -61,6 +95,7 @@ function subtreeOverlayWalk070(n, depth) {
 function shouldExportAsSingleRasterImage(node) {
     if (!node) return false
     if (isCodeRasterNode(node)) return true
+    if (isMaskImageRasterGroup(node)) return !hasTextInSubtree(node) && !subtreeHasVideo070(node)
     if (!isImageCandidate(node)) return false
     if (isContainer(node) && hasTextInSubtree(node)) return false
     // IMAGE fill + 자식: 전체 exportAsync 시 배경+오버레이가 한 PNG. 무클립이거나(항상) 클립이어도 벡터/텍스트 자식이 있으면 분리(KV+로고).
@@ -68,7 +103,8 @@ function shouldExportAsSingleRasterImage(node) {
         if (!isCompositeCandidate(node) || subtreeHasVectorOrTextOverlay(node)) return false
     }
     if (isContainer(node) && shouldCompositeRasterGroup(node)) return true
-    if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node)) return false
+    if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node) && !isMaskImageRasterGroup(node))
+        return false
     // 클립 프레임(clipsContent): 겹친 래스터 2장도 부모 한 번 exportAsync로 합성 가능. 무클립 2장은 위 분기에서 이미 분리.
     if (isContainer(node) && countDirectRasterImageChildren(node) >= 2 && !isCompositeCandidate(node)) return false
     return true
@@ -254,14 +290,51 @@ function computeExportFormatScores(analysis, rootNode) {
     }
     return { png: png, jpg: jpg }
 }
+/** 보이는 직계 자식 1개·이미지 계열일 때 부모 export로 프레임에 맞게 클립 */
+function shouldRasterExportViaParentClip(child, parent) {
+    if (!child || !parent || !isContainer(parent)) return false
+    if (!isFigmaDirectParent(parent, child)) return false
+    if (!hasImageFill(child) && !hasImageFillInSubtree(child)) return false
+    var cnt = 0
+    var kids = parent.children || []
+    for (var i = 0; i < kids.length; i++) {
+        if (kids[i] && isVisible(kids[i])) cnt++
+    }
+    if (cnt !== 1) return false
+    try {
+        if (parent.clipsContent === true) return true
+    } catch (e) {}
+    var a = getAbs(child)
+    var p = getAbs(parent)
+    if (!a || !p) return false
+    try {
+        var rb = child.absoluteRenderBounds
+        if (rb && typeof rb.width === "number" && typeof rb.height === "number") {
+            if (r2(rb.width) > p.w + 0.5 || r2(rb.height) > p.h + 0.5) return true
+        }
+    } catch (e2) {}
+    if (
+        a.x < p.x - 0.5 ||
+        a.y < p.y - 0.5 ||
+        a.x + a.w > p.x + p.w + 0.5 ||
+        a.y + a.h > p.y + p.h + 0.5
+    )
+        return true
+    return false
+}
+
 function nodeSel(id) {
     return id ? "." + nodeUniqueClass(String(id)) : ".ap-missing"
 }
 var IMAGE_EXPORT_MAX_WIDTH = 200
 var IMAGE_EXPORT_ZIP_WIDTH = 1200
 var _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
-function getImageSizeDecl(node) {
-    var box = node && node.type === "TEXT" ? getTextRasterBounds(node) : getRasterExportBounds(node)
+function getImageSizeDecl(node, parent) {
+    var box
+    if (node && node.type === "TEXT") box = getTextRasterBounds(node)
+    else if (node && parent && isFigmaDirectParent(parent, node))
+        box = getRasterExportBoundsClippedToParent(node, parent)
+    else box = getRasterExportBounds(node)
     if (!box || (box.w == null && box.h == null)) return ""
     var parts = []
     if (box.w != null) parts.push("--ap-w:" + cssOutLayoutPx(box.w))

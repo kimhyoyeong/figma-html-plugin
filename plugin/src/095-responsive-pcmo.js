@@ -142,7 +142,12 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             if (d.type === "FRAME" && isContainer(d)) {
                 sel = ".ap-section--" + secClass + " " + cssInnerSelForNode(String(d.id), moOpts, false)
                 if (isFlex(m)) {
-                    var flexDiff = buildFlexDeclDiff(isFlex(d) ? getLayoutVars(d) : null, getLayoutVars(m), m)
+                    var flexDiff = buildFlexDeclDiff(
+                        isFlex(d) ? getLayoutVars(d) : null,
+                        getLayoutVars(m),
+                        m,
+                        isAbsoluteLike(m, mNode)
+                    )
                     if (flexDiff) declParts.push(flexDiff)
                 }
                 var mAbs = isAbsoluteLike(m, mNode)
@@ -231,7 +236,12 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var leafSelRaw = getLeafSelectorForNode(d, moOpts)
                 sel = leafSelRaw ? ".ap-section--" + secClass + " " + leafSelRaw.replace(/,/g, ", .ap-section--" + secClass + " ") : ""
                 if (isFlex(m)) {
-                    var flexDiff2 = buildFlexDeclDiff(isFlex(d) ? getLayoutVars(d) : null, getLayoutVars(m), m)
+                    var flexDiff2 = buildFlexDeclDiff(
+                        isFlex(d) ? getLayoutVars(d) : null,
+                        getLayoutVars(m),
+                        m,
+                        isAbsoluteLike(m, mNode)
+                    )
                     if (flexDiff2) declParts.push(flexDiff2)
                 }
                 var fillW2 = getFillFlexStartWidthDecl(m, mNode)

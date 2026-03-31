@@ -43,10 +43,19 @@ function structuralSourceHash(node) {
 function sourceHashForAssetKey(node, kind, ctx) {
     var keyNode = ctx && ctx.pairPcNode && ctx.cache && ctx.cache.imageSuffix === "_mo" && ctx.insideSwiperSlide ? ctx.pairPcNode : node
     var nid = node && node.id != null ? String(node.id).replace(/[^a-zA-Z0-9_-]/g, "_") : "noid"
+    var exportSrc = ctx && ctx.rasterExportSourceNode
+    var structBase =
+        exportSrc && exportSrc.id != null && node && node.id != null && String(exportSrc.id) !== String(node.id)
+            ? exportSrc
+            : keyNode
+    var pclip =
+        exportSrc && exportSrc.id != null && node && node.id != null && String(exportSrc.id) !== String(node.id)
+            ? ":pclip:" + String(exportSrc.id).replace(/[^a-zA-Z0-9_-]/g, "_")
+            : ""
     var ih = getPrimaryImageFillHash(keyNode)
-    if (ih) return "ih:" + ih + ":n:" + nid
+    if (ih) return "ih:" + ih + ":n:" + nid + pclip
     if (kind === "svg") return "svg:" + structuralSourceHash(keyNode) + ":n:" + nid
-    return structuralSourceHash(keyNode) + ":n:" + nid
+    return structuralSourceHash(structBase) + ":n:" + nid + pclip
 }
 
 function makeAssetKey(node, kind, format, ctx) {
@@ -543,13 +552,16 @@ function exportByKind(node, kind, format, ctx) {
     if (kind === "pc-shared-slide") return Promise.resolve(null)
     if (kind === "svg") return exportSvgAssetAsync(node, ctx)
     var fmt = format || rasterFormatFromKind(kind)
+    var src = (ctx && ctx.rasterExportSourceNode) || node
+    var fromParentClip = src !== node
     if (ctx && ctx.sectionBackgroundImageFillOnly && hasImageFill(node)) {
         return exportSectionBackgroundImageRasterAsync(node, fmt, ctx)
     }
-    if (kind === "composite-raster") return exportCompositeRasterAsync(node, fmt, ctx)
-    if (needsFillOnlyStrip(node)) return exportFillOnlyRasterAsync(node, fmt, ctx)
-    if (hasImageFill(node) && isContainer(node) && hasVisibleChildren(node)) return exportFillOnlyRasterAsync(node, fmt, ctx)
-    return exportRasterAssetAsync(node, fmt, ctx)
+    if (kind === "composite-raster") return exportCompositeRasterAsync(src, fmt, ctx)
+    if (!fromParentClip && needsFillOnlyStrip(node)) return exportFillOnlyRasterAsync(node, fmt, ctx)
+    if (!fromParentClip && hasImageFill(node) && isContainer(node) && hasVisibleChildren(node))
+        return exportFillOnlyRasterAsync(node, fmt, ctx)
+    return exportRasterAssetAsync(src, fmt, ctx)
 }
 
 function finishExport(node, kind, fmt, ctx) {
@@ -604,11 +616,25 @@ function pipelineEnsureImageAsync(node, ctx) {
         }
         if (kind === "composite-raster") {
             return resolveRasterFormatOnceAsync(node, ctx).then(function (f) {
-                return finishExport(node, kind, f, ctx)
+                var effCtx =
+                    ctx &&
+                    !ctx.sectionBackgroundImageFillOnly &&
+                    ctx.clipExportParent &&
+                    shouldRasterExportViaParentClip(node, ctx.clipExportParent)
+                        ? Object.assign({}, ctx, { rasterExportSourceNode: ctx.clipExportParent })
+                        : ctx
+                return finishExport(node, kind, f, effCtx)
             })
         }
         return resolveRasterFormatOnceAsync(node, ctx).then(function (f) {
-            return finishExport(node, kind, f, ctx)
+            var effCtx2 =
+                ctx &&
+                !ctx.sectionBackgroundImageFillOnly &&
+                ctx.clipExportParent &&
+                shouldRasterExportViaParentClip(node, ctx.clipExportParent)
+                    ? Object.assign({}, ctx, { rasterExportSourceNode: ctx.clipExportParent })
+                    : ctx
+            return finishExport(node, kind, f, effCtx2)
         })
     })
 }

@@ -50,7 +50,13 @@ function collectImageFigureNodeIdsRenderNodeAsync(node, parent, cache, secNo, ro
     }
 
     if (shouldExportAsSingleRasterImage(node)) {
-        if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node) && !isCodeRasterNode(node)) {
+        if (
+            isContainer(node) &&
+            hasMultipleImageLikeChildren(node) &&
+            !isCompositeCandidate(node) &&
+            !isCodeRasterNode(node) &&
+            !isMaskImageRasterGroup(node)
+        ) {
             var childrenImgGrp = node.children || []
             var acc = []
             var ix = 0
@@ -144,7 +150,7 @@ function collectImageFigureNodeIdsGenericContainerAsync(node, parent, cache, sec
         if (!useFlex && !abs2 && containerNeedsRelativeForAbsoluteChildren(node)) declParts2Visual.push("position:relative")
         if (useFlex) {
             var lv3 = getLayoutVars(node)
-            var flexDecl3 = buildFlexDecl(lv3, node)
+            var flexDecl3 = buildFlexDecl(lv3, node, abs2)
             if (flexDecl3) declParts2Visual.push(flexDecl3)
         }
         var fillWidthDecl2 = getFillFlexStartWidthDecl(node, parent)
@@ -274,6 +280,7 @@ function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotInde
         cache.pairPcNodeIdByMoId = cache.pairPcNodeIdByMoId || Object.create(null)
         cache.pairPcNodeIdByMoId[String(node.id)] = String(pairPc.id)
     }
+    var clipPar = sectionNode ? findDirectFigmaParentUnderRoot(sectionNode, node) : null
     var imgCtx = {
         cache: cache,
         secNo: secNo,
@@ -281,6 +288,7 @@ function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotInde
         pairPcNode: pairPc,
         insideSwiperSlide: !!slideIdSet[String(node.id)],
         fromPrefetchSlot: true,
+        clipExportParent: clipPar,
     }
     return pipelineEnsureImageAsync(node, imgCtx).then(function (meta) {
         if (!meta) return

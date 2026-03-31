@@ -5,7 +5,9 @@
  *
  * getAbs — absoluteBoundingBox → {x,y,w,h}
  * getTextRasterBounds — TEXT는 렌더 bounds 우선(이미지 export·abs)
- * getRasterExportBounds — 래스터 export·ap-abs와 동일하게 시각 영역(absoluteRenderBounds, 클립 반영) 우선
+ * getRasterExportBounds — 래스터·레이아웃: render가 레이어 박스보다 크면 박스로 제한
+ * getRasterExportBoundsClippedToParent — 직계 부모 프레임·클립 영역으로 추가 교차
+ * isFigmaDirectParent / findDirectFigmaParentUnderRoot — 트리·클립 export용
  * isContainer, isVisible, hasVisibleChildren — 트리 순회·export 필터
  * isFlex — layoutMode !== NONE
  * isAbsoluteInParent, isAbsolutePositioned, isAbsoluteByParentNotFlex, isAbsoluteLike — CSS ap-abs 판별
@@ -35,15 +37,81 @@ function getTextRasterBounds(node) {
     return getAbs(node)
 }
 
-/** PNG/JPG export(useAbsoluteBounds false)와 동일: 그려진 시각 영역. 없거나 0이면 getAbs */
+/** 래스터·CSS 크기: absoluteRenderBounds가 레이어 박스보다 크면(이미지 오버플로 등) bounding box로 맞춤 */
 function getRasterExportBounds(node) {
     if (!node) return null
+    var absB = getAbs(node)
     try {
         var rb = node.absoluteRenderBounds
-        if (rb && typeof rb.x === "number" && typeof rb.y === "number" && typeof rb.width === "number" && typeof rb.height === "number" && rb.width > 0 && rb.height > 0)
-            return {x: r2(rb.x), y: r2(rb.y), w: r2(rb.width), h: r2(rb.height)}
+        if (rb && typeof rb.x === "number" && typeof rb.y === "number" && typeof rb.width === "number" && typeof rb.height === "number" && rb.width > 0 && rb.height > 0) {
+            var rw = r2(rb.width)
+            var rh = r2(rb.height)
+            var aw = absB ? absB.w : rw
+            var ah = absB ? absB.h : rh
+            if (absB && absB.w != null && absB.h != null && (rw > aw + 1 || rh > ah + 1))
+                return {x: r2(absB.x), y: r2(absB.y), w: r2(absB.w), h: r2(absB.h)}
+            return {x: r2(rb.x), y: r2(rb.y), w: rw, h: rh}
+        }
     } catch (e) {}
-    return getAbs(node)
+    return absB
+}
+
+/** 직계 부모와의 교차 영역(부모 clipsContent·자식 박스 삐져나감·render 박스 초과 시) */
+function getRasterExportBoundsClippedToParent(node, parent) {
+    var inner = getRasterExportBounds(node)
+    if (!inner || !parent) return inner
+    var a = getAbs(node)
+    var p = getAbs(parent)
+    if (!a || !p || a.w == null || p.w == null) return inner
+    var clipPc = false
+    try {
+        clipPc = parent.clipsContent === true
+    } catch (e) {}
+    var protrude =
+        a.x < p.x - 0.5 || a.y < p.y - 0.5 || a.x + a.w > p.x + p.w + 0.5 || a.y + a.h > p.y + p.h + 0.5
+    var renderOver = false
+    try {
+        var rb = node.absoluteRenderBounds
+        if (rb && typeof rb.width === "number" && typeof rb.height === "number" && a.w != null && a.h != null) {
+            if (r2(rb.width) > a.w + 1 || r2(rb.height) > a.h + 1) renderOver = true
+        }
+    } catch (e2) {}
+    if (!clipPc && !protrude && !renderOver) return inner
+    var ix = Math.max(inner.x, p.x)
+    var iy = Math.max(inner.y, p.y)
+    var ix2 = Math.min(inner.x + inner.w, p.x + p.w)
+    var iy2 = Math.min(inner.y + inner.h, p.y + p.h)
+    var iw = r2(ix2 - ix)
+    var ih = r2(iy2 - iy)
+    if (iw < 1 || ih < 1) return inner
+    return {x: r2(ix), y: r2(iy), w: iw, h: ih}
+}
+
+function isFigmaDirectParent(possibleParent, child) {
+    try {
+        return !!(possibleParent && child && child.parent && child.parent.id === possibleParent.id)
+    } catch (e) {
+        return false
+    }
+}
+
+/** 섹션 등 루트 아래에서 target의 직계 부모 노드 */
+function findDirectFigmaParentUnderRoot(root, targetNode) {
+    if (!root || !targetNode || targetNode.id == null) return null
+    var tid = String(targetNode.id)
+    function walk(n) {
+        if (!n || !n.children) return null
+        var ch = n.children
+        for (var i = 0; i < ch.length; i++) {
+            var c = ch[i]
+            if (!c) continue
+            if (String(c.id) === tid) return n
+            var f = walk(c)
+            if (f) return f
+        }
+        return null
+    }
+    return walk(root)
 }
 
 /** 자식이 있는 노드(컨테이너) 여부 */

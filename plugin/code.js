@@ -799,7 +799,9 @@ function wrapChunksAsUlOrDiv(depth, cls, frameTag, frameTagOpen, isFrameBtn, chu
  *
  * getAbs — absoluteBoundingBox → {x,y,w,h}
  * getTextRasterBounds — TEXT는 렌더 bounds 우선(이미지 export·abs)
- * getRasterExportBounds — 래스터 export·ap-abs와 동일하게 시각 영역(absoluteRenderBounds, 클립 반영) 우선
+ * getRasterExportBounds — 래스터·레이아웃: render가 레이어 박스보다 크면 박스로 제한
+ * getRasterExportBoundsClippedToParent — 직계 부모 프레임·클립 영역으로 추가 교차
+ * isFigmaDirectParent / findDirectFigmaParentUnderRoot — 트리·클립 export용
  * isContainer, isVisible, hasVisibleChildren — 트리 순회·export 필터
  * isFlex — layoutMode !== NONE
  * isAbsoluteInParent, isAbsolutePositioned, isAbsoluteByParentNotFlex, isAbsoluteLike — CSS ap-abs 판별
@@ -829,15 +831,81 @@ function getTextRasterBounds(node) {
     return getAbs(node)
 }
 
-/** PNG/JPG export(useAbsoluteBounds false)와 동일: 그려진 시각 영역. 없거나 0이면 getAbs */
+/** 래스터·CSS 크기: absoluteRenderBounds가 레이어 박스보다 크면(이미지 오버플로 등) bounding box로 맞춤 */
 function getRasterExportBounds(node) {
     if (!node) return null
+    var absB = getAbs(node)
     try {
         var rb = node.absoluteRenderBounds
-        if (rb && typeof rb.x === "number" && typeof rb.y === "number" && typeof rb.width === "number" && typeof rb.height === "number" && rb.width > 0 && rb.height > 0)
-            return {x: r2(rb.x), y: r2(rb.y), w: r2(rb.width), h: r2(rb.height)}
+        if (rb && typeof rb.x === "number" && typeof rb.y === "number" && typeof rb.width === "number" && typeof rb.height === "number" && rb.width > 0 && rb.height > 0) {
+            var rw = r2(rb.width)
+            var rh = r2(rb.height)
+            var aw = absB ? absB.w : rw
+            var ah = absB ? absB.h : rh
+            if (absB && absB.w != null && absB.h != null && (rw > aw + 1 || rh > ah + 1))
+                return {x: r2(absB.x), y: r2(absB.y), w: r2(absB.w), h: r2(absB.h)}
+            return {x: r2(rb.x), y: r2(rb.y), w: rw, h: rh}
+        }
     } catch (e) {}
-    return getAbs(node)
+    return absB
+}
+
+/** 직계 부모와의 교차 영역(부모 clipsContent·자식 박스 삐져나감·render 박스 초과 시) */
+function getRasterExportBoundsClippedToParent(node, parent) {
+    var inner = getRasterExportBounds(node)
+    if (!inner || !parent) return inner
+    var a = getAbs(node)
+    var p = getAbs(parent)
+    if (!a || !p || a.w == null || p.w == null) return inner
+    var clipPc = false
+    try {
+        clipPc = parent.clipsContent === true
+    } catch (e) {}
+    var protrude =
+        a.x < p.x - 0.5 || a.y < p.y - 0.5 || a.x + a.w > p.x + p.w + 0.5 || a.y + a.h > p.y + p.h + 0.5
+    var renderOver = false
+    try {
+        var rb = node.absoluteRenderBounds
+        if (rb && typeof rb.width === "number" && typeof rb.height === "number" && a.w != null && a.h != null) {
+            if (r2(rb.width) > a.w + 1 || r2(rb.height) > a.h + 1) renderOver = true
+        }
+    } catch (e2) {}
+    if (!clipPc && !protrude && !renderOver) return inner
+    var ix = Math.max(inner.x, p.x)
+    var iy = Math.max(inner.y, p.y)
+    var ix2 = Math.min(inner.x + inner.w, p.x + p.w)
+    var iy2 = Math.min(inner.y + inner.h, p.y + p.h)
+    var iw = r2(ix2 - ix)
+    var ih = r2(iy2 - iy)
+    if (iw < 1 || ih < 1) return inner
+    return {x: r2(ix), y: r2(iy), w: iw, h: ih}
+}
+
+function isFigmaDirectParent(possibleParent, child) {
+    try {
+        return !!(possibleParent && child && child.parent && child.parent.id === possibleParent.id)
+    } catch (e) {
+        return false
+    }
+}
+
+/** 섹션 등 루트 아래에서 target의 직계 부모 노드 */
+function findDirectFigmaParentUnderRoot(root, targetNode) {
+    if (!root || !targetNode || targetNode.id == null) return null
+    var tid = String(targetNode.id)
+    function walk(n) {
+        if (!n || !n.children) return null
+        var ch = n.children
+        for (var i = 0; i < ch.length; i++) {
+            var c = ch[i]
+            if (!c) continue
+            if (String(c.id) === tid) return n
+            var f = walk(c)
+            if (f) return f
+        }
+        return null
+    }
+    return walk(root)
 }
 
 /** 자식이 있는 노드(컨테이너) 여부 */
@@ -1073,8 +1141,9 @@ function buildFlexPaddingDecl(pt, pr, pb, pl) {
     )
 }
 
-/** ap-flex 노드용 flex CSS 변수 선언 */
-function buildFlexDecl(layoutVars, node) {
+/** ap-flex 노드용 flex CSS. absSelf: 이 노드가 ap-abs이면 자식 absolute용 position:relative 를 넣지 않음(지연 CSS가 absolute 덮어쓰기 방지) */
+function buildFlexDecl(layoutVars, node, absSelf) {
+    if (absSelf === undefined) absSelf = false
     if (!layoutVars) return ""
     var parts = []
 
@@ -1084,8 +1153,8 @@ function buildFlexDecl(layoutVars, node) {
 
     parts.push("display:flex")
 
-    // ✅ 자식에 absolute 있을 때만
-    if (hasAbsoluteChild(node)) {
+    // ✅ 자식에 absolute 있을 때만 (자기 자신이 absolute 면 제외)
+    if (hasAbsoluteChild(node) && !absSelf) {
         parts.push("position:relative")
     }
 
@@ -1113,9 +1182,18 @@ function buildFlexDecl(layoutVars, node) {
     return parts.join(";")
 }
 
+/** ap-abs·diff 공통: 직계 부모면 부모 영역으로 클립된 bounds */
+function getBoundsForAbsDeclChild(childNode, parentNode) {
+    if (!childNode) return null
+    if (childNode.type === "TEXT") return getTextRasterBounds(childNode) || getAbs(childNode)
+    if (parentNode && isFigmaDirectParent(parentNode, childNode))
+        return getRasterExportBoundsClippedToParent(childNode, parentNode)
+    return getRasterExportBounds(childNode)
+}
+
 /** 절대 위치: 설계 좌표는 --ap-left/--ap-top/--ap-w/--ap-h (디자인 px). 실제 calc는 .ap-abs 공통 규칙. */
 function buildAbsDecl(childNode, parentNode) {
-    var box = getRasterExportBounds(childNode)
+    var box = getBoundsForAbsDeclChild(childNode, parentNode)
     var parentBox = getAbs(parentNode)
     if (!box || !parentBox) return ""
     var relX = cssOutLayoutPx(box.x - parentBox.x)
@@ -1165,7 +1243,9 @@ function hasAbsoluteChild(node) {
 }
 
 /** PC(d)와 MO(m) 레이아웃 변수 비교 후 달라진 것만 MO 값으로 선언 */
-function buildFlexDeclDiff(dLv, mLv, node) {
+/** moAbsSelf: MO 노드가 ap-abs 이면 position:relative 생략 */
+function buildFlexDeclDiff(dLv, mLv, node, moAbsSelf) {
+    if (moAbsSelf === undefined) moAbsSelf = false
     if (!mLv) return ""
 
     function norm(lv) {
@@ -1201,7 +1281,7 @@ function buildFlexDeclDiff(dLv, mLv, node) {
 
     parts.push("display:flex")
 
-    if (hasAbsoluteChild(node)) {
+    if (hasAbsoluteChild(node) && !moAbsSelf) {
         parts.push("position:relative")
     }
 
@@ -1223,9 +1303,9 @@ function buildFlexDeclDiff(dLv, mLv, node) {
 }
 /** PC(d)와 MO(m) 절대 위치 비교 후 달라질 때만 MO 기준 선언 */
 function buildAbsDeclDiff(dChild, dParent, mChild, mParent) {
-    var dB = getRasterExportBounds(dChild)
+    var dB = getBoundsForAbsDeclChild(dChild, dParent)
     var dPB = getAbs(dParent)
-    var mB = getRasterExportBounds(mChild)
+    var mB = getBoundsForAbsDeclChild(mChild, mParent)
     var mPB = getAbs(mParent)
     if (!dB || !dPB || !mB || !mPB) return ""
     var dRelX = r2(dB.x - dPB.x),
@@ -1243,9 +1323,9 @@ function buildAbsDeclDiff(dChild, dParent, mChild, mParent) {
 
 /** ap-section__image figure: 크기는 getImageSizeDeclDiff 의 --ap-w/--ap-h 만 쓰고, MO 절대배치는 left/top 만 */
 function buildAbsDeclDiffPositionOnly(dChild, dParent, mChild, mParent) {
-    var dB = getRasterExportBounds(dChild)
+    var dB = getBoundsForAbsDeclChild(dChild, dParent)
     var dPB = getAbs(dParent)
-    var mB = getRasterExportBounds(mChild)
+    var mB = getBoundsForAbsDeclChild(mChild, mParent)
     var mPB = getAbs(mParent)
     if (!dB || !dPB || !mB || !mPB) return ""
     var dRelX = r2(dB.x - dPB.x),
@@ -1506,6 +1586,8 @@ function buildStrokeDeclDiff(dNode, mNode) {
 
 /**
  * 070-image-export — 벡터/이미지 후보 분류·PNG·JPG 휴리스틱 분석(067 export가 사용)
+ *
+ * isMaskImageRasterGroup — 직계 마스크 1 + IMAGE fill 서브트리 → 단일 래스터 export
  */
 // ----- 8. Image tree classification & format heuristics (export는 067) -----
 /** VECTOR 계열 타입 목록 (UI 필터와 공유) */
@@ -1540,8 +1622,40 @@ function isCompositeCandidate(node) {
         return false
     }
 }
+/** 직계 자식의 isMask (API 미지원 타입은 false) */
+function nodeIsMaskLayer070(n) {
+    if (!n) return false
+    try {
+        return n.isMask === true
+    } catch (e) {
+        return false
+    }
+}
+/** 마스크 레이어 1개 + 서브트리에 IMAGE fill — exportAsync 한 번에 합쳐야 하는 그룹 */
+function isMaskImageRasterGroup(node) {
+    if (!node || !isContainer(node) || !node.children) return false
+    var maskDirect = 0
+    for (var i = 0; i < node.children.length; i++) {
+        var c = node.children[i]
+        if (!c || !isVisible(c)) continue
+        if (nodeIsMaskLayer070(c)) maskDirect++
+    }
+    if (maskDirect !== 1) return false
+    if (!hasImageFillInSubtree(node)) return false
+    return true
+}
+function subtreeHasVideo070(n) {
+    if (!n || !isVisible(n)) return false
+    if (isVideoNode(n)) return true
+    var kids = n.children
+    if (!kids) return false
+    for (var j = 0; j < kids.length; j++) {
+        if (subtreeHasVideo070(kids[j])) return true
+    }
+    return false
+}
 function isImageCandidate(node) {
-    return !!(node && (hasImageFill(node) || isCompositeCandidate(node) || isCodeRasterNode(node)))
+    return !!(node && (hasImageFill(node) || isCompositeCandidate(node) || isCodeRasterNode(node) || isMaskImageRasterGroup(node)))
 }
 /** IMAGE fill 부모 위에 얹는 콘텐츠(TEXT·비디오·code-raster·벡터-only). 클립 KV+로고도 여기서 걸림 */
 function subtreeHasVectorOrTextOverlay(node) {
@@ -1567,6 +1681,7 @@ function subtreeOverlayWalk070(n, depth) {
 function shouldExportAsSingleRasterImage(node) {
     if (!node) return false
     if (isCodeRasterNode(node)) return true
+    if (isMaskImageRasterGroup(node)) return !hasTextInSubtree(node) && !subtreeHasVideo070(node)
     if (!isImageCandidate(node)) return false
     if (isContainer(node) && hasTextInSubtree(node)) return false
     // IMAGE fill + 자식: 전체 exportAsync 시 배경+오버레이가 한 PNG. 무클립이거나(항상) 클립이어도 벡터/텍스트 자식이 있으면 분리(KV+로고).
@@ -1574,7 +1689,8 @@ function shouldExportAsSingleRasterImage(node) {
         if (!isCompositeCandidate(node) || subtreeHasVectorOrTextOverlay(node)) return false
     }
     if (isContainer(node) && shouldCompositeRasterGroup(node)) return true
-    if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node)) return false
+    if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node) && !isMaskImageRasterGroup(node))
+        return false
     // 클립 프레임(clipsContent): 겹친 래스터 2장도 부모 한 번 exportAsync로 합성 가능. 무클립 2장은 위 분기에서 이미 분리.
     if (isContainer(node) && countDirectRasterImageChildren(node) >= 2 && !isCompositeCandidate(node)) return false
     return true
@@ -1760,14 +1876,51 @@ function computeExportFormatScores(analysis, rootNode) {
     }
     return { png: png, jpg: jpg }
 }
+/** 보이는 직계 자식 1개·이미지 계열일 때 부모 export로 프레임에 맞게 클립 */
+function shouldRasterExportViaParentClip(child, parent) {
+    if (!child || !parent || !isContainer(parent)) return false
+    if (!isFigmaDirectParent(parent, child)) return false
+    if (!hasImageFill(child) && !hasImageFillInSubtree(child)) return false
+    var cnt = 0
+    var kids = parent.children || []
+    for (var i = 0; i < kids.length; i++) {
+        if (kids[i] && isVisible(kids[i])) cnt++
+    }
+    if (cnt !== 1) return false
+    try {
+        if (parent.clipsContent === true) return true
+    } catch (e) {}
+    var a = getAbs(child)
+    var p = getAbs(parent)
+    if (!a || !p) return false
+    try {
+        var rb = child.absoluteRenderBounds
+        if (rb && typeof rb.width === "number" && typeof rb.height === "number") {
+            if (r2(rb.width) > p.w + 0.5 || r2(rb.height) > p.h + 0.5) return true
+        }
+    } catch (e2) {}
+    if (
+        a.x < p.x - 0.5 ||
+        a.y < p.y - 0.5 ||
+        a.x + a.w > p.x + p.w + 0.5 ||
+        a.y + a.h > p.y + p.h + 0.5
+    )
+        return true
+    return false
+}
+
 function nodeSel(id) {
     return id ? "." + nodeUniqueClass(String(id)) : ".ap-missing"
 }
 var IMAGE_EXPORT_MAX_WIDTH = 200
 var IMAGE_EXPORT_ZIP_WIDTH = 1200
 var _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
-function getImageSizeDecl(node) {
-    var box = node && node.type === "TEXT" ? getTextRasterBounds(node) : getRasterExportBounds(node)
+function getImageSizeDecl(node, parent) {
+    var box
+    if (node && node.type === "TEXT") box = getTextRasterBounds(node)
+    else if (node && parent && isFigmaDirectParent(parent, node))
+        box = getRasterExportBoundsClippedToParent(node, parent)
+    else box = getRasterExportBounds(node)
     if (!box || (box.w == null && box.h == null)) return ""
     var parts = []
     if (box.w != null) parts.push("--ap-w:" + cssOutLayoutPx(box.w))
@@ -2702,7 +2855,12 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
             return
         }
         if (isContainer(n) && isImageCandidate(n)) {
-            if (hasMultipleImageLikeChildren(n) && !isCompositeCandidate(n) && !isCodeRasterNode(n)) {
+            if (
+                hasMultipleImageLikeChildren(n) &&
+                !isCompositeCandidate(n) &&
+                !isCodeRasterNode(n) &&
+                !isMaskImageRasterGroup(n)
+            ) {
                 for (var k2 = 0; k2 < (n.children || []).length; k2++) walkImg(n.children[k2])
                 return
             }
@@ -3419,9 +3577,9 @@ function moOverrideSelectorIsLive(sel, usedBySection) {
 }
 
 /** 래퍼(.ap-image .ap-section__image--XX)에 --ap-w/--ap-h만 넣음. 기존 .ap-image img 규칙이 var()로 활용 (ap-abs 래퍼는 생략) */
-function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapperIsApAbs, visibilityWrapper) {
+function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapperIsApAbs, visibilityWrapper, clipParent) {
     if (!nodeId || wrapperIsApAbs) return
-    var decl = getImageSizeDecl(node)
+    var decl = getImageSizeDecl(node, clipParent)
     if (!decl) return
     var innerSel = cssInnerSelForNode(String(nodeId), opts, false)
     var vw = visibilityWrapper ? String(visibilityWrapper).replace(/^\./, "") : ""
@@ -3648,10 +3806,19 @@ function structuralSourceHash(node) {
 function sourceHashForAssetKey(node, kind, ctx) {
     var keyNode = ctx && ctx.pairPcNode && ctx.cache && ctx.cache.imageSuffix === "_mo" && ctx.insideSwiperSlide ? ctx.pairPcNode : node
     var nid = node && node.id != null ? String(node.id).replace(/[^a-zA-Z0-9_-]/g, "_") : "noid"
+    var exportSrc = ctx && ctx.rasterExportSourceNode
+    var structBase =
+        exportSrc && exportSrc.id != null && node && node.id != null && String(exportSrc.id) !== String(node.id)
+            ? exportSrc
+            : keyNode
+    var pclip =
+        exportSrc && exportSrc.id != null && node && node.id != null && String(exportSrc.id) !== String(node.id)
+            ? ":pclip:" + String(exportSrc.id).replace(/[^a-zA-Z0-9_-]/g, "_")
+            : ""
     var ih = getPrimaryImageFillHash(keyNode)
-    if (ih) return "ih:" + ih + ":n:" + nid
+    if (ih) return "ih:" + ih + ":n:" + nid + pclip
     if (kind === "svg") return "svg:" + structuralSourceHash(keyNode) + ":n:" + nid
-    return structuralSourceHash(keyNode) + ":n:" + nid
+    return structuralSourceHash(structBase) + ":n:" + nid + pclip
 }
 
 function makeAssetKey(node, kind, format, ctx) {
@@ -4148,13 +4315,16 @@ function exportByKind(node, kind, format, ctx) {
     if (kind === "pc-shared-slide") return Promise.resolve(null)
     if (kind === "svg") return exportSvgAssetAsync(node, ctx)
     var fmt = format || rasterFormatFromKind(kind)
+    var src = (ctx && ctx.rasterExportSourceNode) || node
+    var fromParentClip = src !== node
     if (ctx && ctx.sectionBackgroundImageFillOnly && hasImageFill(node)) {
         return exportSectionBackgroundImageRasterAsync(node, fmt, ctx)
     }
-    if (kind === "composite-raster") return exportCompositeRasterAsync(node, fmt, ctx)
-    if (needsFillOnlyStrip(node)) return exportFillOnlyRasterAsync(node, fmt, ctx)
-    if (hasImageFill(node) && isContainer(node) && hasVisibleChildren(node)) return exportFillOnlyRasterAsync(node, fmt, ctx)
-    return exportRasterAssetAsync(node, fmt, ctx)
+    if (kind === "composite-raster") return exportCompositeRasterAsync(src, fmt, ctx)
+    if (!fromParentClip && needsFillOnlyStrip(node)) return exportFillOnlyRasterAsync(node, fmt, ctx)
+    if (!fromParentClip && hasImageFill(node) && isContainer(node) && hasVisibleChildren(node))
+        return exportFillOnlyRasterAsync(node, fmt, ctx)
+    return exportRasterAssetAsync(src, fmt, ctx)
 }
 
 function finishExport(node, kind, fmt, ctx) {
@@ -4209,11 +4379,25 @@ function pipelineEnsureImageAsync(node, ctx) {
         }
         if (kind === "composite-raster") {
             return resolveRasterFormatOnceAsync(node, ctx).then(function (f) {
-                return finishExport(node, kind, f, ctx)
+                var effCtx =
+                    ctx &&
+                    !ctx.sectionBackgroundImageFillOnly &&
+                    ctx.clipExportParent &&
+                    shouldRasterExportViaParentClip(node, ctx.clipExportParent)
+                        ? Object.assign({}, ctx, { rasterExportSourceNode: ctx.clipExportParent })
+                        : ctx
+                return finishExport(node, kind, f, effCtx)
             })
         }
         return resolveRasterFormatOnceAsync(node, ctx).then(function (f) {
-            return finishExport(node, kind, f, ctx)
+            var effCtx2 =
+                ctx &&
+                !ctx.sectionBackgroundImageFillOnly &&
+                ctx.clipExportParent &&
+                shouldRasterExportViaParentClip(node, ctx.clipExportParent)
+                    ? Object.assign({}, ctx, { rasterExportSourceNode: ctx.clipExportParent })
+                    : ctx
+            return finishExport(node, kind, f, effCtx2)
         })
     })
 }
@@ -4291,7 +4475,13 @@ function collectImageFigureNodeIdsRenderNodeAsync(node, parent, cache, secNo, ro
     }
 
     if (shouldExportAsSingleRasterImage(node)) {
-        if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node) && !isCodeRasterNode(node)) {
+        if (
+            isContainer(node) &&
+            hasMultipleImageLikeChildren(node) &&
+            !isCompositeCandidate(node) &&
+            !isCodeRasterNode(node) &&
+            !isMaskImageRasterGroup(node)
+        ) {
             var childrenImgGrp = node.children || []
             var acc = []
             var ix = 0
@@ -4385,7 +4575,7 @@ function collectImageFigureNodeIdsGenericContainerAsync(node, parent, cache, sec
         if (!useFlex && !abs2 && containerNeedsRelativeForAbsoluteChildren(node)) declParts2Visual.push("position:relative")
         if (useFlex) {
             var lv3 = getLayoutVars(node)
-            var flexDecl3 = buildFlexDecl(lv3, node)
+            var flexDecl3 = buildFlexDecl(lv3, node, abs2)
             if (flexDecl3) declParts2Visual.push(flexDecl3)
         }
         var fillWidthDecl2 = getFillFlexStartWidthDecl(node, parent)
@@ -4515,6 +4705,7 @@ function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotInde
         cache.pairPcNodeIdByMoId = cache.pairPcNodeIdByMoId || Object.create(null)
         cache.pairPcNodeIdByMoId[String(node.id)] = String(pairPc.id)
     }
+    var clipPar = sectionNode ? findDirectFigmaParentUnderRoot(sectionNode, node) : null
     var imgCtx = {
         cache: cache,
         secNo: secNo,
@@ -4522,6 +4713,7 @@ function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotInde
         pairPcNode: pairPc,
         insideSwiperSlide: !!slideIdSet[String(node.id)],
         fromPrefetchSlot: true,
+        clipExportParent: clipPar,
     }
     return pipelineEnsureImageAsync(node, imgCtx).then(function (meta) {
         if (!meta) return
@@ -5111,7 +5303,12 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             if (d.type === "FRAME" && isContainer(d)) {
                 sel = ".ap-section--" + secClass + " " + cssInnerSelForNode(String(d.id), moOpts, false)
                 if (isFlex(m)) {
-                    var flexDiff = buildFlexDeclDiff(isFlex(d) ? getLayoutVars(d) : null, getLayoutVars(m), m)
+                    var flexDiff = buildFlexDeclDiff(
+                        isFlex(d) ? getLayoutVars(d) : null,
+                        getLayoutVars(m),
+                        m,
+                        isAbsoluteLike(m, mNode)
+                    )
                     if (flexDiff) declParts.push(flexDiff)
                 }
                 var mAbs = isAbsoluteLike(m, mNode)
@@ -5200,7 +5397,12 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var leafSelRaw = getLeafSelectorForNode(d, moOpts)
                 sel = leafSelRaw ? ".ap-section--" + secClass + " " + leafSelRaw.replace(/,/g, ", .ap-section--" + secClass + " ") : ""
                 if (isFlex(m)) {
-                    var flexDiff2 = buildFlexDeclDiff(isFlex(d) ? getLayoutVars(d) : null, getLayoutVars(m), m)
+                    var flexDiff2 = buildFlexDeclDiff(
+                        isFlex(d) ? getLayoutVars(d) : null,
+                        getLayoutVars(m),
+                        m,
+                        isAbsoluteLike(m, mNode)
+                    )
                     if (flexDiff2) declParts.push(flexDiff2)
                 }
                 var fillW2 = getFillFlexStartWidthDecl(m, mNode)
@@ -5835,7 +6037,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("  height:calc(var(--ap-h, 0) / var(--ap-width) * 100cqi);")
     codeLines.push("  display:block;")
     codeLines.push("}")
-    codeLines.push(".ap-image.ap-abs img { width:100%; height:100%; object-fit:contain; }")
+    codeLines.push(".ap-image.ap-abs img { width:100%; height:100%; object-fit:cover; }")
     codeLines.push("")
     codeLines.push(".ap-video {")
     codeLines.push("  display:flex; align-items:center; justify-content:center;")
@@ -5931,6 +6133,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 } catch (e) {}
             }
         }
+        if (opts && opts.clipExportParent) o.clipExportParent = opts.clipExportParent
         return o
     }
 
@@ -5995,7 +6198,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                 }
 
-                return pipelineEnsureImageAsync(node, pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide) }))
+                return pipelineEnsureImageAsync(
+                        node,
+                        pipelineImgCtx(node, secNo, {
+                            insideSwiperSlide: !!(opts && opts.insideSwiperSlide),
+                            clipExportParent: parent,
+                        })
+                    )
                     .then(function (meta) {
                         if (!meta || !meta.dataUrl) {
                             pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, true, opts)
@@ -6016,7 +6225,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                             var traDecl = buildAbsDeclTextRaster(node, parent)
                             if (traDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, rasterOpts, false), visWrapFromOpts(opts)), traDecl)
                         }
-                        pushDeferredImageImgSizeVars(ctx, secClass, id, node, rasterOpts, textAbs, visWrapFromOpts(opts))
+                        pushDeferredImageImgSizeVars(ctx, secClass, id, node, rasterOpts, textAbs, visWrapFromOpts(opts), parent)
                         return wrapIfBtn(
                             node,
                             indent(depth) + '<div class="' + imgWrapCls + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (path || "") + '" alt="' + altText + '" /></div>',
@@ -6066,7 +6275,10 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             return Promise.resolve(wrapIfBtn(node, indent(depth) + ellipseHtml, depth))
         }
         var svgImgAbs = isAbsoluteLike(node, parent)
-        return pipelineEnsureImageAsync(node, pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide) })).then(function (meta) {
+        return pipelineEnsureImageAsync(
+            node,
+            pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide), clipExportParent: parent })
+        ).then(function (meta) {
             if (!meta || !meta.dataUrl) return ""
             var path =
                 cache &&
@@ -6082,7 +6294,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var altText = getImageAltText(node)
             if (id) ctx.ownImageNodeIds[id] = true
             var svgImgCls = apNodeClassList(("ap-image" + (svgImgAbs ? " ap-abs" : "")).trim(), id, opts)
-            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, svgImgAbs, visWrapFromOpts(opts))
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, svgImgAbs, visWrapFromOpts(opts), parent)
             var html = indent(depth) + '<div class="' + svgImgCls + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (path || "") + '" alt="' + altText + '" /></div>'
             return wrapIfBtn(node, html, depth)
         })
@@ -6091,7 +6303,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     // IMAGE — shouldExportAsSingleRasterImage: 직계 래스터 3+는 composite-raster(067), 그 외 분리는 hasMultiple+CLIP(isCompositeCandidate) 등 070 규칙과 동일
     function renderImageNodeAsync(node, parent, secNo, secClass, depth, opts) {
         var id = node.id != null ? String(node.id) : ""
-        if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node) && !isCodeRasterNode(node)) {
+        if (
+            isContainer(node) &&
+            hasMultipleImageLikeChildren(node) &&
+            !isCompositeCandidate(node) &&
+            !isCodeRasterNode(node) &&
+            !isMaskImageRasterGroup(node)
+        ) {
             var absImgGrp = isAbsoluteLike(node, parent)
             var useFlexImg = useApFlexClass(node, absImgGrp, isFlex(node))
             var declPartsImgGrp = []
@@ -6105,7 +6323,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 }
                 if (useFlexImg) {
                     var lvImgGrp = getLayoutVars(node)
-                    var flexImgGrp = buildFlexDecl(lvImgGrp, node)
+                    var flexImgGrp = buildFlexDecl(lvImgGrp, node, absImgGrp)
                     if (flexImgGrp) declPartsImgGrp.push(flexImgGrp)
                 }
                 var fillWImgGrp = getFillFlexStartWidthDecl(node, parent)
@@ -6141,7 +6359,10 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             })
         }
         var imgAbs = isAbsoluteLike(node, parent)
-        return pipelineEnsureImageAsync(node, pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide) })).then(function (meta) {
+        return pipelineEnsureImageAsync(
+            node,
+            pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide), clipExportParent: parent })
+        ).then(function (meta) {
             if (!meta || !meta.dataUrl) return ""
             var path =
                 cache &&
@@ -6157,7 +6378,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var altText = getImageAltText(node)
             if (id) ctx.ownImageNodeIds[id] = true
             var figureCls = apNodeClassList("ap-image" + (imgAbs ? " ap-abs" : ""), id, opts)
-            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs, visWrapFromOpts(opts))
+            pushDeferredImageImgSizeVars(ctx, secClass, id, node, opts, imgAbs, visWrapFromOpts(opts), parent)
             var figureHtml = '<div class="' + figureCls + '"><img ' + apSlidePcImgAttr(opts) + 'src="' + (path || "") + '" alt="' + altText + '" /></div>'
             return wrapIfBtn(node, indent(depth) + figureHtml, depth)
         })
@@ -6185,7 +6406,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
         if (useFlex) {
             var lv = getLayoutVars(node)
-            var flexDecl = buildFlexDecl(lv, node)
+            var flexDecl = buildFlexDecl(lv, node, abs)
             if (flexDecl) declParts.push(flexDecl)
         }
 
@@ -6297,7 +6518,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     (function () {
                         if (!isFlex(ch)) return Promise.resolve("")
                         var lv2 = getLayoutVars(ch)
-                        return Promise.resolve(buildFlexDecl(lv2, ch))
+                        return Promise.resolve(buildFlexDecl(lv2, ch, chAbs))
                     })(),
                 ]).then(function (res) {
                     var itemDeclParts = [res[2], res[0]].filter(Boolean)
@@ -6360,7 +6581,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
             if (useFlex) {
                 var lv3 = getLayoutVars(node)
-                var flexDecl3 = buildFlexDecl(lv3, node)
+                var flexDecl3 = buildFlexDecl(lv3, node, abs2)
                 if (flexDecl3) declParts2Flex.push(flexDecl3)
             }
 
