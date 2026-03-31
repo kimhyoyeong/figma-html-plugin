@@ -1032,6 +1032,51 @@ function rowFlexVisibleChildrenEqualHeight(node) {
     }
 }
 
+/** cornerRadius 또는 개별 radius 중 하나라도 0 초과 */
+function nodeHasNonZeroCornerRadius(node) {
+    if (!node) return false
+    try {
+        if (typeof node.cornerRadius === "number" && node.cornerRadius > 0) return true
+        var tl = typeof node.topLeftRadius === "number" ? node.topLeftRadius : 0
+        var tr = typeof node.topRightRadius === "number" ? node.topRightRadius : 0
+        var br = typeof node.bottomRightRadius === "number" ? node.bottomRightRadius : 0
+        var bl = typeof node.bottomLeftRadius === "number" ? node.bottomLeftRadius : 0
+        return tl > 0 || tr > 0 || br > 0 || bl > 0
+    } catch (e) {
+        return false
+    }
+}
+
+/** 플로우에 보이는 직계 TEXT(ap-text) 자식이 1개 이상 */
+function hasVisibleDirectTextChild(node) {
+    if (!node || !Array.isArray(node.children)) return false
+    for (var i = 0; i < node.children.length; i++) {
+        var ch = node.children[i]
+        if (!ch || !isVisible(ch) || isAbsolutePositioned(ch)) continue
+        if (ch.type === "TEXT") return true
+    }
+    return false
+}
+
+/**
+ * 가로 FIXED + (SOLID 배경색 또는 stroke 또는 radius) + 중앙 정렬 + 직계 TEXT 존재.
+ * 조건을 만족하는 ap-text 직계 부모 frame에만 white-space:nowrap 적용.
+ */
+function flexFrameFixedBoxCenterApTextParentNoWrap(node) {
+    if (!node || !isFlex(node)) return false
+    try {
+        var sh = String(node.layoutSizingHorizontal || "").toUpperCase()
+        var widthOk = sh === "FIXED" || (typeof node.width === "number" && node.width > 0)
+        if (!widthOk) return false
+        if (String(node.primaryAxisAlignItems || "").toUpperCase() !== "CENTER") return false
+        var hasBox = !!(getFirstSolidFill(node) || getFirstSolidStroke(node) || nodeHasNonZeroCornerRadius(node))
+        if (!hasBox) return false
+        return hasVisibleDirectTextChild(node)
+    } catch (e) {
+        return false
+    }
+}
+
 /** Auto Layout 설정을 CSS 변수용 객체로 추출. isFlex(node)일 때만 값 채움 */
 function getLayoutVars(node) {
     var out = {direction: "", gap: "", pt: "", pr: "", pb: "", pl: "", justify: "", align: "", wrap: ""}
@@ -6486,6 +6531,18 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (abs) {
                 var absDecl = buildAbsDecl(node, parent)
                 if (absDecl) declParts.push(absDecl)
+            }
+
+            if (
+                flex &&
+                !abs &&
+                !nodeHasApSectionImageSemantic(node.id, opts) &&
+                flexFrameFixedBoxCenterApTextParentNoWrap(node) &&
+                !declParts.some(function (ws) {
+                    return String(ws).indexOf("white-space:") !== -1
+                })
+            ) {
+                declParts.push("white-space:nowrap")
             }
 
             if (declParts.length) {

@@ -555,6 +555,18 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 if (absDecl) declParts.push(absDecl)
             }
 
+            if (
+                flex &&
+                !abs &&
+                !nodeHasApSectionImageSemantic(node.id, opts) &&
+                flexFrameFixedBoxCenterApTextParentNoWrap(node) &&
+                !declParts.some(function (ws) {
+                    return String(ws).indexOf("white-space:") !== -1
+                })
+            ) {
+                declParts.push("white-space:nowrap")
+            }
+
             if (declParts.length) {
                 pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), declParts.join(";"))
             }
