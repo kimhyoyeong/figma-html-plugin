@@ -294,6 +294,9 @@ function computeExportFormatScores(analysis, rootNode) {
 function shouldRasterExportViaParentClip(child, parent) {
     if (!child || !parent || !isContainer(parent)) return false
     if (!isFigmaDirectParent(parent, child)) return false
+    try {
+        if (isAbsoluteLike(child, parent)) return false
+    } catch (eAbs) {}
     if (!hasImageFill(child) && !hasImageFillInSubtree(child)) return false
     var cnt = 0
     var kids = parent.children || []
@@ -331,9 +334,16 @@ var IMAGE_EXPORT_ZIP_WIDTH = 1200
 var _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
 function getImageSizeDecl(node, parent) {
     var box
+    var useParentClipBounds = false
+    if (node && node.type !== "TEXT" && parent && isFigmaDirectParent(parent, node)) {
+        try {
+            useParentClipBounds = !isAbsoluteLike(node, parent)
+        } catch (e) {
+            useParentClipBounds = true
+        }
+    }
     if (node && node.type === "TEXT") box = getTextRasterBounds(node)
-    else if (node && parent && isFigmaDirectParent(parent, node))
-        box = getRasterExportBoundsClippedToParent(node, parent)
+    else if (useParentClipBounds) box = getRasterExportBoundsClippedToParent(node, parent)
     else box = getRasterExportBounds(node)
     if (!box || (box.w == null && box.h == null)) return ""
     var parts = []

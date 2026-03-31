@@ -1182,12 +1182,17 @@ function buildFlexDecl(layoutVars, node, absSelf) {
     return parts.join(";")
 }
 
-/** ap-abs·diff 공통: 직계 부모면 부모 영역으로 클립된 bounds */
+/** ap-abs·diff 공통: 직계 부모면 부모 영역으로 클립된 bounds(플로우 이미지 등). 절대 배치 이미지는 클립 안 함 */
 function getBoundsForAbsDeclChild(childNode, parentNode) {
     if (!childNode) return null
     if (childNode.type === "TEXT") return getTextRasterBounds(childNode) || getAbs(childNode)
-    if (parentNode && isFigmaDirectParent(parentNode, childNode))
-        return getRasterExportBoundsClippedToParent(childNode, parentNode)
+    if (parentNode && isFigmaDirectParent(parentNode, childNode)) {
+        try {
+            if (!isAbsoluteLike(childNode, parentNode)) return getRasterExportBoundsClippedToParent(childNode, parentNode)
+        } catch (e) {
+            return getRasterExportBounds(childNode)
+        }
+    }
     return getRasterExportBounds(childNode)
 }
 
@@ -1880,6 +1885,9 @@ function computeExportFormatScores(analysis, rootNode) {
 function shouldRasterExportViaParentClip(child, parent) {
     if (!child || !parent || !isContainer(parent)) return false
     if (!isFigmaDirectParent(parent, child)) return false
+    try {
+        if (isAbsoluteLike(child, parent)) return false
+    } catch (eAbs) {}
     if (!hasImageFill(child) && !hasImageFillInSubtree(child)) return false
     var cnt = 0
     var kids = parent.children || []
@@ -1917,9 +1925,16 @@ var IMAGE_EXPORT_ZIP_WIDTH = 1200
 var _currentExportWidth = IMAGE_EXPORT_MAX_WIDTH
 function getImageSizeDecl(node, parent) {
     var box
+    var useParentClipBounds = false
+    if (node && node.type !== "TEXT" && parent && isFigmaDirectParent(parent, node)) {
+        try {
+            useParentClipBounds = !isAbsoluteLike(node, parent)
+        } catch (e) {
+            useParentClipBounds = true
+        }
+    }
     if (node && node.type === "TEXT") box = getTextRasterBounds(node)
-    else if (node && parent && isFigmaDirectParent(parent, node))
-        box = getRasterExportBoundsClippedToParent(node, parent)
+    else if (useParentClipBounds) box = getRasterExportBoundsClippedToParent(node, parent)
     else box = getRasterExportBounds(node)
     if (!box || (box.w == null && box.h == null)) return ""
     var parts = []

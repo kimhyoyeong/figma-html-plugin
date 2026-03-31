@@ -189,12 +189,17 @@ function buildFlexDecl(layoutVars, node, absSelf) {
     return parts.join(";")
 }
 
-/** ap-abs·diff 공통: 직계 부모면 부모 영역으로 클립된 bounds */
+/** ap-abs·diff 공통: 직계 부모면 부모 영역으로 클립된 bounds(플로우 이미지 등). 절대 배치 이미지는 클립 안 함 */
 function getBoundsForAbsDeclChild(childNode, parentNode) {
     if (!childNode) return null
     if (childNode.type === "TEXT") return getTextRasterBounds(childNode) || getAbs(childNode)
-    if (parentNode && isFigmaDirectParent(parentNode, childNode))
-        return getRasterExportBoundsClippedToParent(childNode, parentNode)
+    if (parentNode && isFigmaDirectParent(parentNode, childNode)) {
+        try {
+            if (!isAbsoluteLike(childNode, parentNode)) return getRasterExportBoundsClippedToParent(childNode, parentNode)
+        } catch (e) {
+            return getRasterExportBounds(childNode)
+        }
+    }
     return getRasterExportBounds(childNode)
 }
 
