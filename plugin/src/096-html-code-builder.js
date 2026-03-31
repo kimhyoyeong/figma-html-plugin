@@ -495,11 +495,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var axisGrowSelf = getFlexChildMainAxisGrowDecl(node, parent)
         if (axisGrowSelf && !abs && !nodeHasApSectionImageSemantic(node.id, opts)) declParts.push(axisGrowSelf)
 
-        if (effFullWidth && !nodeHasApSectionImageSemantic(node.id, opts)) {
+        /** 전폭: ap-abs 는 .ap-abs + --ap-w 가 width 담당 — 지연 규칙에 width:100% 넣으면 특이도로 absolute 박스가 깨짐 */
+        if (effFullWidth && !abs && !nodeHasApSectionImageSemantic(node.id, opts)) {
             declParts.push("width:100%")
         }
 
         if (!effFullWidth) {
+            /** FILL 이면 위에서 항상 effFullWidth → 여기서 getFillFlexStartWidthDecl 는 사실상 비-FILL only (코드 대칭·미래 변경 대비 유지) */
             var fillWidthDecl = getFillFlexStartWidthDecl(node, parent)
             if (fillWidthDecl && !nodeHasApSectionImageSemantic(node.id, opts)) declParts.push(fillWidthDecl)
             else if (!abs) {
@@ -519,7 +521,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     var t = String(s)
                     return t.indexOf("width:") !== -1 || t.indexOf("--ap-w:") !== -1
                 })
-                if (box && box.w != null && !hasWidth) {
+                if (
+                    box &&
+                    box.w != null &&
+                    !hasWidth &&
+                    !abs &&
+                    !nodeHasApSectionImageSemantic(node.id, opts)
+                ) {
                     declParts.push("--ap-w:" + cssOutLayoutPx(box.w))
                     declParts.push("width:calc(var(--ap-w)/var(--ap-width)*100cqi)")
                 }
