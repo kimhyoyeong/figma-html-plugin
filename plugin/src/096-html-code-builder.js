@@ -483,13 +483,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
         // style decl for this frame: flex vars + bg (frame는 background-image 가능)
         var declParts = []
-        var frameLv = null
         /** 자기 자신이 ap-abs면 position은 클래스에만 있음 — relative를 deferred로 넣으면 섹션 셀렉터가 덮어써 깨짐 */
         if (!useFlex && !abs && containerNeedsRelativeForAbsoluteChildren(node)) declParts.push("position:relative")
 
         if (useFlex) {
-            frameLv = getLayoutVars(node)
-            var flexDecl = buildFlexDecl(frameLv, node, abs)
+            var lv = getLayoutVars(node)
+            var flexDecl = buildFlexDecl(lv, node, abs)
             if (flexDecl) declParts.push(flexDecl)
         }
 
@@ -498,9 +497,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
         /** 전폭: ap-abs 는 .ap-abs + --ap-w 가 width 담당 — 지연 규칙에 width:100% 넣으면 특이도로 absolute 박스가 깨짐 */
         if (effFullWidth && !abs && !nodeHasApSectionImageSemantic(node.id, opts)) {
-            if (flexFrameFixedWidthPreferMinWidth(frameLv))
-                declParts.push("min-width:100%")
-            else declParts.push("width:100%")
+            declParts.push("width:100%")
         }
 
         if (!effFullWidth) {
@@ -511,13 +508,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 var sizingH = node.layoutSizingHorizontal
                 if (sizingH === "FIXED" && box && box.w != null) {
                     declParts.push("--ap-w:" + cssOutLayoutPx(box.w))
-                    var wCalc = "calc(var(--ap-w)/var(--ap-width)*100cqi)"
-                    if (
-                        !nodeHasApSectionImageSemantic(node.id, opts) &&
-                        flexFrameFixedWidthPreferMinWidth(frameLv)
-                    )
-                        declParts.push("min-width:" + wCalc)
-                    else declParts.push("width:" + wCalc)
+                    declParts.push("width:calc(var(--ap-w)/var(--ap-width)*100cqi)")
                 }
             }
         }
@@ -528,11 +519,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 declParts.push(bgDecl)
                 var hasWidth = declParts.some(function (s) {
                     var t = String(s)
-                    return (
-                        t.indexOf("width:") !== -1 ||
-                        t.indexOf("min-width:") !== -1 ||
-                        t.indexOf("--ap-w:") !== -1
-                    )
+                    return t.indexOf("width:") !== -1 || t.indexOf("--ap-w:") !== -1
                 })
                 if (
                     box &&
@@ -542,9 +529,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     !nodeHasApSectionImageSemantic(node.id, opts)
                 ) {
                     declParts.push("--ap-w:" + cssOutLayoutPx(box.w))
-                    var wCalcBg = "calc(var(--ap-w)/var(--ap-width)*100cqi)"
-                    if (flexFrameFixedWidthPreferMinWidth(frameLv)) declParts.push("min-width:" + wCalcBg)
-                    else declParts.push("width:" + wCalcBg)
+                    declParts.push("width:calc(var(--ap-w)/var(--ap-width)*100cqi)")
                 }
             }
             var strokeDecl = buildStrokeDecl(node)
