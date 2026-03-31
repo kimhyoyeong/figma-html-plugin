@@ -5,7 +5,7 @@
  * buildLineVarsDecl / buildLineVarsDeclDiff — ap-line용 --ap-line-* 선언·PC/MO 차이
  * buildEllipseVarsDecl / buildEllipseVarsDeclDiff — 타원 --ap-ellipse-* 선언·차이
  * wrapIfBtn — code-btn 레이어를 <a class="ap-btn">로 감쌈
- * textNodeTag — TEXT용 <a>/<span> 여는·닫는 태그
+ * textNodeTag — TEXT용 <a>/<p> 여는·닫는 태그 (버튼은 <a>, 그 외는 <p class="ap-text">)
  * getImageAltText — 레이어 이름 기반 img alt (이스케이프·길이 제한)
  */
 // ----- 5. Style/Shape Utils (LINE, ELLIPSE, stroke, radius 등) -----
@@ -80,13 +80,13 @@ function wrapIfBtn(node, html, depth) {
     return indent(depth) + '<a href="#" class="ap-btn">' + "\n" + html + "\n" + indent(depth) + "</a>"
 }
 
-/** TEXT 노드용 태그: code-btn이면 <a href="#" class="ap-btn ap-text">, 아니면 <span class="ap-text">. parentStyle 있으면 open에 style 속성 추가 */
+/** TEXT 노드용 태그: code-btn이면 <a href="#" class="ap-btn ap-text">, 아니면 <p class="ap-text">. parentStyle 있으면 open에 style 속성 추가 */
 function textNodeTag(node, textCls, dataIdAttr, depth, parentStyle) {
     var styleAttr = (parentStyle && String(parentStyle).trim()) ? ' style="' + String(parentStyle).trim() + '"' : ""
     var open = isBtnNode(node)
         ? '<a href="#" class="ap-btn ' + textCls + '"' + dataIdAttr + styleAttr + ">"
-        : '<span class="' + textCls + '"' + dataIdAttr + styleAttr + ">"
-    var close = isBtnNode(node) ? "</a>" : "</span>"
+        : '<p class="' + textCls + '"' + dataIdAttr + styleAttr + ">"
+    var close = isBtnNode(node) ? "</a>" : "</p>"
     return { open: open, close: close }
 }
 

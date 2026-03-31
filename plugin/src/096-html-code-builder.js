@@ -93,6 +93,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
     // text
     codeLines.push(".ap-text {")
+    codeLines.push("  margin:0;")
     codeLines.push("  font-size:calc(var(--ap-fs)/var(--ap-width)*100cqi);")
     codeLines.push("  line-height:calc(var(--ap-lh)/var(--ap-width)*100cqi);")
     codeLines.push("  letter-spacing:calc(var(--ap-ls)/var(--ap-width)*100cqi);")
@@ -472,6 +473,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (flexDecl) declParts.push(flexDecl)
         }
 
+        var axisGrowSelf = getFlexChildMainAxisGrowDecl(node, parent)
+        if (axisGrowSelf && !abs && !nodeHasApSectionImageSemantic(node.id, opts)) declParts.push(axisGrowSelf)
+
         if (effFullWidth && !nodeHasApSectionImageSemantic(node.id, opts)) {
             declParts.push("width:100%")
         }
@@ -509,10 +513,11 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             // ・배경(fill/이미지): bgDecl · 테두리: strokeDecl · radius (박스 느낌)
             // ・직계 자식이 전부 absolute면 플로우 높이 없음 → Figma 프레임 높이로 잘림 방지
             var allAbsKids = containerAllVisibleChildrenAreAbsolute(node)
+            var sbColMinH = flexColumnSpaceBetweenNeedsMinHeight(node)
             if (
                 box &&
                 box.h != null &&
-                (bgDecl || strokeDecl || radiusDecl || allAbsKids) &&
+                (bgDecl || strokeDecl || radiusDecl || allAbsKids || sbColMinH) &&
                 (!flex || node.layoutSizingVertical === "FIXED" || allAbsKids)
             )
                 declParts.push("min-height:calc(" + cssOutLayoutPx(box.h) + "/var(--ap-width)*100cqi)")
@@ -590,6 +595,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         var sameWCh = getSameWidthAsParentDecl(ch, node)
                         if (sameWCh) itemDeclParts.push(sameWCh)
                     }
+                    var axisGrowCh = getFlexChildMainAxisGrowDecl(ch, node)
+                    if (axisGrowCh && !chAbs && !nodeHasApSectionImageSemantic(ch.id, opts)) itemDeclParts.push(axisGrowCh)
                     var itemDecl = itemDeclParts.join(";")
 
                     if (itemDecl && leafSel) {
@@ -649,12 +656,16 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 if (sameWGrp) declParts2Flex.push(sameWGrp)
             }
 
+            var axisGrowGrp = getFlexChildMainAxisGrowDecl(node, parent)
+            if (axisGrowGrp && !abs2 && !nodeHasApSectionImageSemantic(node.id, opts)) declParts2Flex.push(axisGrowGrp)
+
             var boxGrp = getAbs(node)
             var allAbsChildrenGrp = containerAllVisibleChildrenAreAbsolute(node)
+            var sbColMinHGrp = flexColumnSpaceBetweenNeedsMinHeight(node)
             if (
                 boxGrp &&
                 boxGrp.h != null &&
-                (declParts2Visual.length > 0 || allAbsChildrenGrp) &&
+                (declParts2Visual.length > 0 || allAbsChildrenGrp || sbColMinHGrp) &&
                 (!flex || node.layoutSizingVertical === "FIXED" || allAbsChildrenGrp)
             ) {
                 declParts2Visual.push("min-height:calc(" + cssOutLayoutPx(boxGrp.h) + "/var(--ap-width)*100cqi)")

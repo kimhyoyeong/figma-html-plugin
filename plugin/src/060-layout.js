@@ -3,7 +3,7 @@
  *
  * 경계: CSS 선언 조립(레이아웃·칠·테두리). 노드 판별은 050, 최종 HTML 문자열은 096.
  *
- * getLayoutVars, applySectionSingleChildAlignOverride, buildFlexDecl, buildFlexPaddingDecl — ap-flex 변수·padding 한 줄
+ * getLayoutVars, flexColumnSpaceBetweenNeedsMinHeight, applySectionSingleChildAlignOverride, buildFlexDecl, buildFlexPaddingDecl — ap-flex
  * buildAbsDecl, buildAbsDeclTextRaster, *Diff — 절대 위치·TEXT 래스터·PC/MO 차이
  * getImageSizeDeclDiff, getVideoSizeDeclDiff — figure/비디오 크기 MO 오버라이드
  * toHex2, rgbToHex, hexToRgba, getFirstSolidColorFromPaints — 색 문자열
@@ -96,6 +96,21 @@ function getLayoutVars(node) {
         }
     } catch (e) {}
     return out
+}
+
+/**
+ * 세로 오토레이아웃 + 주축 SPACE_BETWEEN → CSS에서 여유 세로가 있어야 분배됨.
+ * 세로 FIXED일 때 min-height로 설계 높이를 확정 (배경 없는 프레임 포함).
+ */
+function flexColumnSpaceBetweenNeedsMinHeight(node) {
+    if (!node || !isFlex(node)) return false
+    try {
+        if (node.layoutMode !== "VERTICAL") return false
+        if (String(node.primaryAxisAlignItems || "").toUpperCase() !== "SPACE_BETWEEN") return false
+        return node.layoutSizingVertical === "FIXED"
+    } catch (e) {
+        return false
+    }
 }
 
 /** PC 섹션 export와 동일: 단일 자식 + align center → MIN과 같이 align-items 선언 생략 */

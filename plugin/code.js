@@ -422,7 +422,7 @@ function resolveSlideMeta(dSec, mSec, bgChildId, opts) {
  * buildLineVarsDecl / buildLineVarsDeclDiff — ap-line용 --ap-line-* 선언·PC/MO 차이
  * buildEllipseVarsDecl / buildEllipseVarsDeclDiff — 타원 --ap-ellipse-* 선언·차이
  * wrapIfBtn — code-btn 레이어를 <a class="ap-btn">로 감쌈
- * textNodeTag — TEXT용 <a>/<span> 여는·닫는 태그
+ * textNodeTag — TEXT용 <a>/<p> 여는·닫는 태그 (버튼은 <a>, 그 외는 <p class="ap-text">)
  * getImageAltText — 레이어 이름 기반 img alt (이스케이프·길이 제한)
  */
 // ----- 5. Style/Shape Utils (LINE, ELLIPSE, stroke, radius 등) -----
@@ -497,13 +497,13 @@ function wrapIfBtn(node, html, depth) {
     return indent(depth) + '<a href="#" class="ap-btn">' + "\n" + html + "\n" + indent(depth) + "</a>"
 }
 
-/** TEXT 노드용 태그: code-btn이면 <a href="#" class="ap-btn ap-text">, 아니면 <span class="ap-text">. parentStyle 있으면 open에 style 속성 추가 */
+/** TEXT 노드용 태그: code-btn이면 <a href="#" class="ap-btn ap-text">, 아니면 <p class="ap-text">. parentStyle 있으면 open에 style 속성 추가 */
 function textNodeTag(node, textCls, dataIdAttr, depth, parentStyle) {
     var styleAttr = (parentStyle && String(parentStyle).trim()) ? ' style="' + String(parentStyle).trim() + '"' : ""
     var open = isBtnNode(node)
         ? '<a href="#" class="ap-btn ' + textCls + '"' + dataIdAttr + styleAttr + ">"
-        : '<span class="' + textCls + '"' + dataIdAttr + styleAttr + ">"
-    var close = isBtnNode(node) ? "</a>" : "</span>"
+        : '<p class="' + textCls + '"' + dataIdAttr + styleAttr + ">"
+    var close = isBtnNode(node) ? "</a>" : "</p>"
     return { open: open, close: close }
 }
 
@@ -928,7 +928,7 @@ function containerAllVisibleChildrenAreAbsolute(node) {
  *
  * 경계: CSS 선언 조립(레이아웃·칠·테두리). 노드 판별은 050, 최종 HTML 문자열은 096.
  *
- * getLayoutVars, applySectionSingleChildAlignOverride, buildFlexDecl, buildFlexPaddingDecl — ap-flex 변수·padding 한 줄
+ * getLayoutVars, flexColumnSpaceBetweenNeedsMinHeight, applySectionSingleChildAlignOverride, buildFlexDecl, buildFlexPaddingDecl — ap-flex
  * buildAbsDecl, buildAbsDeclTextRaster, *Diff — 절대 위치·TEXT 래스터·PC/MO 차이
  * getImageSizeDeclDiff, getVideoSizeDeclDiff — figure/비디오 크기 MO 오버라이드
  * toHex2, rgbToHex, hexToRgba, getFirstSolidColorFromPaints — 색 문자열
@@ -1021,6 +1021,21 @@ function getLayoutVars(node) {
         }
     } catch (e) {}
     return out
+}
+
+/**
+ * 세로 오토레이아웃 + 주축 SPACE_BETWEEN → CSS에서 여유 세로가 있어야 분배됨.
+ * 세로 FIXED일 때 min-height로 설계 높이를 확정 (배경 없는 프레임 포함).
+ */
+function flexColumnSpaceBetweenNeedsMinHeight(node) {
+    if (!node || !isFlex(node)) return false
+    try {
+        if (node.layoutMode !== "VERTICAL") return false
+        if (String(node.primaryAxisAlignItems || "").toUpperCase() !== "SPACE_BETWEEN") return false
+        return node.layoutSizingVertical === "FIXED"
+    } catch (e) {
+        return false
+    }
 }
 
 /** PC 섹션 export와 동일: 단일 자식 + align center → MIN과 같이 align-items 선언 생략 */
@@ -4705,6 +4720,7 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
  * oneLineBase, dumpPadKey — 덤프 한 줄·키 패딩
  * bgDetails, flexDetails, layoutChildDetails — 배경·flex·자식 sizing 덤프 문자열
  * getFillFlexStartWidthDecl — FILL + flex-start일 때 width:100% 보조 선언
+ * getFlexChildMainAxisGrowDecl — 부모 주축 기준 layoutGrow / 세로 FILL → flex-grow 등
  * resolveDesktopMobile — 선택 2개 시 가로 큰 쪽=PC, breakpoint=MO 폭
  * getSectionNodes — ROOT 직계 보이는 자식 = 섹션 후보 목록
  */
@@ -4797,6 +4813,37 @@ function getFillFlexStartWidthDecl(node, parent) {
     var isColumn = pv.direction === "column"
     if (isColumn && (pv.align === "" || pv.align === "flex-start")) return "width:100%"
     if (!isColumn && (pv.justify === "" || pv.justify === "flex-start")) return "width:100%"
+    return ""
+}
+
+/**
+ * 부모 오토레이아웃 주축 방향으로 늘리는 자식: layoutGrow>0 또는 세로 FILL(column 부모).
+ * row 부모에서 세로 FILL + 교차축 flex-start → height:100%.
+ */
+function getFlexChildMainAxisGrowDecl(node, parent) {
+    if (!node || !parent || !isFlex(parent)) return ""
+    try {
+        if (isAbsoluteLike(node, parent)) return ""
+    } catch (e) {
+        return ""
+    }
+    var pv = getLayoutVars(parent)
+    var isColumn = pv.direction === "column"
+    var growN = 0
+    try {
+        if ("layoutGrow" in node && node.layoutGrow != null && Number(node.layoutGrow) > 0) growN = Number(node.layoutGrow)
+    } catch (e) {}
+    var vFill = false
+    try {
+        vFill = node.layoutSizingVertical === "FILL"
+    } catch (e) {}
+    if (isColumn) {
+        if (growN > 0) return "flex-grow:" + growN + ";min-height:0"
+        if (vFill) return "flex-grow:1;min-height:0"
+        return ""
+    }
+    if (growN > 0) return "flex-grow:" + growN + ";min-width:0"
+    if (vFill && pv.align === "flex-start") return "height:100%"
     return ""
 }
 
@@ -5097,6 +5144,11 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                     var contStrD = sectionContainerNeedsFullWidthInColumnParent(d, dNode, semMap, String(d.id))
                     if (contStrM && !contStrD) declParts.push("width:100%")
                 }
+                if (!mAbs && !moImageFigureDup && !nodeHasApSectionImageSemantic(d.id, moOpts)) {
+                    var growM = getFlexChildMainAxisGrowDecl(m, mNode)
+                    var growD = getFlexChildMainAxisGrowDecl(d, dNode)
+                    if (growM && growM !== growD) declParts.push(growM)
+                }
                 var strokeDiff = buildStrokeDeclDiff(d, m)
                 if (strokeDiff) declParts.push(strokeDiff)
                 // PC 프레임과 동일 조건(bg|stroke|radius) + 높이가 다를 때만 MO min-height (Auto Layout+HUG 세로 제외)
@@ -5104,11 +5156,14 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var dBoxH = getAbs(d)
                 var mMinReason = frameHasMinHeightVisualReason(m)
                 var dMinReason = frameHasMinHeightVisualReason(d)
-                if (!moImageFigureDup && mBoxH && mBoxH.h != null && mMinReason) {
+                var sbMinM = flexColumnSpaceBetweenNeedsMinHeight(m)
+                var sbMinD = flexColumnSpaceBetweenNeedsMinHeight(d)
+                if (!moImageFigureDup && mBoxH && mBoxH.h != null && (mMinReason || sbMinM)) {
                     if (!(isFlex(m) && m.layoutSizingVertical !== "FIXED")) {
                         var mh = layoutPxNum(mBoxH.h)
                         var dh = dBoxH && dBoxH.h != null ? layoutPxNum(dBoxH.h) : null
-                        if (!dMinReason || dh === null || mh !== dh)
+                        var dWantsMin = dMinReason || sbMinD
+                        if (!dWantsMin || dh === null || mh !== dh)
                             declParts.push("min-height:calc(" + cssOutLayoutPx(mBoxH.h) + "/var(--ap-width)*100cqi)")
                     }
                 }
@@ -5156,6 +5211,9 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                     var sw2D = getSameWidthAsParentDecl(d, dNode)
                     if (sw2M && !sw2D) declParts.push(sw2M)
                 }
+                var grow2M = getFlexChildMainAxisGrowDecl(m, mNode)
+                var grow2D = getFlexChildMainAxisGrowDecl(d, dNode)
+                if (grow2M && grow2M !== grow2D && !nodeHasApSectionImageSemantic(d.id, moOpts)) declParts.push(grow2M)
                 var mAbs2 = isAbsoluteLike(m, mNode)
                 if (mAbs2) {
                     var ad2 =
@@ -5751,6 +5809,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
     // text
     codeLines.push(".ap-text {")
+    codeLines.push("  margin:0;")
     codeLines.push("  font-size:calc(var(--ap-fs)/var(--ap-width)*100cqi);")
     codeLines.push("  line-height:calc(var(--ap-lh)/var(--ap-width)*100cqi);")
     codeLines.push("  letter-spacing:calc(var(--ap-ls)/var(--ap-width)*100cqi);")
@@ -6130,6 +6189,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (flexDecl) declParts.push(flexDecl)
         }
 
+        var axisGrowSelf = getFlexChildMainAxisGrowDecl(node, parent)
+        if (axisGrowSelf && !abs && !nodeHasApSectionImageSemantic(node.id, opts)) declParts.push(axisGrowSelf)
+
         if (effFullWidth && !nodeHasApSectionImageSemantic(node.id, opts)) {
             declParts.push("width:100%")
         }
@@ -6167,10 +6229,11 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             // ・배경(fill/이미지): bgDecl · 테두리: strokeDecl · radius (박스 느낌)
             // ・직계 자식이 전부 absolute면 플로우 높이 없음 → Figma 프레임 높이로 잘림 방지
             var allAbsKids = containerAllVisibleChildrenAreAbsolute(node)
+            var sbColMinH = flexColumnSpaceBetweenNeedsMinHeight(node)
             if (
                 box &&
                 box.h != null &&
-                (bgDecl || strokeDecl || radiusDecl || allAbsKids) &&
+                (bgDecl || strokeDecl || radiusDecl || allAbsKids || sbColMinH) &&
                 (!flex || node.layoutSizingVertical === "FIXED" || allAbsKids)
             )
                 declParts.push("min-height:calc(" + cssOutLayoutPx(box.h) + "/var(--ap-width)*100cqi)")
@@ -6248,6 +6311,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         var sameWCh = getSameWidthAsParentDecl(ch, node)
                         if (sameWCh) itemDeclParts.push(sameWCh)
                     }
+                    var axisGrowCh = getFlexChildMainAxisGrowDecl(ch, node)
+                    if (axisGrowCh && !chAbs && !nodeHasApSectionImageSemantic(ch.id, opts)) itemDeclParts.push(axisGrowCh)
                     var itemDecl = itemDeclParts.join(";")
 
                     if (itemDecl && leafSel) {
@@ -6307,12 +6372,16 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 if (sameWGrp) declParts2Flex.push(sameWGrp)
             }
 
+            var axisGrowGrp = getFlexChildMainAxisGrowDecl(node, parent)
+            if (axisGrowGrp && !abs2 && !nodeHasApSectionImageSemantic(node.id, opts)) declParts2Flex.push(axisGrowGrp)
+
             var boxGrp = getAbs(node)
             var allAbsChildrenGrp = containerAllVisibleChildrenAreAbsolute(node)
+            var sbColMinHGrp = flexColumnSpaceBetweenNeedsMinHeight(node)
             if (
                 boxGrp &&
                 boxGrp.h != null &&
-                (declParts2Visual.length > 0 || allAbsChildrenGrp) &&
+                (declParts2Visual.length > 0 || allAbsChildrenGrp || sbColMinHGrp) &&
                 (!flex || node.layoutSizingVertical === "FIXED" || allAbsChildrenGrp)
             ) {
                 declParts2Visual.push("min-height:calc(" + cssOutLayoutPx(boxGrp.h) + "/var(--ap-width)*100cqi)")

@@ -6,6 +6,7 @@
  * oneLineBase, dumpPadKey — 덤프 한 줄·키 패딩
  * bgDetails, flexDetails, layoutChildDetails — 배경·flex·자식 sizing 덤프 문자열
  * getFillFlexStartWidthDecl — FILL + flex-start일 때 width:100% 보조 선언
+ * getFlexChildMainAxisGrowDecl — 부모 주축 기준 layoutGrow / 세로 FILL → flex-grow 등
  * resolveDesktopMobile — 선택 2개 시 가로 큰 쪽=PC, breakpoint=MO 폭
  * getSectionNodes — ROOT 직계 보이는 자식 = 섹션 후보 목록
  */
@@ -98,6 +99,37 @@ function getFillFlexStartWidthDecl(node, parent) {
     var isColumn = pv.direction === "column"
     if (isColumn && (pv.align === "" || pv.align === "flex-start")) return "width:100%"
     if (!isColumn && (pv.justify === "" || pv.justify === "flex-start")) return "width:100%"
+    return ""
+}
+
+/**
+ * 부모 오토레이아웃 주축 방향으로 늘리는 자식: layoutGrow>0 또는 세로 FILL(column 부모).
+ * row 부모에서 세로 FILL + 교차축 flex-start → height:100%.
+ */
+function getFlexChildMainAxisGrowDecl(node, parent) {
+    if (!node || !parent || !isFlex(parent)) return ""
+    try {
+        if (isAbsoluteLike(node, parent)) return ""
+    } catch (e) {
+        return ""
+    }
+    var pv = getLayoutVars(parent)
+    var isColumn = pv.direction === "column"
+    var growN = 0
+    try {
+        if ("layoutGrow" in node && node.layoutGrow != null && Number(node.layoutGrow) > 0) growN = Number(node.layoutGrow)
+    } catch (e) {}
+    var vFill = false
+    try {
+        vFill = node.layoutSizingVertical === "FILL"
+    } catch (e) {}
+    if (isColumn) {
+        if (growN > 0) return "flex-grow:" + growN + ";min-height:0"
+        if (vFill) return "flex-grow:1;min-height:0"
+        return ""
+    }
+    if (growN > 0) return "flex-grow:" + growN + ";min-width:0"
+    if (vFill && pv.align === "flex-start") return "height:100%"
     return ""
 }
 

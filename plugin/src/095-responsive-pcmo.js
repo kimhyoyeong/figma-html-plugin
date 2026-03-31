@@ -175,6 +175,11 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                     var contStrD = sectionContainerNeedsFullWidthInColumnParent(d, dNode, semMap, String(d.id))
                     if (contStrM && !contStrD) declParts.push("width:100%")
                 }
+                if (!mAbs && !moImageFigureDup && !nodeHasApSectionImageSemantic(d.id, moOpts)) {
+                    var growM = getFlexChildMainAxisGrowDecl(m, mNode)
+                    var growD = getFlexChildMainAxisGrowDecl(d, dNode)
+                    if (growM && growM !== growD) declParts.push(growM)
+                }
                 var strokeDiff = buildStrokeDeclDiff(d, m)
                 if (strokeDiff) declParts.push(strokeDiff)
                 // PC 프레임과 동일 조건(bg|stroke|radius) + 높이가 다를 때만 MO min-height (Auto Layout+HUG 세로 제외)
@@ -182,11 +187,14 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 var dBoxH = getAbs(d)
                 var mMinReason = frameHasMinHeightVisualReason(m)
                 var dMinReason = frameHasMinHeightVisualReason(d)
-                if (!moImageFigureDup && mBoxH && mBoxH.h != null && mMinReason) {
+                var sbMinM = flexColumnSpaceBetweenNeedsMinHeight(m)
+                var sbMinD = flexColumnSpaceBetweenNeedsMinHeight(d)
+                if (!moImageFigureDup && mBoxH && mBoxH.h != null && (mMinReason || sbMinM)) {
                     if (!(isFlex(m) && m.layoutSizingVertical !== "FIXED")) {
                         var mh = layoutPxNum(mBoxH.h)
                         var dh = dBoxH && dBoxH.h != null ? layoutPxNum(dBoxH.h) : null
-                        if (!dMinReason || dh === null || mh !== dh)
+                        var dWantsMin = dMinReason || sbMinD
+                        if (!dWantsMin || dh === null || mh !== dh)
                             declParts.push("min-height:calc(" + cssOutLayoutPx(mBoxH.h) + "/var(--ap-width)*100cqi)")
                     }
                 }
@@ -234,6 +242,9 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                     var sw2D = getSameWidthAsParentDecl(d, dNode)
                     if (sw2M && !sw2D) declParts.push(sw2M)
                 }
+                var grow2M = getFlexChildMainAxisGrowDecl(m, mNode)
+                var grow2D = getFlexChildMainAxisGrowDecl(d, dNode)
+                if (grow2M && grow2M !== grow2D && !nodeHasApSectionImageSemantic(d.id, moOpts)) declParts.push(grow2M)
                 var mAbs2 = isAbsoluteLike(m, mNode)
                 if (mAbs2) {
                     var ad2 =

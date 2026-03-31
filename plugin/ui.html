@@ -1292,6 +1292,10 @@
         <p class="appLayerRulesLead">특정 레이어명을 사용하면 해당 기능이 자동 적용됩니다.</p>
         <ul class="appLayerRulesList">
           <li>
+            <code>code-btn</code>
+            <span class="appLayerRuleDesc">링크 버튼으로 출력됨 <code>a href="#"</code></span>
+          </li>
+          <li>
             <code>code-slide</code>
             <span class="appLayerRuleDesc">하위 요소가 각각 1장의 슬라이드로 처리됨</span>
           </li>
@@ -1675,7 +1679,7 @@
           "직전 headingAudit와 일치. **`.ap-section--01` 밖의 `<h1>`**·**`ap-section__desc*`에 붙은 `<h*>`**·**문장형·`?` 질문형**·**`<br>` 2회+ 슬로건**·**swiper-slide 반복 구간 전부 h2/h3**·**FACE/EYES 류 라벨 h*** 는 분석에서 지적된 대로 **강등·not-heading 방향만** — 억지 승격 금지.",
           "`h1`은 `--01` 안으로 옮기는 등 **구조 변경이 큰 패치**는 최소 치환으로 어려우면 issues에 맡기고 패치 생략 가능.",
           "제품/브랜드 h1은 직전 판정대로. 배지→제품명·alt만의 명칭→h1은 본문에 문자열 있을 때만 검토.",
-          "`<span class=\"ap-text ap-section__title|subtitle…\">` 안에 `<h*>` 중첩 금지 → `<h2 class=\"ap-text ap-section__title\">…</h2>`로 치환. `<<h2` 금지.",
+          "`<p|span class=\"ap-text ap-section__title|subtitle…\">` 안에 `<h*>` 중첩 금지 → `<h2 class=\"ap-text ap-section__title\">…</h2>`로 치환. `<<h2` 금지.",
           "headingPatches: `before` 실재·유일 매칭, `after` 같은 자리 갈아끼기만, 형제·img 뒤 숨김 `<h*>` 추가 금지. 불확실하면 생략."
         ]
       }
@@ -4381,7 +4385,7 @@
     }
 
     /**
-     * AI 반영 등으로 <span class="ap-text ap-section__title">...</span> 안에 h1–h6만 들어간 잘못된 패턴을
+     * AI 반영 등으로 <span|p class="ap-text ap-section__title">...</span|p> 안에 h1–h6만 들어간 잘못된 패턴을
      * <h2 class="ap-text ap-section__title">...</h2> 형태로 합친다 (클래스·style 병합).
      */
     function extractTagAttr(attrs, name) {
@@ -4448,18 +4452,18 @@
 
     function normalizeApHeadingSpanWrappers(html) {
       var s = String(html || "");
-      var re = /<span\s([^>]*?)>(\s*)<(h)([1-6])(\b[^>]*?)>([\s\S]*?)<\/h\4>(\s*)<\/span>/gi;
-      return s.replace(re, function (full, spanAttrs, ws1, hLetter, hDigit, hRest, inner) {
-        var spanClass = extractTagAttr(spanAttrs, "class");
-        if (!/\bap-text\b/.test(spanClass)) return full;
-        if (!/\bap-section__(?:title|subtitle)(?:--\d+)?\b/.test(spanClass)) return full;
+      var re = /<(span|p)\s([^>]*?)>(\s*)<(h)([1-6])(\b[^>]*?)>([\s\S]*?)<\/h\5>(\s*)<\/\1>/gi;
+      return s.replace(re, function (full, wrapTag, wrapAttrs, ws1, hLetter, hDigit, hRest, inner) {
+        var wrapClass = extractTagAttr(wrapAttrs, "class");
+        if (!/\bap-text\b/.test(wrapClass)) return full;
+        if (!/\bap-section__(?:title|subtitle)(?:--\d+)?\b/.test(wrapClass)) return full;
         var tag = "h" + String(hDigit);
         var hClass = extractTagAttr(hRest, "class");
-        var mergedClass = mergeApClassStrings(spanClass, hClass);
-        var spanStyle = extractTagAttr(spanAttrs, "style");
+        var mergedClass = mergeApClassStrings(wrapClass, hClass);
+        var wrapStyle = extractTagAttr(wrapAttrs, "style");
         var hStyle = extractTagAttr(hRest, "style");
-        var mergedStyle = mergeStyleStrings(spanStyle, hStyle);
-        var rest = [stripClassAndStyleAttrs(spanAttrs), stripClassAndStyleAttrs(hRest)]
+        var mergedStyle = mergeStyleStrings(wrapStyle, hStyle);
+        var rest = [stripClassAndStyleAttrs(wrapAttrs), stripClassAndStyleAttrs(hRest)]
           .filter(Boolean)
           .join(" ")
           .replace(/\s+/g, " ")
