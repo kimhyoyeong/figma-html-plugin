@@ -169,7 +169,7 @@ function buildTextPartInnerHtml(ts) {
     var baseFs = ts.fs !== "" ? Number(ts.fs) || 0 : 0
     var baseFw = ts.fw !== "" ? Number(ts.fw) || 400 : 400
     var baseLsEm = ts.ls !== "" ? Number(ts.ls) || 0 : 0
-    var partLs = [], partFw = [], partClr = [], partFs = []
+    var partLs = [], partFw = [], partClr = [], partFs = [], partTc = []
     for (var i = 0; i < parts.length; i++) {
         var p = parts[i]
         if (Math.abs((p.ls || 0) - baseLsEm) >= 0.001) partLs.push("--ap-ls:" + (Number(p.ls) || 0).toFixed(3) + "em")
@@ -180,6 +180,9 @@ function buildTextPartInnerHtml(ts) {
         else partClr.push(null)
         if (p.fs != null && p.fs > 0 && (!baseFs || Math.abs(p.fs - baseFs) >= 1)) partFs.push("--ap-fs:" + Math.round(p.fs))
         else partFs.push(null)
+        partTc.push(
+            normalizeFigTextCaseKey(p.textCase != null && p.textCase !== "" ? p.textCase : ts.textCase),
+        )
     }
     function allSame(arr) {
         var first = null
@@ -194,8 +197,12 @@ function buildTextPartInnerHtml(ts) {
     var commonFw = allSame(partFw)
     var commonClr = allSame(partClr)
     var commonFs = allSame(partFs)
+    var commonTcKey = allSame(partTc)
     var parentVars = [commonLs, commonFw, commonClr, commonFs].filter(Boolean)
     var parentStyle = parentVars.length ? parentVars.join(";") : ""
+    var commonTcFrag =
+        commonTcKey && commonTcKey !== "ORIGINAL" ? figTextCaseToDeclFragment(commonTcKey) : ""
+    if (commonTcFrag) parentStyle = parentStyle ? parentStyle + ";" + commonTcFrag : commonTcFrag
     var out = ""
     var pos = 0
     for (var i = 0; i < parts.length; i++) {
@@ -213,6 +220,10 @@ function buildTextPartInnerHtml(ts) {
         if (partFs[i] != null && partFs[i] !== commonFs) vars.push(partFs[i])
         if (partFw[i] != null && partFw[i] !== commonFw) vars.push(partFw[i])
         if (partLs[i] != null && partLs[i] !== commonLs) vars.push(partLs[i])
+        if (commonTcKey == null) {
+            var partTcFrag = figTextCaseToDeclFragment(partTc[i])
+            if (partTcFrag) vars.push(partTcFrag)
+        }
         var leadingBr = ""
         if (vars.length > 0) {
             var brMatch = escaped.match(/^(\s*<br[^>]*>\s*)+/i)

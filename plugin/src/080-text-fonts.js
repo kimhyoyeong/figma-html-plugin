@@ -31,6 +31,12 @@ function extractTextStyleRunsFromRangeApi(tn, len) {
     var runs = []
     var start = 0
     var text = tn.characters || ""
+    var runTextCase = ""
+    try {
+        if (typeof tn.textCase !== "undefined" && tn.textCase != null && tn.textCase !== figma.mixed) {
+            runTextCase = String(tn.textCase)
+        }
+    } catch (eTcRun) {}
     var styleToWeight = { Bold: 700, "Extra Bold": 800, "Semi Bold": 600, Medium: 500, Regular: 400, Light: 300, "Extra Light": 200, Thin: 100 }
     function getFs(i) {
         try {
@@ -68,6 +74,7 @@ function extractTextStyleRunsFromRangeApi(tn, len) {
                 fw: prevFont.weight,
                 clr: "",
                 ls: 0,
+                textCase: runTextCase,
             })
             start = i
         }
@@ -115,6 +122,29 @@ function loadFontsForTextNodeAsync(tn) {
         return
     })
 }
+
+/** Figma TextCase → 정규 키 (characters와 별도인 스타일; All caps 등은 여기만 반영됨) */
+function normalizeFigTextCaseKey(tc) {
+    if (tc == null || tc === "") return "ORIGINAL"
+    try {
+        if (tc === figma.mixed) return "ORIGINAL"
+    } catch (eMix) {}
+    var t = String(tc).toUpperCase().replace(/-/g, "_")
+    if (t === "UPPER" || t === "LOWER" || t === "TITLE" || t === "SMALL_CAPS" || t === "SMALL_CAPS_FORCED" || t === "ORIGINAL") return t
+    return "ORIGINAL"
+}
+
+/** TextCase → 지연 CSS에 넣을 선언(표준 속성). ORIGINAL은 빈 문자열 */
+function figTextCaseToDeclFragment(tc) {
+    var k = normalizeFigTextCaseKey(tc)
+    if (k === "ORIGINAL") return ""
+    if (k === "UPPER") return "text-transform:uppercase"
+    if (k === "LOWER") return "text-transform:lowercase"
+    if (k === "TITLE") return "text-transform:capitalize"
+    if (k === "SMALL_CAPS" || k === "SMALL_CAPS_FORCED") return "font-variant:small-caps"
+    return ""
+}
+
 /** TEXT 노드 → {text, fs, lh, ls, fw, ta, clr, parts(구간별 스타일)} (폰트 로드 후) */
 function getTextSummaryAsync(tn) {
     return loadFontsForTextNodeAsync(tn).then(function () {
@@ -131,7 +161,17 @@ function getTextSummaryAsync(tn) {
             fontStyle: "",
             lineBreakIndices: [],
             lines: [],
+            textCase: "",
         }
+
+        var nodeTextCaseStr = ""
+        try {
+            if (typeof tn.textCase !== "undefined") {
+                var ntc = tn.textCase
+                if (ntc != null && ntc !== figma.mixed) nodeTextCaseStr = String(ntc)
+            }
+        } catch (eTc) {}
+        out.textCase = nodeTextCaseStr
 
         try {
             var s = tn.characters
@@ -235,14 +275,21 @@ function getTextSummaryAsync(tn) {
         if (isMixed && len > 0) {
             try {
                 if (typeof tn.getStyledTextSegments === "function") {
-                    var segFields = ["fontName", "fontSize", "fontWeight", "fills", "letterSpacing"]
-                    var rawSegs = tn.getStyledTextSegments(segFields)
+                    var segFields = ["fontName", "fontSize", "fontWeight", "fills", "letterSpacing", "textCase"]
+                    var rawSegs
+                    try {
+                        rawSegs = tn.getStyledTextSegments(segFields)
+                    } catch (eSegTc) {
+                        rawSegs = tn.getStyledTextSegments(["fontName", "fontSize", "fontWeight", "fills", "letterSpacing"])
+                    }
                     if (rawSegs && rawSegs.length > 0) {
                         var baseClr = (out.clr || "").toLowerCase()
                         var baseFs = out.fs !== "" ? Number(out.fs) || 0 : 0
                         var baseFw = out.fw !== "" ? Number(out.fw) || 400 : 400
                         var baseLsEm = out.ls !== "" ? Number(out.ls) || 0 : 0
                         var hasAnyDiff = false
+                        var hasTextCaseDiff = false
+                        var baseTcKey = ""
                         for (var si = 0; si < rawSegs.length; si++) {
                             var seg = rawSegs[si]
                             var segFs = seg.fontSize != null && seg.fontSize !== figma.mixed ? Number(seg.fontSize) || 0 : 0
@@ -255,12 +302,17 @@ function getTextSummaryAsync(tn) {
                                 if (lso.unit === "PERCENT") segLsEm = (Number(lso.value) || 0) / 100
                                 else if (lso.unit === "PIXELS" && segFs > 0) segLsEm = (Number(lso.value) || 0) / segFs
                             }
+                            var segTcKey = normalizeFigTextCaseKey(
+                                seg.textCase != null && seg.textCase !== figma.mixed ? seg.textCase : nodeTextCaseStr,
+                            )
+                            if (si === 0) baseTcKey = segTcKey
+                            else if (segTcKey !== baseTcKey) hasTextCaseDiff = true
                             if (segClr && segClr !== baseClr) hasAnyDiff = true
                             if (segFs && baseFs && Math.abs(segFs - baseFs) >= 1) hasAnyDiff = true
                             if (segFw !== baseFw) hasAnyDiff = true
                             if (Math.abs(segLsEm - baseLsEm) >= 0.001) hasAnyDiff = true
                         }
-                        if (hasAnyDiff) {
+                        if (hasAnyDiff || hasTextCaseDiff) {
                             out.parts = rawSegs.map(function (seg) {
                                 var segFs = seg.fontSize != null && seg.fontSize !== figma.mixed ? Number(seg.fontSize) || 0 : 0
                                 if (!segFs && typeof tn.getRangeFontSize === "function") {
@@ -286,6 +338,10 @@ function getTextSummaryAsync(tn) {
                                     fs: segFs,
                                     fw: segFw,
                                     ls: segLsEm,
+                                    textCase:
+                                        seg.textCase != null && seg.textCase !== figma.mixed
+                                            ? String(seg.textCase)
+                                            : nodeTextCaseStr,
                                 }
                             })
                         }
@@ -444,6 +500,11 @@ function buildTextVarsDecl(ts) {
     parts.push("--ap-ta:" + ta)
     if (clr) parts.push("--ap-clr:" + clr)
 
+    if (!ts.parts || !ts.parts.length) {
+        var tcf = figTextCaseToDeclFragment(ts.textCase)
+        if (tcf) parts.push(tcf)
+    }
+
     return parts.join(";")
 }
 
@@ -466,6 +527,7 @@ function buildTextVarsDeclDiff(tsD, tsM) {
             fw: ts.fw !== "" ? Number(ts.fw) || 400 : 400,
             ta: normTextAlign(ts.ta),
             clr: ts.clr || "",
+            tc: normalizeFigTextCaseKey(ts && ts.textCase),
         }
     }
     var d = normTs(tsD)
@@ -476,6 +538,11 @@ function buildTextVarsDeclDiff(tsD, tsM) {
     if (d.fw !== m.fw) parts.push("--ap-fw:" + m.fw)
     if (d.ta !== m.ta) parts.push("--ap-ta:" + m.ta)
     if (d.clr !== m.clr && m.clr) parts.push("--ap-clr:" + m.clr)
+    if (d.tc !== m.tc) {
+        var moCaseFrag = figTextCaseToDeclFragment(tsM && tsM.textCase)
+        if (moCaseFrag) parts.push(moCaseFrag)
+        else if (m.tc === "ORIGINAL") parts.push("text-transform:none;font-variant:normal")
+    }
     return parts.join(";")
 }
 
