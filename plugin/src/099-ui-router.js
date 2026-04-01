@@ -175,7 +175,6 @@ figma.ui.onmessage = function (msg) {
         /** UI 코드 탭(반영·수정 포함). 비어 있지 않으면 ZIP _cms.html에 항상 우선 사용 · 이미지만 피그마에서 ZIP 해상도로 재 export */
         var codeFromTab = msg.code != null && String(msg.code).trim() ? String(msg.code) : ""
 
-        _currentExportWidth = IMAGE_EXPORT_ZIP_WIDTH
         figma.ui.postMessage({type: "LOADING", value: true})
 
         // export 결과(파일/프리뷰/클립보드) 마무리 처리
@@ -190,7 +189,12 @@ figma.ui.onmessage = function (msg) {
         }
 
         // 1) PC dump (MO 루트 있으면 PC 코드 생성 시점에 MO characters와 줄바꿈 비교)
-        var zipDeskOpts = {phase: "desktop", fontHtmlFilterActive: fontHtmlFilterActiveZip, exportCountryCode: msg.exportCountryCode}
+        var zipDeskOpts = {
+            phase: "desktop",
+            fontHtmlFilterActive: fontHtmlFilterActiveZip,
+            exportCountryCode: msg.exportCountryCode,
+            zipAssetMode: true,
+        }
         if (hasMobile && rootMobile) {
             zipDeskOpts.mobileRoot = rootMobile
             zipDeskOpts.moBreakpoint = breakpoint
@@ -207,7 +211,7 @@ figma.ui.onmessage = function (msg) {
                         return dumpTreeAsync(rootMobile, projectName2, allowedFonts2, {
                             phase: "mobile",
                             imageSuffix: "_mo",
-                            exportWidth: Math.min(2400, Math.round(2 * breakpoint)),
+                            zipAssetMode: true,
                             fontHtmlFilterActive: fontHtmlFilterActiveZip,
                             pcRasterExtByStem: pcRasterExtByStemZip,
                             inheritAssetStores: payload.assetStoresSnapshot,

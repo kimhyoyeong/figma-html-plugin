@@ -4299,7 +4299,11 @@ function exportRasterWithoutTextSubtreeAsync(node, format, ctx) {
 
 function exportRasterAssetAsync(node, format, ctx) {
     if (!node) return Promise.resolve(null)
-    var w = _currentExportWidth
+    /** ZIP 산출물: 피그마 노드 실제(1×) 픽셀 크기 — WIDTH 제약 시 1200 등으로 강제 축소됨 */
+    var w =
+        ctx && ctx.cache && ctx.cache.imagePipeline && ctx.cache.imagePipeline.mode === "zip"
+            ? null
+            : _currentExportWidth
     // false: 노드 선택 박스(클립된 시각 영역) 기준. true면 자손·오버플로가 절대 바운딩까지 PNG에 포함됨.
     var exportBoundsOpts = { useAbsoluteBounds: false }
     function pack(dataUrl, fmtEff) {
@@ -7254,7 +7258,8 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         cache.pcRasterExtByStem = options.pcRasterExtByStem
     }
     ensureImagePipelineOnCache(cache)
-    cache.imagePipeline.mode = _currentExportWidth >= IMAGE_EXPORT_ZIP_WIDTH ? "zip" : "preview"
+    cache.imagePipeline.mode =
+        options.zipAssetMode === true || _currentExportWidth >= IMAGE_EXPORT_ZIP_WIDTH ? "zip" : "preview"
     cache.imagePipeline.variant = options.phase === "mobile" ? "mo" : "pc"
     if (options.inheritAssetStores) {
         var ias = options.inheritAssetStores
@@ -7671,7 +7676,6 @@ figma.ui.onmessage = function (msg) {
         /** UI 코드 탭(반영·수정 포함). 비어 있지 않으면 ZIP _cms.html에 항상 우선 사용 · 이미지만 피그마에서 ZIP 해상도로 재 export */
         var codeFromTab = msg.code != null && String(msg.code).trim() ? String(msg.code) : ""
 
-        _currentExportWidth = IMAGE_EXPORT_ZIP_WIDTH
         figma.ui.postMessage({type: "LOADING", value: true})
 
         // export 결과(파일/프리뷰/클립보드) 마무리 처리
@@ -7686,7 +7690,12 @@ figma.ui.onmessage = function (msg) {
         }
 
         // 1) PC dump (MO 루트 있으면 PC 코드 생성 시점에 MO characters와 줄바꿈 비교)
-        var zipDeskOpts = {phase: "desktop", fontHtmlFilterActive: fontHtmlFilterActiveZip, exportCountryCode: msg.exportCountryCode}
+        var zipDeskOpts = {
+            phase: "desktop",
+            fontHtmlFilterActive: fontHtmlFilterActiveZip,
+            exportCountryCode: msg.exportCountryCode,
+            zipAssetMode: true,
+        }
         if (hasMobile && rootMobile) {
             zipDeskOpts.mobileRoot = rootMobile
             zipDeskOpts.moBreakpoint = breakpoint
@@ -7703,7 +7712,7 @@ figma.ui.onmessage = function (msg) {
                         return dumpTreeAsync(rootMobile, projectName2, allowedFonts2, {
                             phase: "mobile",
                             imageSuffix: "_mo",
-                            exportWidth: Math.min(2400, Math.round(2 * breakpoint)),
+                            zipAssetMode: true,
                             fontHtmlFilterActive: fontHtmlFilterActiveZip,
                             pcRasterExtByStem: pcRasterExtByStemZip,
                             inheritAssetStores: payload.assetStoresSnapshot,

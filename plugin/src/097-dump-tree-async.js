@@ -41,7 +41,8 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         cache.pcRasterExtByStem = options.pcRasterExtByStem
     }
     ensureImagePipelineOnCache(cache)
-    cache.imagePipeline.mode = _currentExportWidth >= IMAGE_EXPORT_ZIP_WIDTH ? "zip" : "preview"
+    cache.imagePipeline.mode =
+        options.zipAssetMode === true || _currentExportWidth >= IMAGE_EXPORT_ZIP_WIDTH ? "zip" : "preview"
     cache.imagePipeline.variant = options.phase === "mobile" ? "mo" : "pc"
     if (options.inheritAssetStores) {
         var ias = options.inheritAssetStores
