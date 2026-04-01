@@ -3,7 +3,7 @@
  *
  * 구조 불일치 시 096이 `.pc-only .ap-section--NN` / `.mo-only .ap-section--NN` 지연 규칙 출력 — parseCodeIntoParts·injectBgOverridesForMo 가 래퍼+자손 선택자 인식.
  * buildMobileOverrides — 레이아웃 등은 인덱스 walk; 이미지 크기는 렌더순서(096)·슬롯·sourceNodeId 매칭
- * getSectionStructureMatch — 섹션별 구조 시그니처 일치 여부(하이브리드 경고용)
+ * getSectionStructureMatch — 섹션별 PC/MO 짝 구조 일치 여부(하이브리드 경고용, code-video·code-raster 슬롯은 하위 무시)
  * parseCodeIntoParts — 산출 HTML에서 base/section 스타일/article 분리
  * injectBgOverridesForMo — sectionStyles의 --bg-img를 MO용 _mo 경로로 @media에 병합
  * rewriteMoOnlyRasterBgUrls — .mo-only 규칙 안 배경 URL만 MO 파일명·확장자에 맞춤
@@ -543,17 +543,31 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
         return arr
     }
 
-    function nodeSig(n, depth) {
+    /**
+     * PC·MO 트리를 각각 해시(nodeSig)하면 MO에 code-video/code-raster 명이 없을 때만 하위 구조가 전부 시그니처에 남아 불일치가 난다.
+     * 같은 인덱스 자식끼리 짝을 지어 비교하고, 한쪽이라도 code-video·code-raster면 단일 슬롯으로 합쳐지므로 그 서브트리는 일치로 본다.
+     */
+    function pairedStructureMatch(dNode, mNode, depth) {
         depth = depth || 0
-        if (!n) return "null"
-        var t = n.type || "UNKNOWN"
-        var isCont = isContainer(n) ? "C" : "L"
-        // 너무 깊게 들어가면 비용 커지므로 3레벨까지만
-        if (!isContainer(n) || depth >= 3) return t + ":" + isCont
-        var kids = visibleChildren(n)
-        var parts = []
-        for (var i = 0; i < kids.length; i++) parts.push(nodeSig(kids[i], depth + 1))
-        return t + ":" + isCont + "[" + parts.join("|") + "]"
+        if (!dNode || !mNode) return !dNode && !mNode
+        if (!isVisible(dNode) || !isVisible(mNode)) return false
+        if (isVideoNode(dNode) || isVideoNode(mNode)) return true
+        if (isCodeRasterNode(dNode) || isCodeRasterNode(mNode)) return true
+        var dt = dNode.type || "UNKNOWN"
+        var mt = mNode.type || "UNKNOWN"
+        if (dt !== mt) return false
+        var dCont = isContainer(dNode)
+        var mCont = isContainer(mNode)
+        if (dCont !== mCont) return false
+        if (!dCont) return true
+        if (depth >= 3) return true
+        var dk = visibleChildren(dNode)
+        var mk = visibleChildren(mNode)
+        if (dk.length !== mk.length) return false
+        for (var ci = 0; ci < dk.length; ci++) {
+            if (!pairedStructureMatch(dk[ci], mk[ci], depth + 1)) return false
+        }
+        return true
     }
 
     var dSecs = getSectionNodes(desktopRoot)
@@ -574,9 +588,7 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
             match = false
             reason = !d ? "PC 섹션 없음" : "MO 섹션 없음"
         } else {
-            var ds = nodeSig(d, 0)
-            var ms = nodeSig(m, 0)
-            match = ds === ms
+            match = pairedStructureMatch(d, m, 0)
             if (!match) reason = "시그니처 불일치"
         }
 
