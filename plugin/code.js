@@ -1340,7 +1340,8 @@ function buildFlexDeclDiff(dLv, mLv, node, moAbsSelf) {
     var m = norm(mLv)
     var parts = []
 
-    parts.push("display:flex")
+    // PC base에 이미 buildFlexDecl 로 display:flex 가 있으면 @media 에 중복 출력하지 않음
+    if (!dLv) parts.push("display:flex")
 
     if (hasAbsoluteChild(node) && !moAbsSelf) {
         parts.push("position:relative")
