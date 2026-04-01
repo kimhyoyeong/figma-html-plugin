@@ -6,7 +6,7 @@
  * pad2, sectionClassPrefix — 섹션 번호 → "01" 형태 클래스 접두
  * stripApAiAuditBlock — AI 검수 HTML 주석 제거(ZIP용)
  * makeClassName, nodeUniqueClass, apSectionBem — 클래스 문자열 생성
- * isNodeName, isBtnNode, isVideoNode, isSlideNode, isCodeRasterNode — 레이어명 기반 특수 처리 판별
+ * isNodeName, isBtnNode, isVideoNode, isVideoNodeEffective, isSlideNode, isCodeRasterNode, isCodeRasterNodeEffective — 레이어명 기반 특수 처리 판별
  */
 // ----- 공통·포맷 (r2, 클래스, BEM) + Core 일부(레이어명 판별은 아래 isNodeName~) -----
 /** 숫자를 소수 둘째 자리까지 반올림 */
@@ -116,6 +116,15 @@ function isBtnNode(node) {
 function isVideoNode(node) {
     return isNodeName(node, "code-video")
 }
+/**
+ * PC/MO 짝 매칭 시 PC가 code-video이면 MO는 레이어명과 관계없이 비디오로 본다.
+ * cache.moVideoInheritIds: { [moNodeId]: true }
+ */
+function isVideoNodeEffective(node, cache) {
+    if (isVideoNode(node)) return true
+    if (!node || node.id == null || !cache || !cache.moVideoInheritIds) return false
+    return cache.moVideoInheritIds[String(node.id)] === true
+}
 /** 레이어 이름이 code-slide이면 Swiper 구조 */
 function isSlideNode(node) {
     return isNodeName(node, "code-slide")
@@ -123,5 +132,14 @@ function isSlideNode(node) {
 /** 레이어 이름이 code-raster이면 단일 래스터 이미지 export 강제(벡터·다중 자식 분할 등 일반 규칙보다 우선) */
 function isCodeRasterNode(node) {
     return isNodeName(node, "code-raster")
+}
+/**
+ * PC/MO 짝 매칭 시 PC가 code-raster이면 MO는 레이어명과 관계없이 동일 규칙으로 본다.
+ * cache.moRasterInheritIds: { [moNodeId]: true }
+ */
+function isCodeRasterNodeEffective(node, cache) {
+    if (isCodeRasterNode(node)) return true
+    if (!node || node.id == null || !cache || !cache.moRasterInheritIds) return false
+    return cache.moRasterInheritIds[String(node.id)] === true
 }
 

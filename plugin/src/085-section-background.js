@@ -39,7 +39,7 @@ function pipelineRasterBackgroundImageDeclAsync(node, useCssVarsForSection, cach
         if (!meta || !meta.dataUrl) return ""
         var path = cache
             ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl || "", secNo, {
-                  skipExport: isVideoNode(node),
+                  skipExport: isVideoNodeEffective(node, cache),
                   imageHash: getPrimaryImageFillHash(node),
                   reuseAssetKey: meta.reuseAssetKey || undefined,
               })
@@ -115,7 +115,7 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
         var fullBleedChild = null
         for (var i = 0; i < children.length; i++) {
             var ch = children[i]
-            if (!ch || !isVisible(ch) || !isImageCandidate(ch)) continue
+            if (!ch || !isVisible(ch) || !isImageCandidate(ch, cache)) continue
             if (isContainer(ch) && ch.children && ch.children.length > 0) continue
             var chBox = getAbs(ch)
             if (!chBox) continue
@@ -139,7 +139,7 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
             if (!meta || !meta.dataUrl) return { decl: decl, bgChildId: null }
             var path = cache
                 ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                      skipExport: isVideoNode(fullBleedChild),
+                      skipExport: isVideoNodeEffective(fullBleedChild, cache),
                       imageHash: getPrimaryImageFillHash(fullBleedChild),
                       reuseAssetKey: meta.reuseAssetKey || undefined,
                   })

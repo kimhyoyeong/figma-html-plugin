@@ -56,6 +56,12 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
     if (options.inheritedSlideAssetKeyBySlot) {
         cache.slideAssetKeyBySlot = Object.assign(Object.create(null), options.inheritedSlideAssetKeyBySlot)
     }
+    if (options.phase === "mobile" && options.pairedDesktopRoot) {
+        var _smMoPair = getSectionStructureMatch(options.pairedDesktopRoot, root)
+        var _misMoPair = _smMoPair && _smMoPair.mismatchSecs ? _smMoPair.mismatchSecs : []
+        cache.moVideoInheritIds = buildMoVideoInheritIdsMap(options.pairedDesktopRoot, root, _misMoPair)
+        cache.moRasterInheritIds = buildMoRasterInheritIdsMap(options.pairedDesktopRoot, root, _misMoPair)
+    }
 
     var rootBox = getAbs(root)
     var rootSummary = ["", "  ─── LAYER INSPECT ───", "  ROOT    " + oneLineBase(root)]

@@ -36,7 +36,7 @@ setTimeout(function () {
  * pad2, sectionClassPrefix — 섹션 번호 → "01" 형태 클래스 접두
  * stripApAiAuditBlock — AI 검수 HTML 주석 제거(ZIP용)
  * makeClassName, nodeUniqueClass, apSectionBem — 클래스 문자열 생성
- * isNodeName, isBtnNode, isVideoNode, isSlideNode, isCodeRasterNode — 레이어명 기반 특수 처리 판별
+ * isNodeName, isBtnNode, isVideoNode, isVideoNodeEffective, isSlideNode, isCodeRasterNode, isCodeRasterNodeEffective — 레이어명 기반 특수 처리 판별
  */
 // ----- 공통·포맷 (r2, 클래스, BEM) + Core 일부(레이어명 판별은 아래 isNodeName~) -----
 /** 숫자를 소수 둘째 자리까지 반올림 */
@@ -146,6 +146,15 @@ function isBtnNode(node) {
 function isVideoNode(node) {
     return isNodeName(node, "code-video")
 }
+/**
+ * PC/MO 짝 매칭 시 PC가 code-video이면 MO는 레이어명과 관계없이 비디오로 본다.
+ * cache.moVideoInheritIds: { [moNodeId]: true }
+ */
+function isVideoNodeEffective(node, cache) {
+    if (isVideoNode(node)) return true
+    if (!node || node.id == null || !cache || !cache.moVideoInheritIds) return false
+    return cache.moVideoInheritIds[String(node.id)] === true
+}
 /** 레이어 이름이 code-slide이면 Swiper 구조 */
 function isSlideNode(node) {
     return isNodeName(node, "code-slide")
@@ -153,6 +162,15 @@ function isSlideNode(node) {
 /** 레이어 이름이 code-raster이면 단일 래스터 이미지 export 강제(벡터·다중 자식 분할 등 일반 규칙보다 우선) */
 function isCodeRasterNode(node) {
     return isNodeName(node, "code-raster")
+}
+/**
+ * PC/MO 짝 매칭 시 PC가 code-raster이면 MO는 레이어명과 관계없이 동일 규칙으로 본다.
+ * cache.moRasterInheritIds: { [moNodeId]: true }
+ */
+function isCodeRasterNodeEffective(node, cache) {
+    if (isCodeRasterNode(node)) return true
+    if (!node || node.id == null || !cache || !cache.moRasterInheritIds) return false
+    return cache.moRasterInheritIds[String(node.id)] === true
 }
 
 
@@ -1706,66 +1724,72 @@ function isMaskImageRasterGroup(node) {
     if (!hasImageFillInSubtree(node)) return false
     return true
 }
-function subtreeHasVideo070(n) {
+function subtreeHasVideo070(n, cache) {
     if (!n || !isVisible(n)) return false
-    if (isVideoNode(n)) return true
+    if (isVideoNodeEffective(n, cache)) return true
     var kids = n.children
     if (!kids) return false
     for (var j = 0; j < kids.length; j++) {
-        if (subtreeHasVideo070(kids[j])) return true
+        if (subtreeHasVideo070(kids[j], cache)) return true
     }
     return false
 }
-function isImageCandidate(node) {
-    return !!(node && (hasImageFill(node) || isCompositeCandidate(node) || isCodeRasterNode(node) || isMaskImageRasterGroup(node)))
+function isImageCandidate(node, cache) {
+    return !!(
+        node &&
+        (hasImageFill(node) ||
+            isCompositeCandidate(node) ||
+            isCodeRasterNodeEffective(node, cache) ||
+            isMaskImageRasterGroup(node))
+    )
 }
 /** IMAGE fill 부모 위에 얹는 콘텐츠(TEXT·비디오·code-raster·벡터-only). 클립 KV+로고도 여기서 걸림 */
-function subtreeHasVectorOrTextOverlay(node) {
+function subtreeHasVectorOrTextOverlay(node, cache) {
     if (!node || !isContainer(node) || !node.children) return false
     for (var i = 0; i < node.children.length; i++) {
-        if (subtreeOverlayWalk070(node.children[i], 0)) return true
+        if (subtreeOverlayWalk070(node.children[i], 0, cache)) return true
     }
     return false
 }
-function subtreeOverlayWalk070(n, depth) {
+function subtreeOverlayWalk070(n, depth, cache) {
     if (!n || !isVisible(n) || depth > 32) return false
     if (n.type === "TEXT") return true
-    if (isVideoNode(n)) return true
-    if (isCodeRasterNode(n)) return true
+    if (isVideoNodeEffective(n, cache)) return true
+    if (isCodeRasterNodeEffective(n, cache)) return true
     if (isVectorOnlyTree(n)) return true
     if (isContainer(n) && n.children) {
         for (var j = 0; j < n.children.length; j++) {
-            if (subtreeOverlayWalk070(n.children[j], depth + 1)) return true
+            if (subtreeOverlayWalk070(n.children[j], depth + 1, cache)) return true
         }
     }
     return false
 }
-function shouldExportAsSingleRasterImage(node) {
+function shouldExportAsSingleRasterImage(node, cache) {
     if (!node) return false
-    if (isCodeRasterNode(node)) return true
-    if (isMaskImageRasterGroup(node)) return !hasTextInSubtree(node) && !subtreeHasVideo070(node)
-    if (!isImageCandidate(node)) return false
+    if (isCodeRasterNodeEffective(node, cache)) return true
+    if (isMaskImageRasterGroup(node)) return !hasTextInSubtree(node) && !subtreeHasVideo070(node, cache)
+    if (!isImageCandidate(node, cache)) return false
     if (isContainer(node) && hasTextInSubtree(node)) return false
     // IMAGE fill + 자식: 전체 exportAsync 시 배경+오버레이가 한 PNG. 무클립이거나(항상) 클립이어도 벡터/텍스트 자식이 있으면 분리(KV+로고).
     if (isContainer(node) && hasImageFill(node) && hasVisibleChildren(node)) {
-        if (!isCompositeCandidate(node) || subtreeHasVectorOrTextOverlay(node)) return false
+        if (!isCompositeCandidate(node) || subtreeHasVectorOrTextOverlay(node, cache)) return false
     }
     if (isContainer(node) && shouldCompositeRasterGroup(node)) return true
-    if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node) && !isMaskImageRasterGroup(node))
+    if (isContainer(node) && hasMultipleImageLikeChildren(node, cache) && !isCompositeCandidate(node) && !isMaskImageRasterGroup(node))
         return false
     // 클립 프레임(clipsContent): 겹친 래스터 2장도 부모 한 번 exportAsync로 합성 가능. 무클립 2장은 위 분기에서 이미 분리.
     if (isContainer(node) && countDirectRasterImageChildren(node) >= 2 && !isCompositeCandidate(node)) return false
     return true
 }
-function nodeWillRenderAsApImageFigure(node) {
+function nodeWillRenderAsApImageFigure(node, cache) {
     if (!node || node.type === "TEXT") return false
-    if (isVideoNode(node)) return false
-    if (isCodeRasterNode(node)) return true
+    if (isVideoNodeEffective(node, cache)) return false
+    if (isCodeRasterNodeEffective(node, cache)) return true
     if (isVectorOnlyTree(node)) {
         return !isLineLikeNode(node) && node.type !== "ELLIPSE"
     }
-    if (!isImageCandidate(node)) return false
-    return shouldExportAsSingleRasterImage(node)
+    if (!isImageCandidate(node, cache)) return false
+    return shouldExportAsSingleRasterImage(node, cache)
 }
 function hasVisibleFillWithOpacityLessThanOne(node) {
     try {
@@ -1778,13 +1802,14 @@ function hasVisibleFillWithOpacityLessThanOne(node) {
     } catch (e) {}
     return false
 }
-function hasMultipleImageLikeChildren(node) {
+function hasMultipleImageLikeChildren(node, cache) {
     if (!node || !isContainer(node) || !node.children) return false
     var list = []
     for (var i = 0; i < node.children.length; i++) {
         var c = node.children[i]
         if (!c || !isVisible(c)) continue
-        var imgLike = isImageCandidate(c) || hasImageFill(c) || (isVectorOnlyTree(c) && !isLineLikeNode(c) && c.type !== "ELLIPSE")
+        var imgLike =
+            isImageCandidate(c, cache) || hasImageFill(c) || (isVectorOnlyTree(c) && !isLineLikeNode(c) && c.type !== "ELLIPSE")
         if (!imgLike) return false
         list.push(c)
     }
@@ -2653,14 +2678,14 @@ function getApSectionImageSlotKeyFromSemantics(semArr) {
 }
 
 /** MO 트리: 슬롯·sourceNodeId·id 로 이미지 노드 조회 (095 PC/MO size diff) */
-function collectMoImageLookupMaps(moSec, moSem) {
+function collectMoImageLookupMaps(moSec, moSem, moInheritCache) {
     var bySlot = {}
     var bySourcePcId = {}
     var byId = {}
     if (!moSec || !moSem) return { bySlot: bySlot, bySourcePcId: bySourcePcId, byId: byId }
     function walk(n) {
         if (!n || !isVisible(n)) return
-        var isImg = (isImageCandidate(n) || hasImageFill(n) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE"))
+        var isImg = (isImageCandidate(n, moInheritCache) || hasImageFill(n) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE"))
         if (n.id && isImg) {
             var sid = String(n.id)
             var sem = moSem[sid] || []
@@ -2842,11 +2867,11 @@ function sanitizeGeoRoleForBem(role) {
  * walkStructure 에서 depth 기반 container/content/… 를 줄 FRAME 인지.
  * 단일 이미지·이미지 fill 위주 프레임 등은 leaf 가 tagImageNode 로 image 가 되므로 여기서 구조 역할을 주지 않음.
  */
-function isSemanticWrapperFrame(n) {
+function isSemanticWrapperFrame(n, inheritCache) {
     if (!n || n.type !== "FRAME" || !isContainer(n)) return false
     if (hasTextInSubtree(n)) return true
-    if (hasMultipleImageLikeChildren(n) && !isCompositeCandidate(n)) return false
-    if (isImageCandidate(n)) return false
+    if (hasMultipleImageLikeChildren(n, inheritCache) && !isCompositeCandidate(n)) return false
+    if (isImageCandidate(n, inheritCache)) return false
     return true
 }
 
@@ -2854,10 +2879,17 @@ function isSemanticWrapperFrame(n) {
  * 섹션 트리 기준 시맨틱 보조 클래스 (id → 클래스 배열).
  * geoHints: AI 검수 GEO.structure [{ text, role }] — 본문 텍스트 매칭 시 ap-section__* 우선 반영.
  * bgChildId: 섹션 배경으로만 승격된 직계 이미지 — HTML/CSS에 해당 노드가 없으므로 시맨틱·중복 접미사·이미지 번호에서 제외.
+ * moVideoInheritIds / moRasterInheritIds: PC와 구조 짝인 MO 노드 id → true (095·MO 덤프와 동일).
  */
-function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
+function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId, moVideoInheritIds, moRasterInheritIds) {
     if (geoHints != null && !Array.isArray(geoHints)) geoHints = null
     if (geoHints && geoHints.length > 64) geoHints = geoHints.slice(0, 64)
+    var moInheritCache = null
+    if (moVideoInheritIds || moRasterInheritIds) {
+        moInheritCache = {}
+        if (moVideoInheritIds) moInheritCache.moVideoInheritIds = moVideoInheritIds
+        if (moRasterInheritIds) moInheritCache.moRasterInheritIds = moRasterInheritIds
+    }
     var map = {}
     function add(nid, cls) {
         if (nid == null) return
@@ -2869,7 +2901,7 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
 
     function walkStructure(n, depthFromSection) {
         if (!n || !isVisible(n)) return
-        if (n.id && isSemanticWrapperFrame(n)) {
+        if (n.id && isSemanticWrapperFrame(n, moInheritCache)) {
             var role = AP_SECTION_STRUCTURE_ROLES[depthFromSection - 1] || "part"
             add(n.id, apSectionBem(role))
         }
@@ -2980,8 +3012,8 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
     /** walkStructure 가 먼지 부여한 content 등과 충돌하지 않게: .ap-image 로 나가는 노드는 시맨틱을 image 하나로만 둠 */
     function tagImageNode(n) {
         if (!n || !n.id) return
-        /** 이름이 code-video인 레이어는 render에서 플레이스홀더로 나감 — IMAGE fill 있어도 image 시맨틱만 주면 apply가 image를 지운 뒤 빈 map이 됨 */
-        if (isVideoNode(n)) {
+        /** code-video 또는 PC 짝 비디오(MO) — render에서 플레이스홀더로 나감 */
+        if (isVideoNodeEffective(n, moInheritCache)) {
             map[String(n.id)] = [apSectionBem("video")]
             return
         }
@@ -2989,21 +3021,21 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
     }
     function walkImg(n) {
         if (!n || !isVisible(n)) return
-        if (isContainer(n) && hasTextInSubtree(n) && !isCodeRasterNode(n)) {
+        if (isContainer(n) && hasTextInSubtree(n) && !isCodeRasterNodeEffective(n, moInheritCache)) {
             for (var k = 0; k < (n.children || []).length; k++) walkImg(n.children[k])
             return
         }
-        if (isContainer(n) && isImageCandidate(n)) {
+        if (isContainer(n) && isImageCandidate(n, moInheritCache)) {
             if (
-                hasMultipleImageLikeChildren(n) &&
+                hasMultipleImageLikeChildren(n, moInheritCache) &&
                 !isCompositeCandidate(n) &&
-                !isCodeRasterNode(n) &&
+                !isCodeRasterNodeEffective(n, moInheritCache) &&
                 !isMaskImageRasterGroup(n)
             ) {
                 for (var k2 = 0; k2 < (n.children || []).length; k2++) walkImg(n.children[k2])
                 return
             }
-            if (hasImageFill(n) && hasVisibleChildren(n) && (!isCompositeCandidate(n) || subtreeHasVectorOrTextOverlay(n))) {
+            if (hasImageFill(n) && hasVisibleChildren(n) && (!isCompositeCandidate(n) || subtreeHasVectorOrTextOverlay(n, moInheritCache))) {
                 for (var kBg = 0; kBg < (n.children || []).length; kBg++) walkImg(n.children[kBg])
                 return
             }
@@ -3012,7 +3044,7 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
         }
         if (
             n.id &&
-            (isImageCandidate(n) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE")) &&
+            (isImageCandidate(n, moInheritCache) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE")) &&
             n.type !== "TEXT"
         ) {
             tagImageNode(n)
@@ -3024,11 +3056,11 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
     function walkFillMissing(n) {
         if (!n || !isVisible(n)) return
         if (n.id && !map[String(n.id)]) {
-            if (isVideoNode(n)) add(n.id, apSectionBem("video"))
+            if (isVideoNodeEffective(n, moInheritCache)) add(n.id, apSectionBem("video"))
             else if (isLineLikeNode(n)) add(n.id, apSectionBem("line"))
             else if (n.type === "ELLIPSE") add(n.id, apSectionBem("ellipse"))
-            else if (nodeWillRenderAsApImageFigure(n)) tagImageNode(n)
-            else if (isImageCandidate(n) && !isContainer(n)) tagImageNode(n)
+            else if (nodeWillRenderAsApImageFigure(n, moInheritCache)) tagImageNode(n)
+            else if (isImageCandidate(n, moInheritCache) && !isContainer(n)) tagImageNode(n)
             else add(n.id, apSectionBem("layer"))
         }
         if (isContainer(n)) for (var wf = 0; wf < (n.children || []).length; wf++) walkFillMissing(n.children[wf])
@@ -4218,7 +4250,7 @@ function decideImageKind(node, ctx) {
             return fmt === "PNG" ? "raster-png" : "raster-jpg"
         })
     }
-    if (isCodeRasterNode(node)) return Promise.resolve("composite-raster")
+    if (isCodeRasterNodeEffective(node, cache)) return Promise.resolve("composite-raster")
     if (ctx.sectionBackgroundImageFillOnly && hasImageFill(node)) {
         return resolveRasterFormatOnceAsync(node, ctx).then(function (fmt) {
             return fmt === "PNG" ? "raster-png" : "raster-jpg"
@@ -4226,7 +4258,7 @@ function decideImageKind(node, ctx) {
     }
     if (isVectorOnlyTree(node)) return Promise.resolve("svg")
     if (isContainer(node) && shouldCompositeRasterGroup(node)) return Promise.resolve("composite-raster")
-    if (!shouldExportAsSingleRasterImage(node)) return Promise.resolve("skip")
+    if (!shouldExportAsSingleRasterImage(node, cache)) return Promise.resolve("skip")
     return resolveRasterFormatOnceAsync(node, ctx).then(function (fmt) {
         return fmt === "PNG" ? "raster-png" : "raster-jpg"
     })
@@ -4608,21 +4640,21 @@ function collectImageFigureNodeIdsRenderNodeAsync(node, parent, cache, secNo, ro
         })
     }
 
-    if (isVideoNode(node)) return Promise.resolve([])
+    if (isVideoNodeEffective(node, cache)) return Promise.resolve([])
 
     if (isVectorOnlyTree(node)) {
-        if (isCodeRasterNode(node)) return node.id != null ? Promise.resolve([String(node.id)]) : Promise.resolve([])
+        if (isCodeRasterNodeEffective(node, cache)) return node.id != null ? Promise.resolve([String(node.id)]) : Promise.resolve([])
         if (isLineLikeNode(node)) return Promise.resolve([])
         if (node.type === "ELLIPSE") return Promise.resolve([])
         return node.id != null ? Promise.resolve([String(node.id)]) : Promise.resolve([])
     }
 
-    if (shouldExportAsSingleRasterImage(node)) {
+    if (shouldExportAsSingleRasterImage(node, cache)) {
         if (
             isContainer(node) &&
-            hasMultipleImageLikeChildren(node) &&
+            hasMultipleImageLikeChildren(node, cache) &&
             !isCompositeCandidate(node) &&
-            !isCodeRasterNode(node) &&
+            !isCodeRasterNodeEffective(node, cache) &&
             !isMaskImageRasterGroup(node)
         ) {
             var childrenImgGrp = node.children || []
@@ -4681,7 +4713,7 @@ function collectImageFigureNodeIdsFrameChildrenAsync(node, parent, cache, secNo,
             var isChContainer = isContainer(ch)
             return Promise.all([
                 buildBackgroundDeclAsync(ch, false, cache, secNo, {
-                    skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch),
+                    skipImageFill: isImageCandidate(ch, cache) || isVectorOnlyTree(ch),
                     skipSolidFill: isVectorOnlyTree(ch),
                 }),
                 !chAbs ? Promise.resolve("") : Promise.resolve(buildAbsDecl(ch, node) || ""),
@@ -4763,7 +4795,7 @@ function collectImageFigureNodeIdsSectionChildAsync(ch, sectionNode, bg, cache, 
     }
     return Promise.all([
         buildBackgroundDeclAsync(ch, false, cache, secNo, {
-            skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch),
+            skipImageFill: isImageCandidate(ch, cache) || isVectorOnlyTree(ch),
             skipSolidFill: isVectorOnlyTree(ch),
         }),
         isAbsoluteLike(ch, sectionNode) ? Promise.resolve(buildAbsDecl(ch, sectionNode) || "") : Promise.resolve(""),
@@ -4861,7 +4893,7 @@ function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotInde
     return pipelineEnsureImageAsync(node, imgCtx).then(function (meta) {
         if (!meta) return
         if (meta.kind === "pc-shared-slide" && meta.dataUrl && meta.assetKey) setCachedAsset(cache, meta.assetKey, meta.dataUrl)
-        var pathOpts = { skipExport: isVideoNode(node), imageHash: getPrimaryImageFillHash(node) }
+        var pathOpts = { skipExport: isVideoNodeEffective(node, cache), imageHash: getPrimaryImageFillHash(node) }
         if (meta.reuseAssetKey) pathOpts.reuseAssetKey = meta.reuseAssetKey
         if (cache.usePcMoImageFilenameVariants && !cache.imageSuffix && slideData && imgCtx.insideSwiperSlide) {
             pathOpts.omitPcMoVariant = true
@@ -4933,7 +4965,7 @@ function pipelineRasterBackgroundImageDeclAsync(node, useCssVarsForSection, cach
         if (!meta || !meta.dataUrl) return ""
         var path = cache
             ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl || "", secNo, {
-                  skipExport: isVideoNode(node),
+                  skipExport: isVideoNodeEffective(node, cache),
                   imageHash: getPrimaryImageFillHash(node),
                   reuseAssetKey: meta.reuseAssetKey || undefined,
               })
@@ -5009,7 +5041,7 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
         var fullBleedChild = null
         for (var i = 0; i < children.length; i++) {
             var ch = children[i]
-            if (!ch || !isVisible(ch) || !isImageCandidate(ch)) continue
+            if (!ch || !isVisible(ch) || !isImageCandidate(ch, cache)) continue
             if (isContainer(ch) && ch.children && ch.children.length > 0) continue
             var chBox = getAbs(ch)
             if (!chBox) continue
@@ -5033,7 +5065,7 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
             if (!meta || !meta.dataUrl) return { decl: decl, bgChildId: null }
             var path = cache
                 ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                      skipExport: isVideoNode(fullBleedChild),
+                      skipExport: isVideoNodeEffective(fullBleedChild, cache),
                       imageHash: getPrimaryImageFillHash(fullBleedChild),
                       reuseAssetKey: meta.reuseAssetKey || undefined,
                   })
@@ -5316,6 +5348,112 @@ function getSectionNodes(root) {
  * combinePcMoAsBreakpoint — 위 요소 합쳐 최종 HTML 문자열
  */
 // ----- 6. Section Utils (배경은 buildSectionBackgroundAsync) -----
+/** 구조 일치 섹션만: PC가 code-video인 슬롯의 MO 노드 id → true (MO 레이어명 불일치 허용) */
+function buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
+    var out = Object.create(null)
+    if (!desktopRoot || !mobileRoot || !isContainer(desktopRoot) || !isContainer(mobileRoot)) return out
+    var skip = Object.create(null)
+    if (Array.isArray(mismatchSecs)) {
+        for (var sx = 0; sx < mismatchSecs.length; sx++) skip[String(mismatchSecs[sx])] = true
+    }
+    var dSecs = getSectionNodes(desktopRoot)
+    var mSecs = getSectionNodes(mobileRoot)
+    function walkInherit(dNode, mNode) {
+        var dKids = (dNode.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        var mKids = (mNode.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        for (var i = 0; i < dKids.length && i < mKids.length; i++) {
+            var d = dKids[i]
+            var m = mKids[i]
+            if (d.type !== m.type) continue
+            if (!d.id) {
+                if (d.type === "FRAME" && isContainer(d)) walkInherit(d, m)
+                continue
+            }
+            if (isVideoNode(d) && m.id) out[String(m.id)] = true
+            if (d.type === "FRAME" && isContainer(d)) walkInherit(d, m)
+        }
+    }
+    for (var s = 0; s < dSecs.length && s < mSecs.length; s++) {
+        var secClass = sectionClassPrefix(s + 1)
+        if (skip[secClass]) continue
+        var dSec = dSecs[s]
+        var mSec = mSecs[s]
+        if (!dSec || !mSec || dSec.type !== mSec.type) continue
+        walkInherit(dSec, mSec)
+    }
+    return out
+}
+/** 구조 일치 섹션만: PC가 code-raster인 슬롯의 MO 노드 id → true */
+function buildMoRasterInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
+    var out = Object.create(null)
+    if (!desktopRoot || !mobileRoot || !isContainer(desktopRoot) || !isContainer(mobileRoot)) return out
+    var skip = Object.create(null)
+    if (Array.isArray(mismatchSecs)) {
+        for (var srx = 0; srx < mismatchSecs.length; srx++) skip[String(mismatchSecs[srx])] = true
+    }
+    var dSecsR = getSectionNodes(desktopRoot)
+    var mSecsR = getSectionNodes(mobileRoot)
+    function walkRasterInherit(dNode, mNode) {
+        var dKids = (dNode.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        var mKids = (mNode.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        for (var ri = 0; ri < dKids.length && ri < mKids.length; ri++) {
+            var d = dKids[ri]
+            var m = mKids[ri]
+            if (d.type !== m.type) continue
+            if (!d.id) {
+                if (d.type === "FRAME" && isContainer(d)) walkRasterInherit(d, m)
+                continue
+            }
+            if (isCodeRasterNode(d) && m.id) out[String(m.id)] = true
+            if (d.type === "FRAME" && isContainer(d)) walkRasterInherit(d, m)
+        }
+    }
+    for (var sr = 0; sr < dSecsR.length && sr < mSecsR.length; sr++) {
+        var secCl = sectionClassPrefix(sr + 1)
+        if (skip[secCl]) continue
+        var dS = dSecsR[sr]
+        var mS = mSecsR[sr]
+        if (!dS || !mS || dS.type !== mS.type) continue
+        walkRasterInherit(dS, mS)
+    }
+    return out
+}
+/** MO 트리에서 PC 레이어 이름(예: code-video)으로 비디오 짝 조회 — 이름 매칭 fallback이 MO 전용 이름이어도 동작 */
+function collectMoVideoNodesByPcLayerName(dSec, mSec) {
+    var map = collectVideoNodesByName(mSec)
+    function walk(dNode, mNode) {
+        var dKids = (dNode.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        var mKids = (mNode.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        for (var i = 0; i < dKids.length && i < mKids.length; i++) {
+            var d = dKids[i]
+            var m = mKids[i]
+            if (d.type !== m.type) continue
+            if (!d.id) {
+                if (d.type === "FRAME" && isContainer(d)) walk(d, m)
+                continue
+            }
+            if (isVideoNode(d) && m.id) {
+                var key = String(d.name || "").trim()
+                if (key) map[key] = m
+            }
+            if (d.type === "FRAME" && isContainer(d)) walk(d, m)
+        }
+    }
+    walk(dSec, mSec)
+    return map
+}
 /** PC HTML 기준 MO 미디어쿼리 오버라이드 (프레임/텍스트는 인덱스 walk, 이미지는 렌더 순서 반영 시맨틱) */
 function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
     options = options || {}
@@ -5329,6 +5467,14 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
     var skipStructSecs = options && options.skipStructureMismatchSecs ? options.skipStructureMismatchSecs : []
     var skipStructSet = Object.create(null)
     for (var si = 0; si < skipStructSecs.length; si++) skipStructSet[String(skipStructSecs[si])] = true
+    var moVideoInheritIds = buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, skipStructSecs)
+    var moRasterInheritIds = buildMoRasterInheritIdsMap(desktopRoot, mobileRoot, skipStructSecs)
+    var moInheritLookupCache = null
+    if (moVideoInheritIds || moRasterInheritIds) {
+        moInheritLookupCache = {}
+        if (moVideoInheritIds) moInheritLookupCache.moVideoInheritIds = moVideoInheritIds
+        if (moRasterInheritIds) moInheritLookupCache.moRasterInheritIds = moRasterInheritIds
+    }
     /** @media 블록 안: 동일 셀렉터 선언을 한 규칙으로 합침 (diff·파일 길이·리뷰용) */
     var moMediaRuleList = []
     function pushMoMoRule(sel, decl) {
@@ -5612,7 +5758,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         var secStrokeDiff = buildStrokeDeclDiff(dSec, mSec)
         if (secStrokeDiff) pushMoMoRule(".ap-section--" + secClass, secStrokeDiff)
         var secImageByName = collectImageNodesByName(mSec)
-        var secVideoByName = collectVideoNodesByName(mSec)
+        var secVideoByName = skipStructSet[secClass] ? collectVideoNodesByName(mSec) : collectMoVideoNodesByPcLayerName(dSec, mSec)
         var secTextByName = collectTextNodesByName(mSec)
         var sectionVideoOverrideDone = {}
         var sectionTextOverrideDone = {}
@@ -5633,7 +5779,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         var pcOrder = options.pcSectionImageRenderOrderIds && options.pcSectionImageRenderOrderIds[s]
         if (pcOrder && pcOrder.length) applyApSectionImageRenderOrderFromIds(deskSem, pcOrder)
         var deskMoOpts = { sectionSemantics: deskSem }
-        var mSem = buildSectionSemanticClasses(mSec, (options && options.geoStructure) || null)
+        var mSem = buildSectionSemanticClasses(mSec, (options && options.geoStructure) || null, null, moVideoInheritIds, moRasterInheritIds)
         promoteRasterTextNodesToImageSemantics(mSec, mSem, allowedMo, !fontMoActive)
         demoteNestedDuplicateSectionRoles(mSec, mSem)
         disambiguateSectionSemantics(mSec, mSem)
@@ -5641,7 +5787,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         disambiguateSectionSemantics(mSec, mSem)
         var moOrder = options.moSectionImageRenderOrderIds && options.moSectionImageRenderOrderIds[s]
         if (moOrder && moOrder.length) applyApSectionImageRenderOrderFromIds(mSem, moOrder)
-        var moLookup = collectMoImageLookupMaps(mSec, mSem)
+        var moLookup = collectMoImageLookupMaps(mSec, mSem, moInheritLookupCache)
         walkPair(dSec, mSec, mSec, secClass, secImageByName, secTextByName, sectionTextOverrideDone, deskSem, secVideoByName, sectionVideoOverrideDone)
         pushImageMoSizeOverridesForSection(dSec, secClass, deskMoOpts, deskSem, moLookup, secImageByName)
         // code-video: 인덱스 매칭이 어긋난 경우 레이어 name 기준으로 MO 비디오 aspect-ratio 등
@@ -5655,7 +5801,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             ) {
                 var key = String(dNode.name || "").trim()
                 var mVid = key !== "" && vidByName ? vidByName[key] : null
-                if (mVid && isVideoNode(mVid)) {
+                if (mVid) {
                     var declV = getVideoSizeDeclDiff(dNode, mVid)
                     if (declV)
                         pushMoMoRule(
@@ -6356,7 +6502,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         var path =
                             cache &&
                             getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                                skipExport: isVideoNode(node),
+                                skipExport: isVideoNodeEffective(node, cache),
                                 imageHash: getPrimaryImageFillHash(node),
                                 reuseAssetKey: meta.reuseAssetKey || undefined,
                             })
@@ -6426,7 +6572,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var path =
                 cache &&
                 getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                    skipExport: isVideoNode(node),
+                    skipExport: isVideoNodeEffective(node, cache),
                     imageHash: getPrimaryImageFillHash(node),
                     reuseAssetKey: meta.reuseAssetKey || undefined,
                 })
@@ -6448,9 +6594,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var id = node.id != null ? String(node.id) : ""
         if (
             isContainer(node) &&
-            hasMultipleImageLikeChildren(node) &&
+            hasMultipleImageLikeChildren(node, cache) &&
             !isCompositeCandidate(node) &&
-            !isCodeRasterNode(node) &&
+            !isCodeRasterNodeEffective(node, cache) &&
             !isMaskImageRasterGroup(node)
         ) {
             var absImgGrp = isAbsoluteLike(node, parent)
@@ -6510,7 +6656,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var path =
                 cache &&
                 getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                    skipExport: isVideoNode(node),
+                    skipExport: isVideoNodeEffective(node, cache),
                     imageHash: getPrimaryImageFillHash(node),
                     reuseAssetKey: meta.reuseAssetKey || undefined,
                 })
@@ -6672,7 +6818,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 var isChContainer = isContainer(ch)
 
                 return Promise.all([
-                    buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}),
+                    buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch, cache) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}),
                     (function () {
                         if (!chAbs) return Promise.resolve("")
                         var absDecl2 = buildAbsDecl(ch, node)
@@ -6685,7 +6831,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     })(),
                 ]).then(function (res) {
                     var itemDeclParts = [res[2], res[0]].filter(Boolean)
-                    if (res[1] && !isImageCandidate(ch)) itemDeclParts.push(res[1])
+                    if (res[1] && !isImageCandidate(ch, cache)) itemDeclParts.push(res[1])
                     var strokeDeclCh = buildStrokeDecl(ch)
                     if (strokeDeclCh) itemDeclParts.push(strokeDeclCh)
                     var fillWidthCh = getFillFlexStartWidthDecl(ch, node)
@@ -6828,7 +6974,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         }
 
         // 레이어 이름이 code-video면 그룹/프레임 여부와 관계없이 비디오 플레이스홀더로 출력
-        if (isVideoNode(node)) {
+        if (isVideoNodeEffective(node, cache)) {
             var videoAbs = isAbsoluteLike(node, parent)
             var videoParentWraps = parent && parent.type === "FRAME" && isContainer(parent)
             var videoNeedWrapper = videoAbs && (!videoParentWraps || (node.type === "FRAME" && isContainer(node)))
@@ -6845,12 +6991,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         }
 
         // VECTOR — LINE/line/ELLIPSE는 CSS로 그리기, 나머지는 SVG export (code-raster는 단일 래스터로 아래 분기)
-        if (isVectorOnlyTree(node) && !isCodeRasterNode(node)) {
+        if (isVectorOnlyTree(node) && !isCodeRasterNodeEffective(node, cache)) {
             return renderVectorNodeAsync(node, parent, secNo, secClass, depth, opts)
         }
 
         // IMAGE (단일 이미지 또는 컴포지트 → 하나의 이미지로 export) — 규칙: shouldExportAsSingleRasterImage
-        if (shouldExportAsSingleRasterImage(node)) {
+        if (shouldExportAsSingleRasterImage(node, cache)) {
             return renderImageNodeAsync(node, parent, secNo, secClass, depth, opts)
         }
 
@@ -6895,9 +7041,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         if (itemId) ctx.exportedNodeIds[itemId] = true
         var leafSel = getLeafSelectorForNode(ch, opts)
         var isChContainer = isContainer(ch)
-        return Promise.all([buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}), chAbs ? Promise.resolve(buildAbsDecl(ch, sectionNode) || "") : Promise.resolve("")]).then(function (res) {
+        return Promise.all([buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch, cache) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}), chAbs ? Promise.resolve(buildAbsDecl(ch, sectionNode) || "") : Promise.resolve("")]).then(function (res) {
             var itemDeclParts = [res[0]].filter(Boolean)
-            if (res[1] && !isImageCandidate(ch)) itemDeclParts.push(res[1])
+            if (res[1] && !isImageCandidate(ch, cache)) itemDeclParts.push(res[1])
             var strokeDeclVirtual = buildStrokeDecl(ch)
             if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)
             var fillWidthVirtual = getFillFlexStartWidthDecl(ch, sectionNode)
@@ -6920,7 +7066,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
      */
     function runSectionPipeline(sectionNode, bg, visWrap, secNo, secClass, slideData, pairedDesktopSection) {
         var slideSectionMeta = null
-        var sectionSemantics = buildSectionSemanticClasses(sectionNode, geoStructure, bg.bgChildId)
+        var sectionSemantics = buildSectionSemanticClasses(
+            sectionNode,
+            geoStructure,
+            bg.bgChildId,
+            cache.moVideoInheritIds || null,
+            cache.moRasterInheritIds || null
+        )
         promoteRasterTextNodesToImageSemantics(sectionNode, sectionSemantics, allowedFontsForHtml, fontHtmlUnrestricted)
         demoteNestedDuplicateSectionRoles(sectionNode, sectionSemantics)
         disambiguateSectionSemantics(sectionNode, sectionSemantics)
@@ -7072,7 +7224,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         var isChContainer = isContainer(ch)
 
                         return Promise.all([
-                            buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}),
+                            buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch, cache) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}),
                             (function () {
                                 if (!chAbs) return Promise.resolve("")
                                 var absDecl = buildAbsDecl(ch, sectionNode)
@@ -7080,7 +7232,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                             })(),
                         ]).then(function (res) {
                             var itemDeclParts = [res[0]].filter(Boolean)
-                            if (res[1] && !isImageCandidate(ch)) itemDeclParts.push(res[1])
+                            if (res[1] && !isImageCandidate(ch, cache)) itemDeclParts.push(res[1])
                             var strokeDeclVirtual = buildStrokeDecl(ch)
                             if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)
                             var fillWidthVirtual = getFillFlexStartWidthDecl(ch, sectionNode)
@@ -7351,6 +7503,12 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
     }
     if (options.inheritedSlideAssetKeyBySlot) {
         cache.slideAssetKeyBySlot = Object.assign(Object.create(null), options.inheritedSlideAssetKeyBySlot)
+    }
+    if (options.phase === "mobile" && options.pairedDesktopRoot) {
+        var _smMoPair = getSectionStructureMatch(options.pairedDesktopRoot, root)
+        var _misMoPair = _smMoPair && _smMoPair.mismatchSecs ? _smMoPair.mismatchSecs : []
+        cache.moVideoInheritIds = buildMoVideoInheritIdsMap(options.pairedDesktopRoot, root, _misMoPair)
+        cache.moRasterInheritIds = buildMoRasterInheritIdsMap(options.pairedDesktopRoot, root, _misMoPair)
     }
 
     var rootBox = getAbs(root)
@@ -7685,6 +7843,7 @@ figma.ui.onmessage = function (msg) {
                         inheritAssetStores: payload.assetStoresSnapshot,
                         inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
                         exportCountryCode: msg.exportCountryCode,
+                        pairedDesktopRoot: rootDesktop,
                     }).then(function (moPayload) {
                         var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                         // 미리보기는 항상 단일 iframe + PC/MO 토글(@media·pc-only/mo-only 보정). 이중 탭은 사용하지 않음.
@@ -7797,6 +7956,7 @@ figma.ui.onmessage = function (msg) {
                             inheritAssetStores: payload.assetStoresSnapshot,
                             inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
                             exportCountryCode: msg.exportCountryCode,
+                            pairedDesktopRoot: rootDesktop,
                         }).then(function (moPayload) {
                             var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                             // 구조 불일치 섹션: HTML·CSS는 096 래퍼+`.pc-only .ap-section--NN` — ZIP 경로도 동일 파이프라인

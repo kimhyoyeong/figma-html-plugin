@@ -316,7 +316,7 @@ function decideImageKind(node, ctx) {
             return fmt === "PNG" ? "raster-png" : "raster-jpg"
         })
     }
-    if (isCodeRasterNode(node)) return Promise.resolve("composite-raster")
+    if (isCodeRasterNodeEffective(node, cache)) return Promise.resolve("composite-raster")
     if (ctx.sectionBackgroundImageFillOnly && hasImageFill(node)) {
         return resolveRasterFormatOnceAsync(node, ctx).then(function (fmt) {
             return fmt === "PNG" ? "raster-png" : "raster-jpg"
@@ -324,7 +324,7 @@ function decideImageKind(node, ctx) {
     }
     if (isVectorOnlyTree(node)) return Promise.resolve("svg")
     if (isContainer(node) && shouldCompositeRasterGroup(node)) return Promise.resolve("composite-raster")
-    if (!shouldExportAsSingleRasterImage(node)) return Promise.resolve("skip")
+    if (!shouldExportAsSingleRasterImage(node, cache)) return Promise.resolve("skip")
     return resolveRasterFormatOnceAsync(node, ctx).then(function (fmt) {
         return fmt === "PNG" ? "raster-png" : "raster-jpg"
     })

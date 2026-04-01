@@ -12,6 +12,112 @@
  * combinePcMoAsBreakpoint — 위 요소 합쳐 최종 HTML 문자열
  */
 // ----- 6. Section Utils (배경은 buildSectionBackgroundAsync) -----
+/** 구조 일치 섹션만: PC가 code-video인 슬롯의 MO 노드 id → true (MO 레이어명 불일치 허용) */
+function buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
+    var out = Object.create(null)
+    if (!desktopRoot || !mobileRoot || !isContainer(desktopRoot) || !isContainer(mobileRoot)) return out
+    var skip = Object.create(null)
+    if (Array.isArray(mismatchSecs)) {
+        for (var sx = 0; sx < mismatchSecs.length; sx++) skip[String(mismatchSecs[sx])] = true
+    }
+    var dSecs = getSectionNodes(desktopRoot)
+    var mSecs = getSectionNodes(mobileRoot)
+    function walkInherit(dNode, mNode) {
+        var dKids = (dNode.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        var mKids = (mNode.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        for (var i = 0; i < dKids.length && i < mKids.length; i++) {
+            var d = dKids[i]
+            var m = mKids[i]
+            if (d.type !== m.type) continue
+            if (!d.id) {
+                if (d.type === "FRAME" && isContainer(d)) walkInherit(d, m)
+                continue
+            }
+            if (isVideoNode(d) && m.id) out[String(m.id)] = true
+            if (d.type === "FRAME" && isContainer(d)) walkInherit(d, m)
+        }
+    }
+    for (var s = 0; s < dSecs.length && s < mSecs.length; s++) {
+        var secClass = sectionClassPrefix(s + 1)
+        if (skip[secClass]) continue
+        var dSec = dSecs[s]
+        var mSec = mSecs[s]
+        if (!dSec || !mSec || dSec.type !== mSec.type) continue
+        walkInherit(dSec, mSec)
+    }
+    return out
+}
+/** 구조 일치 섹션만: PC가 code-raster인 슬롯의 MO 노드 id → true */
+function buildMoRasterInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
+    var out = Object.create(null)
+    if (!desktopRoot || !mobileRoot || !isContainer(desktopRoot) || !isContainer(mobileRoot)) return out
+    var skip = Object.create(null)
+    if (Array.isArray(mismatchSecs)) {
+        for (var srx = 0; srx < mismatchSecs.length; srx++) skip[String(mismatchSecs[srx])] = true
+    }
+    var dSecsR = getSectionNodes(desktopRoot)
+    var mSecsR = getSectionNodes(mobileRoot)
+    function walkRasterInherit(dNode, mNode) {
+        var dKids = (dNode.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        var mKids = (mNode.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        for (var ri = 0; ri < dKids.length && ri < mKids.length; ri++) {
+            var d = dKids[ri]
+            var m = mKids[ri]
+            if (d.type !== m.type) continue
+            if (!d.id) {
+                if (d.type === "FRAME" && isContainer(d)) walkRasterInherit(d, m)
+                continue
+            }
+            if (isCodeRasterNode(d) && m.id) out[String(m.id)] = true
+            if (d.type === "FRAME" && isContainer(d)) walkRasterInherit(d, m)
+        }
+    }
+    for (var sr = 0; sr < dSecsR.length && sr < mSecsR.length; sr++) {
+        var secCl = sectionClassPrefix(sr + 1)
+        if (skip[secCl]) continue
+        var dS = dSecsR[sr]
+        var mS = mSecsR[sr]
+        if (!dS || !mS || dS.type !== mS.type) continue
+        walkRasterInherit(dS, mS)
+    }
+    return out
+}
+/** MO 트리에서 PC 레이어 이름(예: code-video)으로 비디오 짝 조회 — 이름 매칭 fallback이 MO 전용 이름이어도 동작 */
+function collectMoVideoNodesByPcLayerName(dSec, mSec) {
+    var map = collectVideoNodesByName(mSec)
+    function walk(dNode, mNode) {
+        var dKids = (dNode.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        var mKids = (mNode.children || []).filter(function (c) {
+            return c && isVisible(c)
+        })
+        for (var i = 0; i < dKids.length && i < mKids.length; i++) {
+            var d = dKids[i]
+            var m = mKids[i]
+            if (d.type !== m.type) continue
+            if (!d.id) {
+                if (d.type === "FRAME" && isContainer(d)) walk(d, m)
+                continue
+            }
+            if (isVideoNode(d) && m.id) {
+                var key = String(d.name || "").trim()
+                if (key) map[key] = m
+            }
+            if (d.type === "FRAME" && isContainer(d)) walk(d, m)
+        }
+    }
+    walk(dSec, mSec)
+    return map
+}
 /** PC HTML 기준 MO 미디어쿼리 오버라이드 (프레임/텍스트는 인덱스 walk, 이미지는 렌더 순서 반영 시맨틱) */
 function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
     options = options || {}
@@ -25,6 +131,14 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
     var skipStructSecs = options && options.skipStructureMismatchSecs ? options.skipStructureMismatchSecs : []
     var skipStructSet = Object.create(null)
     for (var si = 0; si < skipStructSecs.length; si++) skipStructSet[String(skipStructSecs[si])] = true
+    var moVideoInheritIds = buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, skipStructSecs)
+    var moRasterInheritIds = buildMoRasterInheritIdsMap(desktopRoot, mobileRoot, skipStructSecs)
+    var moInheritLookupCache = null
+    if (moVideoInheritIds || moRasterInheritIds) {
+        moInheritLookupCache = {}
+        if (moVideoInheritIds) moInheritLookupCache.moVideoInheritIds = moVideoInheritIds
+        if (moRasterInheritIds) moInheritLookupCache.moRasterInheritIds = moRasterInheritIds
+    }
     /** @media 블록 안: 동일 셀렉터 선언을 한 규칙으로 합침 (diff·파일 길이·리뷰용) */
     var moMediaRuleList = []
     function pushMoMoRule(sel, decl) {
@@ -308,7 +422,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         var secStrokeDiff = buildStrokeDeclDiff(dSec, mSec)
         if (secStrokeDiff) pushMoMoRule(".ap-section--" + secClass, secStrokeDiff)
         var secImageByName = collectImageNodesByName(mSec)
-        var secVideoByName = collectVideoNodesByName(mSec)
+        var secVideoByName = skipStructSet[secClass] ? collectVideoNodesByName(mSec) : collectMoVideoNodesByPcLayerName(dSec, mSec)
         var secTextByName = collectTextNodesByName(mSec)
         var sectionVideoOverrideDone = {}
         var sectionTextOverrideDone = {}
@@ -329,7 +443,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         var pcOrder = options.pcSectionImageRenderOrderIds && options.pcSectionImageRenderOrderIds[s]
         if (pcOrder && pcOrder.length) applyApSectionImageRenderOrderFromIds(deskSem, pcOrder)
         var deskMoOpts = { sectionSemantics: deskSem }
-        var mSem = buildSectionSemanticClasses(mSec, (options && options.geoStructure) || null)
+        var mSem = buildSectionSemanticClasses(mSec, (options && options.geoStructure) || null, null, moVideoInheritIds, moRasterInheritIds)
         promoteRasterTextNodesToImageSemantics(mSec, mSem, allowedMo, !fontMoActive)
         demoteNestedDuplicateSectionRoles(mSec, mSem)
         disambiguateSectionSemantics(mSec, mSem)
@@ -337,7 +451,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         disambiguateSectionSemantics(mSec, mSem)
         var moOrder = options.moSectionImageRenderOrderIds && options.moSectionImageRenderOrderIds[s]
         if (moOrder && moOrder.length) applyApSectionImageRenderOrderFromIds(mSem, moOrder)
-        var moLookup = collectMoImageLookupMaps(mSec, mSem)
+        var moLookup = collectMoImageLookupMaps(mSec, mSem, moInheritLookupCache)
         walkPair(dSec, mSec, mSec, secClass, secImageByName, secTextByName, sectionTextOverrideDone, deskSem, secVideoByName, sectionVideoOverrideDone)
         pushImageMoSizeOverridesForSection(dSec, secClass, deskMoOpts, deskSem, moLookup, secImageByName)
         // code-video: 인덱스 매칭이 어긋난 경우 레이어 name 기준으로 MO 비디오 aspect-ratio 등
@@ -351,7 +465,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             ) {
                 var key = String(dNode.name || "").trim()
                 var mVid = key !== "" && vidByName ? vidByName[key] : null
-                if (mVid && isVideoNode(mVid)) {
+                if (mVid) {
                     var declV = getVideoSizeDeclDiff(dNode, mVid)
                     if (declV)
                         pushMoMoRule(

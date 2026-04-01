@@ -40,21 +40,21 @@ function collectImageFigureNodeIdsRenderNodeAsync(node, parent, cache, secNo, ro
         })
     }
 
-    if (isVideoNode(node)) return Promise.resolve([])
+    if (isVideoNodeEffective(node, cache)) return Promise.resolve([])
 
     if (isVectorOnlyTree(node)) {
-        if (isCodeRasterNode(node)) return node.id != null ? Promise.resolve([String(node.id)]) : Promise.resolve([])
+        if (isCodeRasterNodeEffective(node, cache)) return node.id != null ? Promise.resolve([String(node.id)]) : Promise.resolve([])
         if (isLineLikeNode(node)) return Promise.resolve([])
         if (node.type === "ELLIPSE") return Promise.resolve([])
         return node.id != null ? Promise.resolve([String(node.id)]) : Promise.resolve([])
     }
 
-    if (shouldExportAsSingleRasterImage(node)) {
+    if (shouldExportAsSingleRasterImage(node, cache)) {
         if (
             isContainer(node) &&
-            hasMultipleImageLikeChildren(node) &&
+            hasMultipleImageLikeChildren(node, cache) &&
             !isCompositeCandidate(node) &&
-            !isCodeRasterNode(node) &&
+            !isCodeRasterNodeEffective(node, cache) &&
             !isMaskImageRasterGroup(node)
         ) {
             var childrenImgGrp = node.children || []
@@ -113,7 +113,7 @@ function collectImageFigureNodeIdsFrameChildrenAsync(node, parent, cache, secNo,
             var isChContainer = isContainer(ch)
             return Promise.all([
                 buildBackgroundDeclAsync(ch, false, cache, secNo, {
-                    skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch),
+                    skipImageFill: isImageCandidate(ch, cache) || isVectorOnlyTree(ch),
                     skipSolidFill: isVectorOnlyTree(ch),
                 }),
                 !chAbs ? Promise.resolve("") : Promise.resolve(buildAbsDecl(ch, node) || ""),
@@ -195,7 +195,7 @@ function collectImageFigureNodeIdsSectionChildAsync(ch, sectionNode, bg, cache, 
     }
     return Promise.all([
         buildBackgroundDeclAsync(ch, false, cache, secNo, {
-            skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch),
+            skipImageFill: isImageCandidate(ch, cache) || isVectorOnlyTree(ch),
             skipSolidFill: isVectorOnlyTree(ch),
         }),
         isAbsoluteLike(ch, sectionNode) ? Promise.resolve(buildAbsDecl(ch, sectionNode) || "") : Promise.resolve(""),
@@ -293,7 +293,7 @@ function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotInde
     return pipelineEnsureImageAsync(node, imgCtx).then(function (meta) {
         if (!meta) return
         if (meta.kind === "pc-shared-slide" && meta.dataUrl && meta.assetKey) setCachedAsset(cache, meta.assetKey, meta.dataUrl)
-        var pathOpts = { skipExport: isVideoNode(node), imageHash: getPrimaryImageFillHash(node) }
+        var pathOpts = { skipExport: isVideoNodeEffective(node, cache), imageHash: getPrimaryImageFillHash(node) }
         if (meta.reuseAssetKey) pathOpts.reuseAssetKey = meta.reuseAssetKey
         if (cache.usePcMoImageFilenameVariants && !cache.imageSuffix && slideData && imgCtx.insideSwiperSlide) {
             pathOpts.omitPcMoVariant = true

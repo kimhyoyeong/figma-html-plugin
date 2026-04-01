@@ -30,14 +30,14 @@ function getApSectionImageSlotKeyFromSemantics(semArr) {
 }
 
 /** MO 트리: 슬롯·sourceNodeId·id 로 이미지 노드 조회 (095 PC/MO size diff) */
-function collectMoImageLookupMaps(moSec, moSem) {
+function collectMoImageLookupMaps(moSec, moSem, moInheritCache) {
     var bySlot = {}
     var bySourcePcId = {}
     var byId = {}
     if (!moSec || !moSem) return { bySlot: bySlot, bySourcePcId: bySourcePcId, byId: byId }
     function walk(n) {
         if (!n || !isVisible(n)) return
-        var isImg = (isImageCandidate(n) || hasImageFill(n) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE"))
+        var isImg = (isImageCandidate(n, moInheritCache) || hasImageFill(n) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE"))
         if (n.id && isImg) {
             var sid = String(n.id)
             var sem = moSem[sid] || []
@@ -219,11 +219,11 @@ function sanitizeGeoRoleForBem(role) {
  * walkStructure 에서 depth 기반 container/content/… 를 줄 FRAME 인지.
  * 단일 이미지·이미지 fill 위주 프레임 등은 leaf 가 tagImageNode 로 image 가 되므로 여기서 구조 역할을 주지 않음.
  */
-function isSemanticWrapperFrame(n) {
+function isSemanticWrapperFrame(n, inheritCache) {
     if (!n || n.type !== "FRAME" || !isContainer(n)) return false
     if (hasTextInSubtree(n)) return true
-    if (hasMultipleImageLikeChildren(n) && !isCompositeCandidate(n)) return false
-    if (isImageCandidate(n)) return false
+    if (hasMultipleImageLikeChildren(n, inheritCache) && !isCompositeCandidate(n)) return false
+    if (isImageCandidate(n, inheritCache)) return false
     return true
 }
 
@@ -231,10 +231,17 @@ function isSemanticWrapperFrame(n) {
  * 섹션 트리 기준 시맨틱 보조 클래스 (id → 클래스 배열).
  * geoHints: AI 검수 GEO.structure [{ text, role }] — 본문 텍스트 매칭 시 ap-section__* 우선 반영.
  * bgChildId: 섹션 배경으로만 승격된 직계 이미지 — HTML/CSS에 해당 노드가 없으므로 시맨틱·중복 접미사·이미지 번호에서 제외.
+ * moVideoInheritIds / moRasterInheritIds: PC와 구조 짝인 MO 노드 id → true (095·MO 덤프와 동일).
  */
-function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
+function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId, moVideoInheritIds, moRasterInheritIds) {
     if (geoHints != null && !Array.isArray(geoHints)) geoHints = null
     if (geoHints && geoHints.length > 64) geoHints = geoHints.slice(0, 64)
+    var moInheritCache = null
+    if (moVideoInheritIds || moRasterInheritIds) {
+        moInheritCache = {}
+        if (moVideoInheritIds) moInheritCache.moVideoInheritIds = moVideoInheritIds
+        if (moRasterInheritIds) moInheritCache.moRasterInheritIds = moRasterInheritIds
+    }
     var map = {}
     function add(nid, cls) {
         if (nid == null) return
@@ -246,7 +253,7 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
 
     function walkStructure(n, depthFromSection) {
         if (!n || !isVisible(n)) return
-        if (n.id && isSemanticWrapperFrame(n)) {
+        if (n.id && isSemanticWrapperFrame(n, moInheritCache)) {
             var role = AP_SECTION_STRUCTURE_ROLES[depthFromSection - 1] || "part"
             add(n.id, apSectionBem(role))
         }
@@ -357,8 +364,8 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
     /** walkStructure 가 먼지 부여한 content 등과 충돌하지 않게: .ap-image 로 나가는 노드는 시맨틱을 image 하나로만 둠 */
     function tagImageNode(n) {
         if (!n || !n.id) return
-        /** 이름이 code-video인 레이어는 render에서 플레이스홀더로 나감 — IMAGE fill 있어도 image 시맨틱만 주면 apply가 image를 지운 뒤 빈 map이 됨 */
-        if (isVideoNode(n)) {
+        /** code-video 또는 PC 짝 비디오(MO) — render에서 플레이스홀더로 나감 */
+        if (isVideoNodeEffective(n, moInheritCache)) {
             map[String(n.id)] = [apSectionBem("video")]
             return
         }
@@ -366,21 +373,21 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
     }
     function walkImg(n) {
         if (!n || !isVisible(n)) return
-        if (isContainer(n) && hasTextInSubtree(n) && !isCodeRasterNode(n)) {
+        if (isContainer(n) && hasTextInSubtree(n) && !isCodeRasterNodeEffective(n, moInheritCache)) {
             for (var k = 0; k < (n.children || []).length; k++) walkImg(n.children[k])
             return
         }
-        if (isContainer(n) && isImageCandidate(n)) {
+        if (isContainer(n) && isImageCandidate(n, moInheritCache)) {
             if (
-                hasMultipleImageLikeChildren(n) &&
+                hasMultipleImageLikeChildren(n, moInheritCache) &&
                 !isCompositeCandidate(n) &&
-                !isCodeRasterNode(n) &&
+                !isCodeRasterNodeEffective(n, moInheritCache) &&
                 !isMaskImageRasterGroup(n)
             ) {
                 for (var k2 = 0; k2 < (n.children || []).length; k2++) walkImg(n.children[k2])
                 return
             }
-            if (hasImageFill(n) && hasVisibleChildren(n) && (!isCompositeCandidate(n) || subtreeHasVectorOrTextOverlay(n))) {
+            if (hasImageFill(n) && hasVisibleChildren(n) && (!isCompositeCandidate(n) || subtreeHasVectorOrTextOverlay(n, moInheritCache))) {
                 for (var kBg = 0; kBg < (n.children || []).length; kBg++) walkImg(n.children[kBg])
                 return
             }
@@ -389,7 +396,7 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
         }
         if (
             n.id &&
-            (isImageCandidate(n) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE")) &&
+            (isImageCandidate(n, moInheritCache) || (isVectorOnlyTree(n) && !isLineLikeNode(n) && n.type !== "ELLIPSE")) &&
             n.type !== "TEXT"
         ) {
             tagImageNode(n)
@@ -401,11 +408,11 @@ function buildSectionSemanticClasses(sectionNode, geoHints, bgChildId) {
     function walkFillMissing(n) {
         if (!n || !isVisible(n)) return
         if (n.id && !map[String(n.id)]) {
-            if (isVideoNode(n)) add(n.id, apSectionBem("video"))
+            if (isVideoNodeEffective(n, moInheritCache)) add(n.id, apSectionBem("video"))
             else if (isLineLikeNode(n)) add(n.id, apSectionBem("line"))
             else if (n.type === "ELLIPSE") add(n.id, apSectionBem("ellipse"))
-            else if (nodeWillRenderAsApImageFigure(n)) tagImageNode(n)
-            else if (isImageCandidate(n) && !isContainer(n)) tagImageNode(n)
+            else if (nodeWillRenderAsApImageFigure(n, moInheritCache)) tagImageNode(n)
+            else if (isImageCandidate(n, moInheritCache) && !isContainer(n)) tagImageNode(n)
             else add(n.id, apSectionBem("layer"))
         }
         if (isContainer(n)) for (var wf = 0; wf < (n.children || []).length; wf++) walkFillMissing(n.children[wf])

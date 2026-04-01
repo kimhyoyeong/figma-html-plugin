@@ -58,66 +58,72 @@ function isMaskImageRasterGroup(node) {
     if (!hasImageFillInSubtree(node)) return false
     return true
 }
-function subtreeHasVideo070(n) {
+function subtreeHasVideo070(n, cache) {
     if (!n || !isVisible(n)) return false
-    if (isVideoNode(n)) return true
+    if (isVideoNodeEffective(n, cache)) return true
     var kids = n.children
     if (!kids) return false
     for (var j = 0; j < kids.length; j++) {
-        if (subtreeHasVideo070(kids[j])) return true
+        if (subtreeHasVideo070(kids[j], cache)) return true
     }
     return false
 }
-function isImageCandidate(node) {
-    return !!(node && (hasImageFill(node) || isCompositeCandidate(node) || isCodeRasterNode(node) || isMaskImageRasterGroup(node)))
+function isImageCandidate(node, cache) {
+    return !!(
+        node &&
+        (hasImageFill(node) ||
+            isCompositeCandidate(node) ||
+            isCodeRasterNodeEffective(node, cache) ||
+            isMaskImageRasterGroup(node))
+    )
 }
 /** IMAGE fill 부모 위에 얹는 콘텐츠(TEXT·비디오·code-raster·벡터-only). 클립 KV+로고도 여기서 걸림 */
-function subtreeHasVectorOrTextOverlay(node) {
+function subtreeHasVectorOrTextOverlay(node, cache) {
     if (!node || !isContainer(node) || !node.children) return false
     for (var i = 0; i < node.children.length; i++) {
-        if (subtreeOverlayWalk070(node.children[i], 0)) return true
+        if (subtreeOverlayWalk070(node.children[i], 0, cache)) return true
     }
     return false
 }
-function subtreeOverlayWalk070(n, depth) {
+function subtreeOverlayWalk070(n, depth, cache) {
     if (!n || !isVisible(n) || depth > 32) return false
     if (n.type === "TEXT") return true
-    if (isVideoNode(n)) return true
-    if (isCodeRasterNode(n)) return true
+    if (isVideoNodeEffective(n, cache)) return true
+    if (isCodeRasterNodeEffective(n, cache)) return true
     if (isVectorOnlyTree(n)) return true
     if (isContainer(n) && n.children) {
         for (var j = 0; j < n.children.length; j++) {
-            if (subtreeOverlayWalk070(n.children[j], depth + 1)) return true
+            if (subtreeOverlayWalk070(n.children[j], depth + 1, cache)) return true
         }
     }
     return false
 }
-function shouldExportAsSingleRasterImage(node) {
+function shouldExportAsSingleRasterImage(node, cache) {
     if (!node) return false
-    if (isCodeRasterNode(node)) return true
-    if (isMaskImageRasterGroup(node)) return !hasTextInSubtree(node) && !subtreeHasVideo070(node)
-    if (!isImageCandidate(node)) return false
+    if (isCodeRasterNodeEffective(node, cache)) return true
+    if (isMaskImageRasterGroup(node)) return !hasTextInSubtree(node) && !subtreeHasVideo070(node, cache)
+    if (!isImageCandidate(node, cache)) return false
     if (isContainer(node) && hasTextInSubtree(node)) return false
     // IMAGE fill + 자식: 전체 exportAsync 시 배경+오버레이가 한 PNG. 무클립이거나(항상) 클립이어도 벡터/텍스트 자식이 있으면 분리(KV+로고).
     if (isContainer(node) && hasImageFill(node) && hasVisibleChildren(node)) {
-        if (!isCompositeCandidate(node) || subtreeHasVectorOrTextOverlay(node)) return false
+        if (!isCompositeCandidate(node) || subtreeHasVectorOrTextOverlay(node, cache)) return false
     }
     if (isContainer(node) && shouldCompositeRasterGroup(node)) return true
-    if (isContainer(node) && hasMultipleImageLikeChildren(node) && !isCompositeCandidate(node) && !isMaskImageRasterGroup(node))
+    if (isContainer(node) && hasMultipleImageLikeChildren(node, cache) && !isCompositeCandidate(node) && !isMaskImageRasterGroup(node))
         return false
     // 클립 프레임(clipsContent): 겹친 래스터 2장도 부모 한 번 exportAsync로 합성 가능. 무클립 2장은 위 분기에서 이미 분리.
     if (isContainer(node) && countDirectRasterImageChildren(node) >= 2 && !isCompositeCandidate(node)) return false
     return true
 }
-function nodeWillRenderAsApImageFigure(node) {
+function nodeWillRenderAsApImageFigure(node, cache) {
     if (!node || node.type === "TEXT") return false
-    if (isVideoNode(node)) return false
-    if (isCodeRasterNode(node)) return true
+    if (isVideoNodeEffective(node, cache)) return false
+    if (isCodeRasterNodeEffective(node, cache)) return true
     if (isVectorOnlyTree(node)) {
         return !isLineLikeNode(node) && node.type !== "ELLIPSE"
     }
-    if (!isImageCandidate(node)) return false
-    return shouldExportAsSingleRasterImage(node)
+    if (!isImageCandidate(node, cache)) return false
+    return shouldExportAsSingleRasterImage(node, cache)
 }
 function hasVisibleFillWithOpacityLessThanOne(node) {
     try {
@@ -130,13 +136,14 @@ function hasVisibleFillWithOpacityLessThanOne(node) {
     } catch (e) {}
     return false
 }
-function hasMultipleImageLikeChildren(node) {
+function hasMultipleImageLikeChildren(node, cache) {
     if (!node || !isContainer(node) || !node.children) return false
     var list = []
     for (var i = 0; i < node.children.length; i++) {
         var c = node.children[i]
         if (!c || !isVisible(c)) continue
-        var imgLike = isImageCandidate(c) || hasImageFill(c) || (isVectorOnlyTree(c) && !isLineLikeNode(c) && c.type !== "ELLIPSE")
+        var imgLike =
+            isImageCandidate(c, cache) || hasImageFill(c) || (isVectorOnlyTree(c) && !isLineLikeNode(c) && c.type !== "ELLIPSE")
         if (!imgLike) return false
         list.push(c)
     }

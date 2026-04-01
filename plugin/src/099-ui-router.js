@@ -105,6 +105,7 @@ figma.ui.onmessage = function (msg) {
                         inheritAssetStores: payload.assetStoresSnapshot,
                         inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
                         exportCountryCode: msg.exportCountryCode,
+                        pairedDesktopRoot: rootDesktop,
                     }).then(function (moPayload) {
                         var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                         // 미리보기는 항상 단일 iframe + PC/MO 토글(@media·pc-only/mo-only 보정). 이중 탭은 사용하지 않음.
@@ -217,6 +218,7 @@ figma.ui.onmessage = function (msg) {
                             inheritAssetStores: payload.assetStoresSnapshot,
                             inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
                             exportCountryCode: msg.exportCountryCode,
+                            pairedDesktopRoot: rootDesktop,
                         }).then(function (moPayload) {
                             var secMatch = getSectionStructureMatch(rootDesktop, rootMobile)
                             // 구조 불일치 섹션: HTML·CSS는 096 래퍼+`.pc-only .ap-section--NN` — ZIP 경로도 동일 파이프라인

@@ -295,7 +295,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         var path =
                             cache &&
                             getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                                skipExport: isVideoNode(node),
+                                skipExport: isVideoNodeEffective(node, cache),
                                 imageHash: getPrimaryImageFillHash(node),
                                 reuseAssetKey: meta.reuseAssetKey || undefined,
                             })
@@ -365,7 +365,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var path =
                 cache &&
                 getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                    skipExport: isVideoNode(node),
+                    skipExport: isVideoNodeEffective(node, cache),
                     imageHash: getPrimaryImageFillHash(node),
                     reuseAssetKey: meta.reuseAssetKey || undefined,
                 })
@@ -387,9 +387,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var id = node.id != null ? String(node.id) : ""
         if (
             isContainer(node) &&
-            hasMultipleImageLikeChildren(node) &&
+            hasMultipleImageLikeChildren(node, cache) &&
             !isCompositeCandidate(node) &&
-            !isCodeRasterNode(node) &&
+            !isCodeRasterNodeEffective(node, cache) &&
             !isMaskImageRasterGroup(node)
         ) {
             var absImgGrp = isAbsoluteLike(node, parent)
@@ -449,7 +449,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var path =
                 cache &&
                 getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                    skipExport: isVideoNode(node),
+                    skipExport: isVideoNodeEffective(node, cache),
                     imageHash: getPrimaryImageFillHash(node),
                     reuseAssetKey: meta.reuseAssetKey || undefined,
                 })
@@ -611,7 +611,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 var isChContainer = isContainer(ch)
 
                 return Promise.all([
-                    buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}),
+                    buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch, cache) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}),
                     (function () {
                         if (!chAbs) return Promise.resolve("")
                         var absDecl2 = buildAbsDecl(ch, node)
@@ -624,7 +624,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     })(),
                 ]).then(function (res) {
                     var itemDeclParts = [res[2], res[0]].filter(Boolean)
-                    if (res[1] && !isImageCandidate(ch)) itemDeclParts.push(res[1])
+                    if (res[1] && !isImageCandidate(ch, cache)) itemDeclParts.push(res[1])
                     var strokeDeclCh = buildStrokeDecl(ch)
                     if (strokeDeclCh) itemDeclParts.push(strokeDeclCh)
                     var fillWidthCh = getFillFlexStartWidthDecl(ch, node)
@@ -767,7 +767,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         }
 
         // 레이어 이름이 code-video면 그룹/프레임 여부와 관계없이 비디오 플레이스홀더로 출력
-        if (isVideoNode(node)) {
+        if (isVideoNodeEffective(node, cache)) {
             var videoAbs = isAbsoluteLike(node, parent)
             var videoParentWraps = parent && parent.type === "FRAME" && isContainer(parent)
             var videoNeedWrapper = videoAbs && (!videoParentWraps || (node.type === "FRAME" && isContainer(node)))
@@ -784,12 +784,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         }
 
         // VECTOR — LINE/line/ELLIPSE는 CSS로 그리기, 나머지는 SVG export (code-raster는 단일 래스터로 아래 분기)
-        if (isVectorOnlyTree(node) && !isCodeRasterNode(node)) {
+        if (isVectorOnlyTree(node) && !isCodeRasterNodeEffective(node, cache)) {
             return renderVectorNodeAsync(node, parent, secNo, secClass, depth, opts)
         }
 
         // IMAGE (단일 이미지 또는 컴포지트 → 하나의 이미지로 export) — 규칙: shouldExportAsSingleRasterImage
-        if (shouldExportAsSingleRasterImage(node)) {
+        if (shouldExportAsSingleRasterImage(node, cache)) {
             return renderImageNodeAsync(node, parent, secNo, secClass, depth, opts)
         }
 
@@ -834,9 +834,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         if (itemId) ctx.exportedNodeIds[itemId] = true
         var leafSel = getLeafSelectorForNode(ch, opts)
         var isChContainer = isContainer(ch)
-        return Promise.all([buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}), chAbs ? Promise.resolve(buildAbsDecl(ch, sectionNode) || "") : Promise.resolve("")]).then(function (res) {
+        return Promise.all([buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch, cache) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}), chAbs ? Promise.resolve(buildAbsDecl(ch, sectionNode) || "") : Promise.resolve("")]).then(function (res) {
             var itemDeclParts = [res[0]].filter(Boolean)
-            if (res[1] && !isImageCandidate(ch)) itemDeclParts.push(res[1])
+            if (res[1] && !isImageCandidate(ch, cache)) itemDeclParts.push(res[1])
             var strokeDeclVirtual = buildStrokeDecl(ch)
             if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)
             var fillWidthVirtual = getFillFlexStartWidthDecl(ch, sectionNode)
@@ -859,7 +859,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
      */
     function runSectionPipeline(sectionNode, bg, visWrap, secNo, secClass, slideData, pairedDesktopSection) {
         var slideSectionMeta = null
-        var sectionSemantics = buildSectionSemanticClasses(sectionNode, geoStructure, bg.bgChildId)
+        var sectionSemantics = buildSectionSemanticClasses(
+            sectionNode,
+            geoStructure,
+            bg.bgChildId,
+            cache.moVideoInheritIds || null,
+            cache.moRasterInheritIds || null
+        )
         promoteRasterTextNodesToImageSemantics(sectionNode, sectionSemantics, allowedFontsForHtml, fontHtmlUnrestricted)
         demoteNestedDuplicateSectionRoles(sectionNode, sectionSemantics)
         disambiguateSectionSemantics(sectionNode, sectionSemantics)
@@ -1011,7 +1017,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         var isChContainer = isContainer(ch)
 
                         return Promise.all([
-                            buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}),
+                            buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch, cache) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}),
                             (function () {
                                 if (!chAbs) return Promise.resolve("")
                                 var absDecl = buildAbsDecl(ch, sectionNode)
@@ -1019,7 +1025,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                             })(),
                         ]).then(function (res) {
                             var itemDeclParts = [res[0]].filter(Boolean)
-                            if (res[1] && !isImageCandidate(ch)) itemDeclParts.push(res[1])
+                            if (res[1] && !isImageCandidate(ch, cache)) itemDeclParts.push(res[1])
                             var strokeDeclVirtual = buildStrokeDecl(ch)
                             if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)
                             var fillWidthVirtual = getFillFlexStartWidthDecl(ch, sectionNode)
