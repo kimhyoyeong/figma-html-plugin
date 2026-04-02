@@ -1,10 +1,16 @@
 # Figma HTML Export (figma-html-plugin)
 
+통이미지·랜딩 등 Figma 시안을 **반응형 HTML/CSS 초안**으로 옮기기 위한 내부용 플러그인입니다. 레이아웃·섹션 시맨틱·타이포·이미지 export를 규칙으로 묶고, 필요 시 AI 검수로 `alt`·헤딩 등을 보완합니다.
+
 ---
 
 ## 1. 프로젝트 소개
 
-Figma 플러그인(`figma.showUI`) 기반으로 선택한 프레임(ROOT)에서 레이아웃·텍스트·이미지 정보를 읽어 HTML/CSS를 생성하고, UI에서 미리보기·ZIP 보내기·(선택) AI 검수를 제공하는 도구입니다. 메인 스레드는 빌드된 `plugin/code.js`, UI는 `plugin/ui.html` 단일 파일 구조입니다.
+Figma 플러그인(`figma.showUI`)으로 선택한 프레임(ROOT) 트리를 순회해 **HTML/CSS·에셋 목록**을 만들고, UI에서 미리보기·ZIP·(선택) **OpenAI / Gemini 검수·반영**을 제공합니다.
+
+- **메인 스레드**: `plugin/src/*.js`를 이어 붙인 `plugin/code.js` (`npm run build`로 생성).
+- **UI**: `plugin/ui.html` 단일 파일(마크업·스타일·스크립트).
+- **진입**: `plugin/manifest.json` → `main: code.js`, `ui: ui.html`.
 
 ---
 
@@ -38,6 +44,18 @@ Figma 플러그인(`figma.showUI`) 기반으로 선택한 프레임(ROOT)에서 
   - `code-video` → 비디오 플레이스홀더  
   - `code-raster` → 단일 래스터 export 우선
 - **HTML/CSS 생성**: 섹션 BEM(`ap-section--NN`), 슬라이드 마크업, 지연 CSS, 이미지 경로·폰트 등(`096-html-code-builder.js` 등).
+- **텍스트 타이포(CSS 변수)** (`080-text-fonts.js`, `096-html-code-builder.js` 생성 규칙)  
+  - `--ap-fs`: 디자인 기준 글자 크기(숫자).  
+  - **`--ap-lh`: 글자 크기 대비 줄간 비율(무단위)** — Figma px/퍼센트 줄간을 환산한 뒤 **0.05 단위로 스냅**(예: 1.2, 1.25, 1.3). 실제 `line-height`는 `font-size × 비율`과 같은 `calc(var(--ap-fs)*var(--ap-lh, …)/…)`로 맞춤.  
+  - `.ap-text` **기본값(fallback)**: 줄간 비율 `1.2`, 자간 `0`, 굵기 `400`, 정렬 `center`, 색 `#000`. `buildTextVarsDecl`은 이와 같으면 해당 변수 선언을 **생략**하고, CSS `var(--ap-*, fallback)`으로 처리.  
+  - PC/MO 차이만 넣는 `buildTextVarsDeclDiff`는 PC와 MO 값이 다를 때만 속성을 출력(기본값으로 되돌릴 때도 명시적으로 덮어씀).
+- **섹션 텍스트 역할 접미사(`--02` 등)** (`081-section-semantics.js`)  
+  - `title` / `desc` 등 **텍스트 역할**에서 동일 클래스가 여러 노드에 걸릴 때, **`--ap-lh` / `--ap-ls`만** 다르면 **접미사로 쪼개지 않고** 한 역할 클래스를 공유하도록 그룹화(union-find).  
+  - 그 외(fs·fw·색 등) 차이는 기존처럼 `--02`, `--03` … 로 구분.
+- **줄간·자간만 다른 동일 역할 묶음** (`096-html-code-builder.js`, `phase !== "mobile"`인 빌드)  
+  - 교집합 타이포는 지연 CSS **한 블록**, 노드별 차이는 `style`에 `--ap-lh` / `--ap-ls` 등만 인라인. **MO 전용 트리 빌드**(`dumpTreeAsync` `phase: "mobile"`)에서는 `@media` 정합을 위해 이 경로를 끔.
+- **GEO 시맨틱 힌트**: AI 검수 결과의 구조·역할 힌트를 `geoStructure`로 넘기면 `buildSectionSemanticClasses`에서 `ap-section__*` 역할 보정에 반영(`081`, `097`, `099` 등).
+- **폰트 → HTML vs 래스터**: UI **허용 폰트** 목록에 없는 서체가 섞인 TEXT는 HTML 대신 이미지로 export되는 경로가 있음(`080-text-fonts.js`의 `textFamiliesAllowedAsHtml` 등).
 - **Swiper 관련 계산**: `computeSlidesPerView` / `computeSlidesPerViewMo`, `resolveSlideMeta`로 슬라이드당 노출 수 등 메타 계산; 생성 HTML에 Swiper 초기화용 인라인 조립(주석상 **Swiper CDN `<script>`/`<link>` 주입은 미리보기 UI 쪽**).
 - **PC/MO 비교·병합(규칙 기반)**  
   - 섹션별 트리 시그니처 비교(`getSectionStructureMatch`, 최대 3레벨 자식 시그니처)  
@@ -99,8 +117,8 @@ Figma 플러그인(`figma.showUI`) 기반으로 선택한 프레임(ROOT)에서 
 
 1. Figma에서 ROOT **1개 또는 2개** 선택.  
 2. UI → `postMessage` → 메인 스레드 `RUN_ANALYZE` / `RUN_DESKTOP` / `RUN_MOBILE` 처리(`099-ui-router.js`).  
-3. `dumpTreeAsync`로 레이어 인스펙트 `dataTree`·텍스트 생성, `buildCodeAsync`로 HTML/CSS·이미지 export 목록 생성(`097-dump-tree-async.js` 등).  
-4. PC+MO인 경우: PC 트리 생성 후 MO 트리 처리, `combinePcMoAsBreakpoint`로 단일 문서 문자열 조합.  
+3. `dumpTreeAsync`로 레이어 인스펙트 `dataTree`·텍스트 생성, `buildCodeAsync(root, cache, sections, geoStructure, mobileRoot, mismatchSecs, phase)`로 HTML/CSS·이미지 목록 생성(`097-dump-tree-async.js`). `phase`는 `desktop` / `mobile` — **MO 전용 패스**에서만 타이포 교집합+인라인 최적화를 끔.  
+4. PC+MO인 경우: PC 트리 생성(`mobileRoot` 전달) 후 MO 트리 처리, `combinePcMoAsBreakpoint`로 단일 문서 문자열 조합.  
 5. `RESULT`·이미지 청크·ZIP 관련 메시지로 UI에 전달.  
 6. UI에서 코드·미리보기·ZIP·(선택) AI 검수/반영.
 
@@ -155,7 +173,8 @@ Figma 플러그인(`figma.showUI`) 기반으로 선택한 프레임(ROOT)에서 
 - Figma 트리·메타데이터를 활용한 **노드 단위 PC/MO 매칭** 고도화(이름·시맨틱 외 추가 휴리스틱 또는, 필요 시 **별도** AI 파이프라인 설계 — 현재 미구현).  
 - 보내기 HTML에 **Swiper(및 기타 CDN) 삽입 옵션**을 명시적으로 토글.  
 - `dataTree`/덤프를 **표준 JSON 파일로 저장**하는 UI 옵션(현재는 메시지로 UI에 전달).  
-- AI 검수 프롬프트·스키마를 도메인별로 외부 설정화.
+- AI 검수 프롬프트·스키마를 도메인별로 외부 설정화.  
+- 혼합 스타일 텍스트(`parts`)에 대한 타이포 최적화·MO 구간과의 일관성 보강.
 
 ---
 
@@ -164,8 +183,11 @@ Figma 플러그인(`figma.showUI`) 기반으로 선택한 프레임(ROOT)에서 
 - 플러그인 진입·UI 크기: `plugin/src/00-entry.js`  
 - 메시지 라우팅·선택 규칙: `plugin/src/099-ui-router.js`  
 - PC/MO: `plugin/src/095-responsive-pcmo.js`  
-- HTML 생성: `plugin/src/096-html-code-builder.js`  
-- 덤프·빌드 루프: `plugin/src/097-dump-tree-async.js`  
+- HTML/CSS 생성·`.ap-text` 기본 규칙: `plugin/src/096-html-code-builder.js`  
+- 덤프·`buildCodeAsync` 연동: `plugin/src/097-dump-tree-async.js`  
+- 타이포 변수·줄간 비율·기본값 생략: `plugin/src/080-text-fonts.js`  
+- 섹션 시맨틱·`ap-section__*`·lh/ls 기준 접미사 묶음: `plugin/src/081-section-semantics.js`  
+- 지연 CSS 누적·병합: `plugin/src/082-deferred-css.js`  
 - 슬라이드: `plugin/src/020-slide.js`  
 - 레이어 규칙: `plugin/src/010-format-class.js`  
 - AI·모델 UI: `plugin/ui.html`  
