@@ -253,6 +253,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                 options.geoStructure || null,
                 options.mobileRoot || null,
                 structureMismatchSecs,
+                options.phase,
             ).then(function (result) {
                 var code = result && result.code != null ? result.code : typeof result === "string" ? result : ""
                 var exportedNodeIds = result && result.exportedNodeIds ? result.exportedNodeIds : {}

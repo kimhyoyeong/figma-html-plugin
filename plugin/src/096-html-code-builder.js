@@ -4,6 +4,7 @@
  * compressCssForStyleTag — <style> 안 CSS 압축(주석·공백 제거, } 단위 줄바꿈)
  * compressEmbeddedStyleTagsInHtml — HTML 문자열 속 <style> 내용만 압축
  * buildCodeAsync — article·섹션·지연 스타일·슬라이드 마크업/CSS·Swiper 인라인 초기화 조립(Swiper CDN link/script 는 미리보기 ui.html 에서만 주입)
+ *   htmlBuildPhase: dumpTreeAsync 의 phase — "mobile" 일 때만 --ap-lh/--ap-ls 교집합+인라인 끔.
  *   PC+MO 구조 불일치·비슬라이드: `div.pc-only`/`div.mo-only` 래퍼 + section, 지연 CSS `.pc-only .ap-section--NN …`
  */
 // ----- 9. HTML Renderers / Code Builder (node-id 기반 HTML·CSS) -----
@@ -32,7 +33,7 @@ function compressEmbeddedStyleTagsInHtml(html) {
 }
 
 /** 루트 노드와 캐시로 전체 HTML/CSS 문자열 생성 (섹션별 스타일·article 본문) */
-function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot, structureMismatchSecs) {
+function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot, structureMismatchSecs, htmlBuildPhase) {
     var codeLines = []
     var deferredStyles = []
     var exportedNodeIds = {}
@@ -49,6 +50,11 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     /** 첫 분석(fontHtmlFilterActive 아님): 필터 없음. 이후: allowedFonts로만 HTML 허용. */
     var fontHtmlUnrestricted = cache.fontHtmlFilterActive !== true
     var allowedFontsForHtml = Array.isArray(cache.allowedFonts) ? cache.allowedFonts : []
+    /** line-height·letter-spacing(--ap-lh/--ap-ls)만 다른 동일 역할: 교집합은 지연 CSS, 그 차이만 인라인. MO 전용 빌드만 끔. */
+    var inlinePcTextTypography = htmlBuildPhase !== "mobile"
+    cache.pcTypoClusterBaseDecl = Object.create(null)
+    cache.pcTypoClusterDeferredPushed = Object.create(null)
+    cache.pcTypoInlineDiffByNode = Object.create(null)
 
     var sectionList = sectionNodesParam && sectionNodesParam.length >= 0 ? sectionNodesParam : (root.children || [])
     var rootBox = getAbs(root)
@@ -95,18 +101,18 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push(".ap-text {")
     codeLines.push("  margin:0;")
     codeLines.push("  font-size:calc(var(--ap-fs)/var(--ap-width)*100cqi);")
-    codeLines.push("  line-height:calc(var(--ap-lh)/var(--ap-width)*100cqi);")
-    codeLines.push("  letter-spacing:calc(var(--ap-ls)/var(--ap-width)*100cqi);")
-    codeLines.push("  font-weight:var(--ap-fw);")
-    codeLines.push("  text-align:var(--ap-ta);")
-    codeLines.push("  color:var(--ap-clr);")
+    codeLines.push("  line-height:calc(var(--ap-fs)*var(--ap-lh, 1.2)/var(--ap-width)*100cqi);")
+    codeLines.push("  letter-spacing:calc(var(--ap-ls, 0)/var(--ap-width)*100cqi);")
+    codeLines.push("  font-weight:var(--ap-fw, 400);")
+    codeLines.push("  text-align:var(--ap-ta, center);")
+    codeLines.push("  color:var(--ap-clr, #000);")
     codeLines.push("}")
     codeLines.push(".ap-text__part {")
     codeLines.push("  font-size:calc(var(--ap-fs)/var(--ap-width)*100cqi);")
     codeLines.push("  line-height:initial;")
-    codeLines.push("  letter-spacing:calc(var(--ap-ls)/var(--ap-width)*100cqi);")
-    codeLines.push("  font-weight:var(--ap-fw);")
-    codeLines.push("  color:var(--ap-clr);")
+    codeLines.push("  letter-spacing:calc(var(--ap-ls, 0)/var(--ap-width)*100cqi);")
+    codeLines.push("  font-weight:var(--ap-fw, 400);")
+    codeLines.push("  color:var(--ap-clr, #000);")
     codeLines.push("}")
     codeLines.push("")
     codeLines.push(".pc-only{ display:block; }")
@@ -231,16 +237,188 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         return prefix + " " + String(innerSel || "").replace(/,/g, ", " + prefix + " ")
     }
 
+    /** 클러스터 허용 차이: lh/ls 만 (081 disambig도 동일 기준으로 접미사 묶음) */
+    var TYPO_INLINE_DIFF_KEYS = {
+        "--ap-lh": 1,
+        "--ap-ls": 1,
+    }
+
+    function parseDeclStringToMap(decl) {
+        var map = Object.create(null)
+        if (!decl || !String(decl).trim()) return map
+        var parts = String(decl).split(";")
+        for (var pi = 0; pi < parts.length; pi++) {
+            var p = parts[pi].trim()
+            if (!p) continue
+            var c = p.indexOf(":")
+            if (c === -1) continue
+            map[p.substring(0, c).trim()] = p.substring(c + 1).trim()
+        }
+        return map
+    }
+
+    function sortedDeclMapToString(m) {
+        if (!m) return ""
+        var keys = Object.keys(m).sort()
+        var out = []
+        for (var si = 0; si < keys.length; si++) out.push(keys[si] + ":" + m[keys[si]])
+        return dedupeCssDecl(out.join(";"))
+    }
+
+    function differsOnlyTypoInlineKeys(mRef, mOther) {
+        var keys = Object.create(null)
+        for (var k in mRef) if (Object.prototype.hasOwnProperty.call(mRef, k)) keys[k] = 1
+        for (var k2 in mOther) if (Object.prototype.hasOwnProperty.call(mOther, k2)) keys[k2] = 1
+        for (var kk in keys) {
+            if (!Object.prototype.hasOwnProperty.call(keys, kk)) continue
+            var a = mRef[kk]
+            var b = mOther[kk]
+            if (a === b) continue
+            if (!TYPO_INLINE_DIFF_KEYS[kk]) return false
+        }
+        return true
+    }
+
+    function intersectionDeclMaps(maps) {
+        if (!maps || !maps.length) return Object.create(null)
+        var out = Object.create(null)
+        for (var k in maps[0]) {
+            if (!Object.prototype.hasOwnProperty.call(maps[0], k)) continue
+            var v = maps[0][k]
+            var ok = true
+            for (var ii = 1; ii < maps.length; ii++) {
+                if (maps[ii][k] !== v) {
+                    ok = false
+                    break
+                }
+            }
+            if (ok) out[k] = v
+        }
+        return out
+    }
+
+    function subtractDeclMaps(full, inter) {
+        var o = Object.create(null)
+        for (var k in full) {
+            if (!Object.prototype.hasOwnProperty.call(full, k)) continue
+            if (!Object.prototype.hasOwnProperty.call(inter, k) || inter[k] !== full[k]) o[k] = full[k]
+        }
+        return o
+    }
+
+    /**
+     * 동일 역할 클래스·단일 스타일 TEXT 중 --ap-lh/--ap-ls 만 다름 → 교집합 지연 CSS·클래스 통일, lh/ls 차이만 인라인.
+     */
+    function collapseSectionTextSemanticsForPcInline(sectionNode, sectionSemantics, secClassStr) {
+        if (!inlinePcTextTypography || !sectionNode || !sectionSemantics) return
+
+        var semOpts = { sectionSemantics: sectionSemantics }
+        var TEXT_ROLE_INNER_RE =
+            /^ap-section__(title|subtitle|desc|description|caption|cta|label|body)(?:--\d{2})?$/
+
+        var items = []
+        function walkTextCollect(n, par) {
+            if (!n || !isVisible(n)) return
+            if (n.type === "TEXT" && n.id) {
+                var sid = String(n.id)
+                var cls = cssInnerSelForNode(sid, semOpts, false).replace(/^\./, "")
+                if (TEXT_ROLE_INNER_RE.test(cls)) {
+                    var ts0 = getTextSummarySync(n)
+                    if (ts0 && (!ts0.parts || !ts0.parts.length)) {
+                        var ta0 = isAbsoluteLike(n, par)
+                        var mp = parseDeclStringToMap(buildTextVarsDecl(ts0))
+                        var wf = getTextFullWidthDecl(n, ta0, par)
+                        if (wf) mp.width = "100%"
+                        items.push({ id: sid, cls: cls, map: mp })
+                    }
+                }
+            }
+            if (isContainer(n)) for (var ci = 0; ci < n.children.length; ci++) walkTextCollect(n.children[ci], n)
+        }
+        walkTextCollect(sectionNode, null)
+
+        var byBase = Object.create(null)
+        for (var hi = 0; hi < items.length; hi++) {
+            var it = items[hi]
+            var baseKey = it.cls.replace(/--\d{2}$/, "")
+            if (!byBase[baseKey]) byBase[baseKey] = []
+            byBase[baseKey].push(it)
+        }
+
+        for (var bk in byBase) {
+            if (!Object.prototype.hasOwnProperty.call(byBase, bk)) continue
+            var list = byBase[bk]
+            if (list.length < 2) continue
+            var i0 = 0
+            while (i0 < list.length) {
+                var j = i0 + 1
+                var mapsCol = [list[i0].map]
+                while (j < list.length && differsOnlyTypoInlineKeys(list[i0].map, list[j].map)) {
+                    mapsCol.push(list[j].map)
+                    j++
+                }
+                if (mapsCol.length < 2) {
+                    i0++
+                    continue
+                }
+                var anchorCls = list[i0].cls
+                var inter = intersectionDeclMaps(mapsCol)
+                var interStr = sortedDeclMapToString(inter)
+                if (!interStr || !String(interStr).trim()) {
+                    i0 = j
+                    continue
+                }
+                var pk = secClassStr + "\x00" + anchorCls
+                if (cache.pcTypoClusterBaseDecl[pk] != null && cache.pcTypoClusterBaseDecl[pk] !== interStr) {
+                    i0 = j
+                    continue
+                }
+                cache.pcTypoClusterBaseDecl[pk] = interStr
+                for (var kk = i0; kk < j; kk++) {
+                    var ent = list[kk]
+                    if (ent.cls !== anchorCls) {
+                        var arr = sectionSemantics[ent.id]
+                        if (arr) {
+                            var ix = arr.indexOf(ent.cls)
+                            if (ix >= 0) arr[ix] = anchorCls
+                        }
+                    }
+                    cache.pcTypoInlineDiffByNode[ent.id] = sortedDeclMapToString(subtractDeclMaps(ent.map, inter))
+                }
+                i0 = j
+            }
+        }
+    }
+
     function pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, includeAbs, ropts) {
         if (includeAbs === undefined) includeAbs = true
         var inner = cssInnerSelForNode(id, ropts || {}, false)
         var vw = visWrapFromOpts(ropts)
-        var textDeclParts = []
-        var decl = buildTextVarsDecl(ts)
-        if (decl) textDeclParts.push(decl)
-        var textFullW = getTextFullWidthDecl(node, textAbs, parent)
-        if (textFullW) textDeclParts.push(textFullW)
-        if (textDeclParts.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textDeclParts.join(";"))
+        if (inlinePcTextTypography) {
+            var rep = inner.replace(/^\./, "")
+            var pk = secClass + "\x00" + rep
+            var baseDecl = cache.pcTypoClusterBaseDecl && cache.pcTypoClusterBaseDecl[pk]
+            if (baseDecl != null && String(baseDecl).trim() !== "") {
+                if (!cache.pcTypoClusterDeferredPushed[pk]) {
+                    cache.pcTypoClusterDeferredPushed[pk] = true
+                    pushDeferredStyle(ctx, selInSection(secClass, inner, vw), dedupeCssDecl(baseDecl))
+                }
+            } else {
+                var textDeclPartsPc = []
+                var declPc = buildTextVarsDecl(ts)
+                if (declPc) textDeclPartsPc.push(declPc)
+                var textFullWPc = getTextFullWidthDecl(node, textAbs, parent)
+                if (textFullWPc) textDeclPartsPc.push(textFullWPc)
+                if (textDeclPartsPc.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textDeclPartsPc.join(";"))
+            }
+        } else {
+            var textDeclParts = []
+            var decl = buildTextVarsDecl(ts)
+            if (decl) textDeclParts.push(decl)
+            var textFullW = getTextFullWidthDecl(node, textAbs, parent)
+            if (textFullW) textDeclParts.push(textFullW)
+            if (textDeclParts.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textDeclParts.join(";"))
+        }
         if (includeAbs && textAbs && id) {
             var textAbsDecl = buildAbsDecl(node, parent)
             if (textAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textAbsDecl)
@@ -259,7 +437,14 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             resp = cache.responsiveTextInnerByNodeId[rid]
         }
         if (resp !== undefined && resp !== null) innerHtml = resp
-        var tag = textNodeTag(node, textCls, dataIdAttr, depth)
+        var inlineStyle = ""
+        if (inlinePcTextTypography && ts) {
+            if (cache.pcTypoInlineDiffByNode && Object.prototype.hasOwnProperty.call(cache.pcTypoInlineDiffByNode, rid)) {
+                var dDiff = cache.pcTypoInlineDiffByNode[rid]
+                if (dDiff) inlineStyle = dedupeCssDecl(dDiff)
+            }
+        }
+        var tag = textNodeTag(node, textCls, dataIdAttr, depth, inlineStyle)
         var html = indent(depth) + tag.open + innerHtml + tag.close
         return isBtnNode(node) ? html : wrapIfBtn(node, html, depth)
     }
@@ -320,7 +505,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     })
             })
             .catch(function () {
-                var tag = textNodeTag(node, textCls, dataIdAttr, depth)
+                var tag = textNodeTag(node, textCls, dataIdAttr, depth, "")
                 return indent(depth) + tag.open + tag.close
             })
     }
@@ -871,6 +1056,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         disambiguateSectionSemantics(sectionNode, sectionSemantics)
         demoteNestedDuplicateSectionRoles(sectionNode, sectionSemantics)
         disambiguateSectionSemantics(sectionNode, sectionSemantics)
+        collapseSectionTextSemanticsForPcInline(sectionNode, sectionSemantics, secClass)
         var collectRopts = {
             includeHidden: true,
             allowedFonts: allowedFontsForHtml,

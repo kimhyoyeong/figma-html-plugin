@@ -1,7 +1,7 @@
 /**
  * 080-text-fonts — 폰트 로드, TEXT 스타일 구간, ap-text CSS 변수, 허용 폰트 판별
  *
- * getTextSummaryAsync/Sync, getTextFontFamiliesSync, buildTextVarsDecl*, textFamiliesAllowedAsHtml 등.
+ * getTextSummaryAsync/Sync, getTextFontFamiliesSync, buildTextVarsDecl*(--ap-lh=줄간/글자크 배율), textFamiliesAllowedAsHtml 등.
  * 지연 CSS·에셋 경로·배경·섹션 시맨틱·폰트 래스터 시맨틱 승격은 082·083·085·081.
  */
 // ----- 텍스트 (폰트 로드, 스타일 구간, CSS 변수) -----
@@ -474,7 +474,51 @@ function textFamiliesAllowedAsHtml(families, allowedHtml, unrestricted) {
     return true
 }
 
-/** 텍스트 스타일 → CSS 변수 (--ap-fs, --ap-lh, --ap-clr 등) */
+/** line-height 를 font-size 대비 배율(1.2, 1.25…)로 스냅 — --ap-lh 는 단위 없음, line-height = fs*ratio */
+function snapLineHeightRatio(ratio) {
+    if (!(ratio > 0) || !isFinite(ratio)) return 1.2
+    var c = Math.min(2.5, Math.max(0.8, ratio))
+    return r2(Math.round(c * 20) / 20)
+}
+
+function effectiveLineHeightPx(fs, lhRaw) {
+    var f = Number(fs) || 0
+    var lh = Number(lhRaw) || 0
+    if (lh <= 0) return f > 0 ? f : 0
+    if (lh > 0 && lh <= 3 && f > 0) return lh * f
+    return lh
+}
+
+function lineHeightRatioFromFsAndLhRaw(fs, lhRaw) {
+    var f = Number(fs) || 0
+    if (f <= 0) return 1
+    var lhPx = effectiveLineHeightPx(f, lhRaw)
+    if (lhPx <= 0) return 1
+    return snapLineHeightRatio(lhPx / f)
+}
+
+/** .ap-text 기본값과 같으면 buildTextVarsDecl 에서 변수 생략 (096 .ap-text fallback 과 맞춤) */
+var AP_TEXT_DEFAULT_LH_RATIO = 1.2
+var AP_TEXT_DEFAULT_FW = 400
+var AP_TEXT_DEFAULT_TA = "center"
+
+function normalizeApTextColorHex(clr) {
+    var s = String(clr || "")
+        .trim()
+        .toLowerCase()
+    if (s === "#000" || s === "#000000") return "#000"
+    return s
+}
+
+function isDefaultApTextColor(clr) {
+    return normalizeApTextColorHex(clr) === "" || normalizeApTextColorHex(clr) === "#000"
+}
+
+function isDefaultApTextLhRatio(ratio) {
+    return r2(Number(ratio) || 0) === AP_TEXT_DEFAULT_LH_RATIO
+}
+
+/** 텍스트 스타일 → CSS 변수 (--ap-fs 필수, 나머지는 기본과 다를 때만) */
 function buildTextVarsDecl(ts) {
     if (!ts) return ""
     var fs = ts.fs !== "" ? Number(ts.fs) || 0 : 0
@@ -483,22 +527,15 @@ function buildTextVarsDecl(ts) {
     var fw = ts.fw !== "" ? Number(ts.fw) || 400 : 400
     var ta = normTextAlign(ts.ta)
     var clr = ts.clr || ""
+    var lhRatio = lineHeightRatioFromFsAndLhRaw(fs, lhRaw)
 
     var parts = []
     parts.push("--ap-fs:" + cssOutNum(fs))
-
-    if (lhRaw > 0) {
-        var lhPx = lhRaw
-        if (lhRaw <= 3 && fs > 0) lhPx = lhRaw * fs // ratio -> px
-        parts.push("--ap-lh:" + cssOutNum(lhPx))
-    } else {
-        parts.push("--ap-lh:" + cssOutNum(fs))
-    }
-
-    parts.push("--ap-ls:" + cssOutNum(ls))
-    parts.push("--ap-fw:" + fw)
-    parts.push("--ap-ta:" + ta)
-    if (clr) parts.push("--ap-clr:" + clr)
+    if (!isDefaultApTextLhRatio(lhRatio)) parts.push("--ap-lh:" + cssOutNum(lhRatio))
+    if (r2(ls) !== 0) parts.push("--ap-ls:" + cssOutNum(ls))
+    if (fw !== AP_TEXT_DEFAULT_FW) parts.push("--ap-fw:" + fw)
+    if (ta !== AP_TEXT_DEFAULT_TA) parts.push("--ap-ta:" + ta)
+    if (!isDefaultApTextColor(clr)) parts.push("--ap-clr:" + clr)
 
     if (!ts.parts || !ts.parts.length) {
         var tcf = figTextCaseToDeclFragment(ts.textCase)
@@ -513,16 +550,22 @@ function buildTextVarsDeclDiff(tsD, tsM) {
     if (!tsM) return ""
     var parts = []
     function normTs(ts) {
-        if (!ts) return {fs: 0, lh: 0, lhPx: 0, ls: 0, fw: 400, ta: "left", clr: ""}
+        if (!ts) {
+            return {
+                fs: 0,
+                lhRatio: AP_TEXT_DEFAULT_LH_RATIO,
+                ls: 0,
+                fw: AP_TEXT_DEFAULT_FW,
+                ta: AP_TEXT_DEFAULT_TA,
+                clr: "",
+                tc: "ORIGINAL",
+            }
+        }
         var fs = ts.fs !== "" ? Number(ts.fs) || 0 : 0
         var lhRaw = ts.lh !== "" ? Number(ts.lh) || 0 : 0
-        var lhPx = lhRaw
-        if (lhRaw > 0 && lhRaw <= 3 && fs > 0) lhPx = lhRaw * fs
-        else if (lhRaw <= 0) lhPx = fs
         return {
             fs: fs,
-            lh: lhRaw,
-            lhPx: r2(lhPx),
+            lhRatio: lineHeightRatioFromFsAndLhRaw(fs, lhRaw),
             ls: ts.ls !== "" ? Number(ts.ls) || 0 : 0,
             fw: ts.fw !== "" ? Number(ts.fw) || 400 : 400,
             ta: normTextAlign(ts.ta),
@@ -533,11 +576,14 @@ function buildTextVarsDeclDiff(tsD, tsM) {
     var d = normTs(tsD)
     var m = normTs(tsM)
     if (d.fs !== m.fs) parts.push("--ap-fs:" + cssOutNum(m.fs))
-    if (d.lhPx !== m.lhPx) parts.push("--ap-lh:" + cssOutNum(m.lhPx))
+    if (d.lhRatio !== m.lhRatio) parts.push("--ap-lh:" + cssOutNum(m.lhRatio))
     if (r2(d.ls) !== r2(m.ls)) parts.push("--ap-ls:" + cssOutNum(m.ls))
     if (d.fw !== m.fw) parts.push("--ap-fw:" + m.fw)
     if (d.ta !== m.ta) parts.push("--ap-ta:" + m.ta)
-    if (d.clr !== m.clr && m.clr) parts.push("--ap-clr:" + m.clr)
+    if (normalizeApTextColorHex(d.clr) !== normalizeApTextColorHex(m.clr)) {
+        if (isDefaultApTextColor(m.clr)) parts.push("--ap-clr:#000")
+        else parts.push("--ap-clr:" + m.clr)
+    }
     if (d.tc !== m.tc) {
         var moCaseFrag = figTextCaseToDeclFragment(tsM && tsM.textCase)
         if (moCaseFrag) parts.push(moCaseFrag)
