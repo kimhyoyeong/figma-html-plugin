@@ -1003,7 +1003,7 @@
 
     .previewPane--mo {
       flex: 0 0 auto;
-      width: min(100%, 390px);
+      width: min(100%, 375px);
       max-width: 100%;
     }
 
@@ -1024,6 +1024,12 @@
       background: #fff;
       box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
       border-radius: var(--ap-radius-sm);
+    }
+
+    .previewPane--pc iframe {
+      max-width: 1920px;
+      margin-left: auto;
+      margin-right: auto;
     }
 
     .previewToolbarDualHint {
@@ -1219,6 +1225,8 @@
       flex: 1;
       min-height: 0;
       width: 100%;
+      max-width: 1920px;
+      margin: 0 auto;
       border: 0;
       background: #fff;
     }
@@ -1984,9 +1992,9 @@
       return !!(mobileDataTree && previewImagesReady);
     }
 
-    /** MO iframe·meta viewport 폭(px), bp와 375 중 작은 값 */
+    /** MO iframe·meta viewport 폭(px) — 미리보기는 375 기준 고정 */
     function previewMoViewportCssPx() {
-      return Math.min(375, (typeof lastMoBreakpoint === "number" && lastMoBreakpoint > 0) ? lastMoBreakpoint : 375);
+      return 375;
     }
 
     function updatePreviewToolbar() {
@@ -2223,9 +2231,8 @@
       if (msg.type === "ZIP_IMAGES_END") {
         setExportZipReady();
         var zipImages = zipImagesBuffer.slice();
-        var exportHtml = extractCmsExportFragment(
-          zipImagesCode || (($("#codeOut") && $("#codeOut").value) || "")
-        );
+        var zipCodeSource = zipImagesCode || (($("#codeOut") && $("#codeOut").value) || "");
+        var exportHtml = wrapCmsZipStandaloneHtml(extractCmsExportFragment(zipCodeSource), zipCodeSource);
         if (!exportHtml.trim()) return;
 
         var zip = new JSZip();
@@ -2610,8 +2617,8 @@
     }
 
     // ----- 미리보기: HTML 조립 · iframe · blob URL -----
-    /** PC 미리보기 meta width (중첩 iframe에서 뷰포트 클램프 보정) */
-    var PREVIEW_PC_LAYOUT_WIDTH = 1440;
+    /** PC 미리보기 meta width — 1920 설계 폭 기준 */
+    var PREVIEW_PC_LAYOUT_WIDTH = 1920;
     var previewBlobUrl = null;
     var previewBlobUrlPc = null;
     var previewBlobUrlMo = null;
@@ -2703,6 +2710,87 @@
       var afterArticle = end + "</article>".length;
       var core = s.substring(start, afterArticle).replace(/\s+$/, "");
       return core + extractPostArticleScriptsForZip(s, afterArticle);
+    }
+
+    /** `_cms.html` 본문에 Swiper 루트가 있으면 미리보기와 동일 Swiper CDN */
+    function cmsZipFragmentUsesSwiper(fragment) {
+      return /\bclass\s*=\s*["'][^"']*\bswiper\b[^"']*["']/i.test(String(fragment || ""));
+    }
+
+    /** 코드 탭에서 `<style>` 앞에 둔 `<link>`·`<meta>`·외부 src `<script>` → ZIP `<head>`에 포함 */
+    function extractCmsExternalHeadSnippets(fullHtml) {
+      var s = stripEmbeddedAuditReport(String(fullHtml || ""));
+      var idx = s.indexOf("<style>");
+      if (idx <= 0) return "";
+      var headPart = s.substring(0, idx);
+      var chunks = [];
+      var linkRe = /<link\b[^>]*>/gi;
+      var metaRe = /<meta\b[^>]*>/gi;
+      var extScriptRe =
+        /<script\b[^>]*\bsrc\s*=\s*["'](?:https?:\/\/|\/\/)[^"']+["'][^>]*>\s*<\/script>/gi;
+      var m;
+      while ((m = linkRe.exec(headPart)) !== null) chunks.push(m[0]);
+      while ((m = metaRe.exec(headPart)) !== null) chunks.push(m[0]);
+      while ((m = extScriptRe.exec(headPart)) !== null) chunks.push(m[0]);
+      return chunks.length ? "\n  " + chunks.join("\n  ") : "";
+    }
+
+    /** `</article>` 뒤에만 있는 CDN `<script src="https…">`(인라인 초기화는 extractPostArticleScriptsForZip이 본문에 유지) */
+    function extractCmsExternalScriptsAfterArticle(fullHtml) {
+      var s = stripEmbeddedAuditReport(String(fullHtml || ""));
+      var pos = s.indexOf("</article>");
+      if (pos < 0) return "";
+      var tail = s.substring(pos + "</article>".length);
+      var re =
+        /<script\b[^>]*\bsrc\s*=\s*["']((?:https?:\/\/|\/\/)[^"']+)["'][^>]*>\s*<\/script>/gi;
+      var seen = Object.create(null);
+      var chunks = [];
+      var m;
+      while ((m = re.exec(tail)) !== null) {
+        var u = m[1];
+        if (seen[u]) continue;
+        seen[u] = true;
+        chunks.push(m[0]);
+      }
+      return chunks.length ? "\n  " + chunks.join("\n  ") : "";
+    }
+
+    /** ZIP `_cms.html`: charset·viewport·(선택) 사용자 head·Swiper CDN·body 래퍼 */
+    function wrapCmsZipStandaloneHtml(fragment, fullSourceHtml) {
+      var core = String(fragment || "").trim();
+      if (!core) return "";
+      var apSwiperCdn = "https://cdnjs.cloudflare.com/ajax/libs/Swiper/11.0.0";
+      var extraHead = extractCmsExternalHeadSnippets(fullSourceHtml);
+      var tailCdnScripts = extractCmsExternalScriptsAfterArticle(fullSourceHtml);
+      var hasSwiperCdn = /swiper-bundle|cdnjs\.cloudflare\.com\/ajax\/libs\/Swiper/i.test(
+        String(fullSourceHtml || "")
+      );
+      var swiperHead = "";
+      if (cmsZipFragmentUsesSwiper(core) && !hasSwiperCdn) {
+        swiperHead =
+          "\n  <link rel=\"stylesheet\" href=\"" +
+          apSwiperCdn +
+          "/swiper-bundle.min.css\">" +
+          "\n  <script src=\"" +
+          apSwiperCdn +
+          "/swiper-bundle.min.js\"><\/script>";
+      }
+      return (
+        "<!DOCTYPE html>\n" +
+        "<html lang=\"ko\">\n" +
+        "<head>\n" +
+        "  <meta charset=\"utf-8\">\n" +
+        "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+        extraHead +
+        swiperHead +
+        tailCdnScripts +
+        "\n  <style>body{margin:0;min-height:100vh;background:#f5f5f5;}</style>\n" +
+        "</head>\n" +
+        "<body>\n" +
+        core +
+        "\n</body>\n" +
+        "</html>\n"
+      );
     }
 
     function getPreviewHtml(forExport, forceViewportWidth, previewStripMoMq, previewRole) {

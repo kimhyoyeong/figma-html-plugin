@@ -598,19 +598,19 @@ function getFirstSolidStroke(node) {
 /** corner radius → border-radius CSS (responsive calc). cornerRadius 통일 또는 topLeftRadius 등 개별값 지원 */
 function buildCornerRadiusDecl(node) {
     if (!node) return ""
-    var calc = function (px) {
+    var calcR = function (px) {
         return "calc(" + cssOutLayoutPx(px) + "/var(--ap-width)*100cqi)"
     }
     try {
         var cr = node.cornerRadius
-        if (typeof cr === "number" && cr > 0) return "border-radius:" + calc(cr)
+        if (typeof cr === "number" && cr > 0) return "border-radius:" + calcR(cr)
     } catch (e1) {}
     try {
         var tl = typeof node.topLeftRadius === "number" ? node.topLeftRadius : 0
         var tr = typeof node.topRightRadius === "number" ? node.topRightRadius : 0
         var br = typeof node.bottomRightRadius === "number" ? node.bottomRightRadius : 0
         var bl = typeof node.bottomLeftRadius === "number" ? node.bottomLeftRadius : 0
-        if (tl > 0 || tr > 0 || br > 0 || bl > 0) return "border-radius:" + calc(tl) + " " + calc(tr) + " " + calc(br) + " " + calc(bl)
+        if (tl > 0 || tr > 0 || br > 0 || bl > 0) return "border-radius:" + calcR(tl) + " " + calcR(tr) + " " + calcR(br) + " " + calcR(bl)
     } catch (e2) {}
     return ""
 }
@@ -620,12 +620,12 @@ function buildStrokeDecl(node) {
     var stroke = getFirstSolidStroke(node)
     if (!stroke || !stroke.color) return ""
     var style = stroke.dashes ? "dashed" : "solid"
-    var calc = function (w) {
+    var calcW = function (w) {
         return "calc(" + cssOutLayoutPx(w) + "/var(--ap-width)*100cqi)"
     }
     var parts = []
     if (stroke.top > 0 || stroke.bottom > 0 || stroke.left > 0 || stroke.right > 0) {
-        parts.push("border-width:" + calc(stroke.top) + " " + calc(stroke.right) + " " + calc(stroke.bottom) + " " + calc(stroke.left))
+        parts.push("border-width:" + calcW(stroke.top) + " " + calcW(stroke.right) + " " + calcW(stroke.bottom) + " " + calcW(stroke.left))
         parts.push("border-style:" + style)
         parts.push("border-color:" + stroke.color)
     }

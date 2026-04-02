@@ -1620,19 +1620,19 @@ function getFirstSolidStroke(node) {
 /** corner radius → border-radius CSS (responsive calc). cornerRadius 통일 또는 topLeftRadius 등 개별값 지원 */
 function buildCornerRadiusDecl(node) {
     if (!node) return ""
-    var calc = function (px) {
+    var calcR = function (px) {
         return "calc(" + cssOutLayoutPx(px) + "/var(--ap-width)*100cqi)"
     }
     try {
         var cr = node.cornerRadius
-        if (typeof cr === "number" && cr > 0) return "border-radius:" + calc(cr)
+        if (typeof cr === "number" && cr > 0) return "border-radius:" + calcR(cr)
     } catch (e1) {}
     try {
         var tl = typeof node.topLeftRadius === "number" ? node.topLeftRadius : 0
         var tr = typeof node.topRightRadius === "number" ? node.topRightRadius : 0
         var br = typeof node.bottomRightRadius === "number" ? node.bottomRightRadius : 0
         var bl = typeof node.bottomLeftRadius === "number" ? node.bottomLeftRadius : 0
-        if (tl > 0 || tr > 0 || br > 0 || bl > 0) return "border-radius:" + calc(tl) + " " + calc(tr) + " " + calc(br) + " " + calc(bl)
+        if (tl > 0 || tr > 0 || br > 0 || bl > 0) return "border-radius:" + calcR(tl) + " " + calcR(tr) + " " + calcR(br) + " " + calcR(bl)
     } catch (e2) {}
     return ""
 }
@@ -1642,12 +1642,12 @@ function buildStrokeDecl(node) {
     var stroke = getFirstSolidStroke(node)
     if (!stroke || !stroke.color) return ""
     var style = stroke.dashes ? "dashed" : "solid"
-    var calc = function (w) {
+    var calcW = function (w) {
         return "calc(" + cssOutLayoutPx(w) + "/var(--ap-width)*100cqi)"
     }
     var parts = []
     if (stroke.top > 0 || stroke.bottom > 0 || stroke.left > 0 || stroke.right > 0) {
-        parts.push("border-width:" + calc(stroke.top) + " " + calc(stroke.right) + " " + calc(stroke.bottom) + " " + calc(stroke.left))
+        parts.push("border-width:" + calcW(stroke.top) + " " + calcW(stroke.right) + " " + calcW(stroke.bottom) + " " + calcW(stroke.left))
         parts.push("border-style:" + style)
         parts.push("border-color:" + stroke.color)
     }
@@ -6447,6 +6447,9 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("  margin:0;")
     codeLines.push("  box-sizing:border-box;")
     codeLines.push("}")
+    codeLines.push(".ap-post {")
+    codeLines.push("  --ap-fs-min:6px;")
+    codeLines.push("}")
     codeLines.push("")
     codeLines.push(".ap-post__inner {")
     codeLines.push("  container:article/inline-size;")
@@ -6480,16 +6483,16 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     // text
     codeLines.push(".ap-text {")
     codeLines.push("  margin:0;")
-    codeLines.push("  font-size:calc(var(--ap-fs)/var(--ap-width)*100cqi);")
-    codeLines.push("  line-height:calc(var(--ap-fs)*var(--ap-lh, 1.2)/var(--ap-width)*100cqi);")
+    codeLines.push("  font-size:clamp(var(--ap-fs-min),calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));")
+    codeLines.push("  line-height:var(--ap-lh, 1.2);")
     codeLines.push("  letter-spacing:calc(var(--ap-ls, 0)/var(--ap-width)*100cqi);")
     codeLines.push("  font-weight:var(--ap-fw, 400);")
     codeLines.push("  text-align:var(--ap-ta, center);")
     codeLines.push("  color:var(--ap-clr, #000);")
     codeLines.push("}")
     codeLines.push(".ap-text__part {")
-    codeLines.push("  font-size:calc(var(--ap-fs)/var(--ap-width)*100cqi);")
-    codeLines.push("  line-height:initial;")
+    codeLines.push("  font-size:clamp(var(--ap-fs-min),calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));")
+    codeLines.push("  line-height:var(--ap-lh, 1.2);")
     codeLines.push("  letter-spacing:calc(var(--ap-ls, 0)/var(--ap-width)*100cqi);")
     codeLines.push("  font-weight:var(--ap-fw, 400);")
     codeLines.push("  color:var(--ap-clr, #000);")
@@ -6553,8 +6556,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after { content:none; }")
     codeLines.push(".ap-post .swiper-button-prev,")
     codeLines.push(".ap-post .swiper-button-next {")
-    codeLines.push("  width: clamp(0px, calc(40 / var(--ap-width) * 100cqi), 40px);")
-    codeLines.push("  height: clamp(0px, calc(80 / var(--ap-width) * 100cqi), 80px);")
+    codeLines.push("  width: calc(40 / var(--ap-width) * 100cqi);")
+    codeLines.push("  height: calc(80 / var(--ap-width) * 100cqi);")
     codeLines.push("  background-color: var(--swiper-navigation-color);")
     codeLines.push('  -webkit-mask: url("' + apSwiperNavArrowDataUrl + '") no-repeat center / contain;')
     codeLines.push('  mask: url("' + apSwiperNavArrowDataUrl + '") no-repeat center / contain;')
