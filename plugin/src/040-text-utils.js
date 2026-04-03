@@ -8,7 +8,7 @@
  * newlineGapsForResponsive, appendResponsiveBrSlotHtml, buildResponsiveBrInnerFromPcMoChars — 개행 개수만 다를 때 pc-only/mo-only <br>
  * textSummaryAllowsResponsiveBrOverride — 단일 스타일 구간일 때만 MO 줄바꿈 오버라이드 허용
  * moTextNodeFromNameMap, buildResponsiveTextInnerByNodeIdMap — MO 텍스트를 이름/트리로 매칭해 노드 id → inner HTML
- * buildTextPartInnerHtml — 스타일 구간별 ap-text__part span·부모 변수
+ * buildTextPartInnerHtml — 스타일 구간별 ap-text__part span (--ap-part-* 는 블록 .ap-text 의 --ap-* 와 분리)
  * normTextAlign, getLineBreakPoints — Figma 정렬 → CSS, 줄바꿈 인덱스
  * indent, wrapChunksAsUlOrDiv — HTML 들여쓰기·리스트/프레임 래핑
  */
@@ -159,7 +159,7 @@ function buildResponsiveTextInnerByNodeIdMap(desktopRoot, mobileRoot) {
     }
     return map
 }
-/** mixed 텍스트: parts 있으면 ap-text__part span으로 출력 (--ap-fs, --ap-fw, --ap-clr, --ap-ls 로 부모 변수 오버라이드). 모든 part가 동일한 값이면 부모 style로만 출력 */
+/** mixed 텍스트: parts 있으면 ap-text__part span (--ap-part-fs/fw/clr/ls; 부모 p는 --ap-*). 모든 part가 동일하면 부모 style만 */
 function buildTextPartInnerHtml(ts) {
     if (!ts) return ""
     var parts = ts.parts
@@ -172,13 +172,13 @@ function buildTextPartInnerHtml(ts) {
     var partLs = [], partFw = [], partClr = [], partFs = [], partTc = []
     for (var i = 0; i < parts.length; i++) {
         var p = parts[i]
-        if (Math.abs((p.ls || 0) - baseLsEm) >= 0.001) partLs.push("--ap-ls:" + (Number(p.ls) || 0).toFixed(3) + "em")
+        if (Math.abs((p.ls || 0) - baseLsEm) >= 0.001) partLs.push("--ap-part-ls:" + (Number(p.ls) || 0).toFixed(3) + "em")
         else partLs.push(null)
-        if (p.fw != null && p.fw !== baseFw) partFw.push("--ap-fw:" + Number(p.fw))
+        if (p.fw != null && p.fw !== baseFw) partFw.push("--ap-part-fw:" + Number(p.fw))
         else partFw.push(null)
-        if (p.clr && (p.clr !== baseClr)) partClr.push("--ap-clr:" + p.clr)
+        if (p.clr && (p.clr !== baseClr)) partClr.push("--ap-part-clr:" + p.clr)
         else partClr.push(null)
-        if (p.fs != null && p.fs > 0 && (!baseFs || Math.abs(p.fs - baseFs) >= 1)) partFs.push("--ap-fs:" + Math.round(p.fs))
+        if (p.fs != null && p.fs > 0 && (!baseFs || Math.abs(p.fs - baseFs) >= 1)) partFs.push("--ap-part-fs:" + Math.round(p.fs))
         else partFs.push(null)
         partTc.push(
             normalizeFigTextCaseKey(p.textCase != null && p.textCase !== "" ? p.textCase : ts.textCase),

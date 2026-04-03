@@ -108,11 +108,13 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("  color:var(--ap-clr, #000);")
     codeLines.push("}")
     codeLines.push(".ap-text__part {")
-    codeLines.push("  font-size:clamp(0px,calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));")
-    codeLines.push("  line-height:var(--ap-lh, 1.2);")
-    codeLines.push("  letter-spacing:calc(var(--ap-ls, 0)/var(--ap-width)*100cqi);")
-    codeLines.push("  font-weight:var(--ap-fw, 400);")
-    codeLines.push("  color:var(--ap-clr, #000);")
+    codeLines.push(
+        "  font-size:clamp(0px,calc(var(--ap-part-fs)/var(--ap-width)*100cqi),calc(var(--ap-part-fs)*1px));"
+    )
+    codeLines.push("  line-height:var(--ap-part-lh);")
+    codeLines.push("  letter-spacing:calc(var(--ap-part-ls)/var(--ap-width)*100cqi);")
+    codeLines.push("  font-weight:var(--ap-part-fw);")
+    codeLines.push("  color:var(--ap-part-clr);")
     codeLines.push("}")
     codeLines.push("")
     codeLines.push(".pc-only{ display:block; }")
