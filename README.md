@@ -1,194 +1,273 @@
 # Figma HTML Export (figma-html-plugin)
 
-통이미지·랜딩 등 Figma 시안을 **반응형 HTML/CSS 초안**으로 옮기기 위한 내부용 플러그인입니다. 레이아웃·섹션 시맨틱·타이포·이미지 export를 규칙으로 묶고, 필요 시 AI 검수로 `alt`·헤딩 등을 보완합니다.
+Figma 시안을 **반응형 HTML/CSS 초안**과 이미지 에셋 목록으로 바꾸는 내부용 플러그인입니다. 레이아웃·섹션·타이포·이미지는 **규칙으로 자동 변환**하고, 필요하면 **OpenAI / Gemini**로 `alt`·헤딩·시맨틱을 검수합니다.
 
 ---
 
 ## 1. 프로젝트 소개
 
-Figma 플러그인(`figma.showUI`)으로 선택한 프레임(ROOT) 트리를 순회해 **HTML/CSS·에셋 목록**을 만들고, UI에서 미리보기·ZIP·(선택) **OpenAI / Gemini 검수·반영**을 제공합니다.
-
-- **메인 스레드**: `plugin/src/*.js`를 이어 붙인 `plugin/code.js` (`npm run build`로 생성).
-- **UI**: `plugin/ui.html` 단일 파일(마크업·스타일·스크립트).
-- **진입**: `plugin/manifest.json` → `main: code.js`, `ui: ui.html`.
+- Figma에서 **ROOT 프레임**을 고르고 실행하면, 그 아래 트리를 읽어 **HTML/CSS**와 **보낼 이미지 경로**를 만듭니다.
+- **UI**(`plugin/ui.html`)에서 미리보기·코드 확인·ZIP보내기·AI 검수/반영을 합니다.
+- **메인 로직**은 `plugin/code.js` 한 파일이며, 소스는 `plugin/src` 여러 파일을 `npm run build`로 합칩니다.
 
 ---
 
 ## 2. 문제 정의
 
-- Figma 디자인을 퍼블리싱할 때 수작업 비중이 큼.
-- 레이어 구조가 표준화되지 않으면 자동 변환 규칙을 일관되게 적용하기 어려움.
-- PC·MO(모바일) 프레임이 서로 다른 트리 구조를 가질 때, 단일 규칙만으로 스타일·에셋을 맞추기 어려움.
-- 상세 페이지(PDP) 등에서 작업 기간이 길어지는 경우가 있음(도메인·팀 기준 수치는 본 저장소 코드와 무관).
+- 디자인 → 코드 작업에 수작업이 많다.
+- 레이어 구조가 제각각이면 같은 규칙을 일관되게 적용하기 어렵다.
+- PC·모바일 프레임의 **트리가 다르면** 스타일·이미지 파일을 한 번에 맞추기 어렵다.
 
 ---
 
 ## 3. 해결 방법
 
-- Figma Plugin API로 선택 노드 트리를 순회·분석하고, 레이어 이름 규칙(`code-*`)과 레이아웃·이미지 export 파이프라인으로 **HTML/CSS 초안**을 생성합니다.
-- PC·MO를 동시에 선택한 경우, 가로 폭이 큰 프레임을 PC로 해석하고, 트리·시맨틱·이름 등 **규칙 기반 휴리스틱**으로 MO용 `@media` 오버라이드 또는 `pc-only` / `mo-only` 분기 HTML을 조합합니다.
-- 생성된 마크업에 대해 UI에서 **OpenAI 또는 Gemini**를 호출해 SEO·접근성·시맨틱·`alt`·헤딩을 검수하고, 선택적으로 이미지 비전(JPEG)을 붙여 `alt` 품질을 높입니다(아래 [5. AI 활용 방식](#5-ai-활용-방식)).
+- Figma Plugin API로 노드를 읽고, **레이어 이름 규칙**(`code-*`)과 **Auto Layout / 절대 배치** 규칙으로 마크업을 만든다.
+- PC+MO를 **둘 다 선택**하면 가로가 큰 쪽을 PC로 보고, 섹션별로 구조가 맞는지 비교한 뒤  
+  - 맞으면 **`@media`**로 스타일을 합치고  
+  - 다르면 **`pc-only` / `mo-only`** 로 나눠 출력한다.
+- 생성된 HTML/CSS를 UI에서 **선택적으로 AI에 보내** 접근성·시맨틱을 다듬는다. (PC/MO 구조 판별 자체는 AI를 쓰지 않는다.)
 
 ---
 
-## 4. 주요 기능
+## 4. 주요 기능 (읽기 쉬운 목록)
 
-### 4.1 구현된 기능
+### 4.1 분석·입력
 
-- **선택 노드 기반 분석**: ROOT 1개(PC만) 또는 2개(PC+MO). 2개일 때 가로가 큰 쪽을 PC, 작은 쪽을 MO로 처리(`resolveDesktopMobile`).
-- **레이어 인스펙트 데이터**: `dumpTreeAsync`가 `dataTree` 객체(`rootSummary`, `sections`, `legend`)와 평탄화 텍스트를 만들어 UI로 전달(원시 Figma REST “씬 JSON 파일” 덤프와는 별개).
-- **레이아웃·위치·자식 관계 분석**: Auto Layout·절대 배치·텍스트·이미지 후보 등 메인 스레드 모듈(`060-layout.js`, `050-core-node.js`, `070-image-export.js` 등)에서 처리.
-- **레이어 이름 규칙**: 대소문자 무관 정확 일치 기준  
-  - `code-btn` → `<a class="ap-btn">` 계열  
-  - `code-slide` → Swiper용 슬라이드 구조(자식 구성 규칙은 `getSlideItems` 주석 참고)  
-  - `code-video` → 비디오 플레이스홀더  
-  - `code-raster` → 단일 래스터 export 우선
-- **HTML/CSS 생성**: 섹션 BEM(`ap-section--NN`), 슬라이드 마크업, 지연 CSS, 이미지 경로·폰트 등(`096-html-code-builder.js` 등).
-- **텍스트 타이포(CSS 변수)** (`080-text-fonts.js`, `096-html-code-builder.js` 생성 규칙)  
-  - `--ap-fs`: 디자인 기준 글자 크기(숫자).  
-  - **`--ap-lh`: 글자 크기 대비 줄간 비율(무단위)** — Figma px/퍼센트 줄간을 환산한 뒤 **0.05 단위로 스냅**(예: 1.2, 1.25, 1.3). 실제 `line-height`는 `font-size × 비율`과 같은 `calc(var(--ap-fs)*var(--ap-lh, …)/…)`로 맞춤.  
-  - `.ap-text` **기본값(fallback)**: 줄간 비율 `1.2`, 자간 `0`, 굵기 `400`, 정렬 `center`, 색 `#000`. `buildTextVarsDecl`은 이와 같으면 해당 변수 선언을 **생략**하고, CSS `var(--ap-*, fallback)`으로 처리.  
-  - PC/MO 차이만 넣는 `buildTextVarsDeclDiff`는 PC와 MO 값이 다를 때만 속성을 출력(기본값으로 되돌릴 때도 명시적으로 덮어씀).
-- **섹션 텍스트 역할 접미사(`--02` 등)** (`081-section-semantics.js`)  
-  - `title` / `desc` 등 **텍스트 역할**에서 동일 클래스가 여러 노드에 걸릴 때, **`--ap-lh` / `--ap-ls`만** 다르면 **접미사로 쪼개지 않고** 한 역할 클래스를 공유하도록 그룹화(union-find).  
-  - 그 외(fs·fw·색 등) 차이는 기존처럼 `--02`, `--03` … 로 구분.
-- **줄간·자간만 다른 동일 역할 묶음** (`096-html-code-builder.js`, `phase !== "mobile"`인 빌드)  
-  - 교집합 타이포는 지연 CSS **한 블록**, 노드별 차이는 `style`에 `--ap-lh` / `--ap-ls` 등만 인라인. **MO 전용 트리 빌드**(`dumpTreeAsync` `phase: "mobile"`)에서는 `@media` 정합을 위해 이 경로를 끔.
-- **GEO 시맨틱 힌트**: AI 검수 결과의 구조·역할 힌트를 `geoStructure`로 넘기면 `buildSectionSemanticClasses`에서 `ap-section__*` 역할 보정에 반영(`081`, `097`, `099` 등).
-- **폰트 → HTML vs 래스터**: UI **허용 폰트** 목록에 없는 서체가 섞인 TEXT는 HTML 대신 이미지로 export되는 경로가 있음(`080-text-fonts.js`의 `textFamiliesAllowedAsHtml` 등).
-- **Swiper 관련 계산**: `computeSlidesPerView` / `computeSlidesPerViewMo`, `resolveSlideMeta`로 슬라이드당 노출 수 등 메타 계산; 생성 HTML에 Swiper 초기화용 인라인 조립(주석상 **Swiper CDN `<script>`/`<link>` 주입은 미리보기 UI 쪽**).
-- **PC/MO 비교·병합(규칙 기반)**  
-  - 섹션별 트리 시그니처 비교(`getSectionStructureMatch`, 최대 3레벨 자식 시그니처)  
-  - 구조가 맞지 않으면 UI/상태에서 “불일치” 표시 및 `pc-only` / `mo-only` 래핑·지연 CSS 경로  
-  - `@media` 병합(`combinePcMoAsBreakpoint`), 이미지는 `sourceNodeId`·semantic slot·동일 id·이름 폴백 등으로 MO 노드 해석(`resolveMoImageNodeForPc`)
-- **보내기**: 이미지·코드·ZIP 관련 메시지 타입(`RESULT`, `RESULT_IMAGES_*`, `ZIP_*` 등)으로 UI와 연동(`099-ui-router.js`).
-- **`img alt` (보내기 시점)**: `getImageAltText` — **이미지 노드의 레이어 `name`을 이스케이프 후 사용**(최대 125자). AI와 무관.
+- **ROOT 1개**: PC(또는 단일) 기준으로만 분석.
+- **ROOT 2개**: 가로가 큰 프레임 = PC, 작은 프레임 = 모바일. UI에서 **분석**만 눌러도 선택 개수에 따라 위 두 모드로 자동 분기된다.
+- **프로젝트명·국가 코드** 등은 UI에서 넘기면 **이미지 파일명** 등에 반영된다.
 
-### 4.2 부분 구현 / 조건부
+### 4.2 레이어 인스펙트
 
-- **고품질 `alt`·헤딩**: 초기 HTML은 레이어명 기반. **의미 있는 접근성 문구**는 코드 탭의 AI **검수·반영** 플로우에서 보완(네트워크·API 키·모델 응답 품질에 의존).
-- **Swiper 런타임**: 생성물에 맞춘 마크업/스타일은 포함하나, **라이브러리 CDN 로드는 미리보기 UI에서의 주입 패턴**으로 기술되어 있음 — 배포 HTML에 CDN을 자동 삽입하는지 여부는 생성 문자열과 배포 방식에 따라 별도 확인이 필요.
+- 선택 프레임을 **섹션 단위**로 요약한 트리 텍스트·객체(`dataTree`)를 UI에 보낸다. (REST API용 전체 씬 JSON 덤프와는 다르다.)
 
-### 4.3 미구현(본 저장소 코드 기준으로 확인되지 않음)
+### 4.3 레이아웃
 
-- **Figma 노드 트리를 외부 AI에 보내 PC/MO 노드를 자동 재정렬·“의미 단위”로 매핑하는 파이프라인** (PC/MO 처리는 전부 플러그인 내 규칙/휴리스틱).
-- **공식 Figma REST API 형태의 전체 씬 JSON 파일 export** 전용 기능.
-- **AI 없이도 완전 자동으로 PDP급 품질을 보장**하는 검증 단계(수동 검토·프롬프트 튜닝 여지).
+- **Auto Layout** → flex 방향·간격·패딩·정렬 등을 CSS로 옮긴다.
+- **절대 배치** 자식은 위치·크기를 CSS 변수(`--ap-left` 등)로 계산한다.
+
+### 4.4 레이어 이름 규칙 (`code-*`, 대소문자 무시·정확 일치)
+
+| 이름 | 대략의 결과 |
+|------|-------------|
+| `code-btn` | 버튼/링크용 `ap-btn` 마크업 |
+| `code-slide` | Swiper용 슬라이드 구조(자식 구성은 슬라이드 모듈 주석 참고) |
+| `code-video` | 비디오 플레이스홀더 |
+| `code-raster` | 해당 노드를 **한 장의 래스터**로 우선 export |
+
+### 4.5 HTML/CSS 생성
+
+- ROOT 직계 자식을 **섹션**으로 나누고 `ap-section--01` … 형태의 클래스를 쓴다.
+- 스타일은 **지연 `<style>`** 에 모아 두는 부분이 많다.
+- **Swiper**용 마크업·인라인 초기화 스크립트는 생성한다. **CDN `<script>`/`<link>`** 는 주로 **미리보기 UI**에서 넣는 패턴이다.
+
+### 4.6 텍스트·타이포
+
+- 글자 크기·줄간·자간·굵기·색 등을 **CSS 변수**(`--ap-fs`, `--ap-lh` …)로보낸다.
+- 줄간은 Figma 값을 **글자 크기 대비 비율**로 바꾼 뒤 **0.05 단위로 반올림**한다.
+- 기본값과 같으면 변수 선언을 **생략**하고 CSS `var(..., fallback)`으로 처리한다.
+- PC와 모바일 값이 다를 때만 **차이만** 추가하는 경로가 있다. (모바일 전용 빌드 단계에서는 `@media`와 맞추기 위해 일부 최적화를 끈다.)
+
+### 4.7 섹션 시맨틱·텍스트 역할
+
+- 섹션 안에서 `title` / `desc` 같은 **역할 클래스**를 붙인다.
+- 역할이 같은데 **줄간·자간만** 다르면 굳이 `--02`처럼 쪼개지 않고 **한 클래스를 공유**하도록 묶는다. (글자 크기·색 등이 다르면 기존처럼 접미사로 구분.)
+
+### 4.8 GEO 힌트
+
+- AI 검수에서 나온 **구조·역할 힌트**를 다시 분석에 넘기면, 섹션 시맨틱 보정에 반영할 수 있다.
+
+### 4.9 폰트
+
+- UI에서 지정한 **허용 폰트**에 없는 서체가 섞인 텍스트는, HTML 텍스트 대신 **이미지로 export**되는 경로가 있다.
+
+### 4.10 도형·선
+
+- **Line 도구**와 이름이 `line`인 단순 벡터는 **이미지 파일이 아니라** CSS 클래스 `ap-line`으로 그린다. (색·두께는 주로 **Stroke** 기준. Fill만 있고 Stroke가 없으면 색이 기대와 다를 수 있다.)
+- **Ellipse**는 `ap-ellipse`로 CSS 처리.
+- 그 외 복잡한 벡터는 **SVG(또는 규칙에 따라 래스터)** 경로로 나간다.
+
+### 4.11 PC / 모바일
+
+- 섹션마다 **자식 구조를 대략 비교**해 같은지 다른지 판단한다.
+- 같으면 한 HTML에 **`@media`**로 모바일 스타일을 얹고, 다르면 **PC용 / 모바일용 블록**을 나눈다.
+- **스타일·배경 URL 병합**과, **ZIP에 쓰이는 이미지 파일 이름(img01_pc / img01_mo 등)** 을 맞추는 로직은 **서로 다른 단계**다. (전자는 병합된 CSS/HTML, 후자는 데스크톱에서 만든 경로·순서를 모바일 패스에 **넘겨 받아** 짝을 맞춘다.)
+
+### 4.12 PC–모바일 이미지 짝 (ZIP·미리보기 파일명)
+
+- 데스크톱 실행에서 섹션별 **이미지가 나오는 순서**와 **파일 경로 맵**을 모바일 실행에 넘긴다.
+- 모바일에서 같은 섹션의 이미지에 대해 짝을 맞출 때 우선순위는 대략  
+  1) 노드 **플러그인 데이터 `sourceNodeId`** = PC 이미지 노드 id  
+  2) **같은 레이어 이름**(가까운 순서 우선)  
+  3) **같은 순번**  
+- PC에 대응 이미지가 없으면 해당 모바일 래스터는 **파일을 만들지 않도록** 할 수 있는 규칙이 있다. (짝이 없는 구간은 예전처럼 순서 번호만 쓰는 폴백도 있다.)
+- 슬라이드에서 PC와 **같은 파일을 쓰는** 경우는 별도 규칙으로 처리한다.
+
+### 4.13 이미지 해상도·파일명
+
+- **미리보기·일반 분석**은 가로를 줄인 썸네일 수준으로 export하고, **ZIP**은 더 큰 폭 기준으로 뽑는 경로가 있다.
+- 파일명 예: `page_{프로젝트}_sec{섹션}_img{번호}_{_pc|_mo}{_국가}{_날짜}.{확장자}`
+
+### 4.14 ZIP·코드 탭
+
+- ZIP보내기 시 **코드 탭에 이미 편집한 HTML**이 있으면 그걸 우선 쓸 수 있고, 이미지는 피그마에서 다시 뽑는다.
+- AI 감사용 블록 등은 ZIP HTML에서 **제거**하는 처리가 있다.
+
+### 4.15 `img`의 `alt` (규칙만)
+
+- 처음 생성 시 `alt`는 **레이어 이름**에서 온다(길이 제한·이스케이프). AI 검수와는 별개다.
+
+### 4.16 부분적·조건부 동작
+
+- **고품질 `alt`/헤딩**은 AI 검수·반영에 의존한다.
+- **Swiper 라이브러리**를 배포 HTML에 자동으로 넣는지 여부는 생성 문자열·배포 방식을 따로 봐야 한다.
+
+### 4.17 이 저장소에 없는 것
+
+- Figma 트리를 AI에 보내 **PC/모바일 노드를 자동 재배열**하는 기능.
+- 공식 REST API 스타일의 **전체 씬 JSON 파일** 전용 export.
+- AI 없이 **항상 PDP급 품질을 보장**하는 검증 단계.
 
 ---
 
 ## 5. AI 활용 방식
 
-### 5.1 AI 역할(코드 기준)
-
-| 구분 | 내용 |
+| 항목 | 설명 |
 |------|------|
-| **위치** | `plugin/ui.html` — 코드 탭의 **분석(검수)** / **반영(패치)**. 메인 스레드 `code.js`는 API 키 저장·로드(`LOAD_*_KEY`, `SAVE_*_KEY`)만 담당. |
-| **입력** | 생성된 HTML/CSS(및 프롬프트에 정의된 범위: `<style>`·`<article class="ap-post">` 등). 검수 시 **이미지 JPEG 비전** 첨부 옵션(기본 ON 여부는 `00-entry.js`의 `AP_AI_DEFAULT_ALT_VISION`). |
-| **출력** | JSON 형태의 검수 리포트(이슈, `alt` 제안, `headingAudit`, `headingPatches` 등). Gemini는 구조화 출력 스키마(`AP_GEMINI_*_SCHEMA`) 사용. |
-| **반영** | 마지막 검수의 `alt`·헤딩 관련 제안을 코드 문자열에 패치하는 UI 측 로직. |
+| 어디서 | 코드 탭 — **검수(분석)** / **반영**. API 키 저장·로드만 메인 스레드에서 처리. |
+| 입력 | 이미 만들어진 HTML/CSS 일부, 옵션으로 **이미지 JPEG** 비전. |
+| 출력 | JSON 형태 제안(이슈, `alt`, 헤딩 등). Gemini는 구조화 스키마 사용. |
+| 반영 | UI가 HTML 문자열을 **패치**. |
 
-**PC/MO “구조 매칭” 자체는 AI를 사용하지 않습니다.** 구조 판별·병합은 `095-responsive-pcmo.js` 등 **규칙 기반**입니다.
-
-### 5.2 왜 AI가 필요한가(이 프로젝트 맥락)
-
-- **레이어명만으로는** 제품 이미지·타이포 이미지·장식 이미지를 구분해 적절한 `alt`를 쓰기 어렵고, **페이지 단위 시맨틱·헤딩 계층**은 디자인 레이어 구조와 1:1로 대응하지 않는 경우가 많습니다.
-- 이에 대해 **이미지 픽셀(비전)과 본문 HTML을 함께 보도록** 프롬프트가 설계되어 있으며, 순수 규칙만으로 동일 수준의 검수를 재현하기 어렵습니다.  
-  → **“시각·문맥을 이해한 `alt`/헤딩 검수”는 AI 없이 해결하기 어려운 문제에 가깝고**, PC/MO 트리 정합은 **현재 코드에서는 AI가 담당하지 않음**을 구분해야 합니다.
-
-### 5.3 사용 가능한 모델(UI에 하드코딩된 예시)
-
-- **OpenAI**: `gpt-4o`, `gpt-4o-mini`
-- **Google Gemini**: `gemini-2.5-flash`, `gemini-2.5-flash-lite`  
-- 플러그인 기본값: 제공자 `gemini`, 모델 `gemini-2.5-flash`(`00-entry.js`의 `AP_AI_DEFAULT_*` 및 UI `AI_UI_DEFAULTS`).
-
-### 5.4 처리 방식(요약)
-
-1. 사용자가 코드 탭에서 **분석** 실행.  
-2. UI가 선택된 제공자·모델·API 키로 **OpenAI Chat Completions** 또는 **Gemini Generative Language API** 호출(`manifest.json`의 `networkAccess` 허용 도메인과 일치).  
-3. 응답 JSON 파싱·정규화 후 리포트 표시.  
-4. **반영** 시 동일 검수 결과를 바탕으로 HTML 문자열 패치.
-
-**참고:** AI 입력은 **이미 생성된 HTML/CSS**(및 선택적 비전 JPEG)이며, **Figma 노드 JSON을 AI에 넘겨 PC/MO 트리를 재매핑하는 단계는 코드에 없습니다.**
+- **PC/모바일 구조가 맞는지 판단하고 HTML을 합치는 일**은 전부 **규칙 코드**이며 AI가 하지 않는다.
+- 사용 예시 모델: OpenAI `gpt-4o`, `gpt-4o-mini`, Gemini `gemini-2.5-flash` 등(UI에 정의). 기본값은 UI·진입 스크립트 설정을 따른다.
 
 ---
 
-## 6. 시스템 구조(Flow)
+## 6. 처리 흐름 (한 페이지 요약)
 
-1. Figma에서 ROOT **1개 또는 2개** 선택.  
-2. UI → `postMessage` → 메인 스레드 `RUN_ANALYZE` / `RUN_DESKTOP` / `RUN_MOBILE` 처리(`099-ui-router.js`).  
-3. `dumpTreeAsync`로 레이어 인스펙트 `dataTree`·텍스트 생성, `buildCodeAsync(root, cache, sections, geoStructure, mobileRoot, mismatchSecs, phase)`로 HTML/CSS·이미지 목록 생성(`097-dump-tree-async.js`). `phase`는 `desktop` / `mobile` — **MO 전용 패스**에서만 타이포 교집합+인라인 최적화를 끔.  
-4. PC+MO인 경우: PC 트리 생성(`mobileRoot` 전달) 후 MO 트리 처리, `combinePcMoAsBreakpoint`로 단일 문서 문자열 조합.  
-5. `RESULT`·이미지 청크·ZIP 관련 메시지로 UI에 전달.  
-6. UI에서 코드·미리보기·ZIP·(선택) AI 검수/반영.
+1. Figma에서 ROOT 1개 또는 2개 선택.  
+2. UI가 메인에 **분석 / ZIP** 등 메시지를 보낸다.  
+3. 메인이 트리를 걷고 **인스펙트 데이터 + HTML/CSS + 이미지 목록**을 만든다.  
+4. PC+모바일이면 데스크톱 결과를 모바일 패스에 넘겨 **이미지 파일 번호·경로**를 맞춘 뒤, 한 문서로 합친다.  
+5. 결과·이미지 청크·진행 상태를 UI로 보낸다.  
+6. (선택) 코드 탭에서 AI 검수 → 반영.
 
 ---
 
 ## 7. 기술 스택
 
-- **Figma Plugin**: `manifest.json` — `api: "1.0.0"`, `main: "code.js"`, `ui: "ui.html"`.
-- **메인 스레드**: `plugin/src/*.js`를 순서대로 이어 붙인 **`plugin/code.js`**(빌드 스크립트로 생성). Vanilla JavaScript.
-- **UI**: **`plugin/ui.html`** 단일 파일(HTML + CSS + JS). 별도 프레임워크 번들은 없음.
-- **빌드**: Node.js — `plugin/scripts/build-code.js`, `plugin/scripts/dev.js`, 경로 상수 `plugin/build-paths.js`.
-- **외부 네트워크**: `api.openai.com`, `generativelanguage.googleapis.com`, `cdnjs.cloudflare.com`(미리보기 등).
+- Figma Plugin API 1.0.0, `manifest.json` → `code.js` + `ui.html`
+- 메인·UI 모두 **바닐라 JS** (UI는 단일 HTML 파일)
+- 빌드: Node.js (`npm run build` / `npm run dev`)
+- 외부: OpenAI·Gemini API, CDN(미리보기 등) — `manifest.json` 허용 도메인 참고
 
 ---
 
 ## 8. 실행 방법
 
-1. 저장소 클론 후 프로젝트 루트에서 메인 스레드 번들 생성:  
-   `npm run build`  
-   → `plugin/src` → `plugin/code.js` 갱신.
-2. 개발 시 소스 감시:  
-   `npm run dev`  
-   → `plugin/src` 변경 시 `code.js` 재빌드(UI는 `ui.html` 수정 후 Figma에서 플러그인을 다시 실행해야 함 — `dev.js` 주석과 동일).
-3. Figma Desktop: **Plugins → Development → Import plugin from manifest…** 에서 `plugin/manifest.json` 선택.
-
-`package.json`에 런타임 npm 의존성은 없고, 스크립트만 정의되어 있습니다.
+1. `npm run build` → `plugin/src`가 `plugin/code.js`로 합쳐짐.  
+2. 개발 시 `npm run dev`로 소스 변경 시 자동 재빌드(UI 수정 후에는 Figma에서 플러그인 다시 실행).  
+3. Figma Desktop → Plugins → Development → **manifest**로 `plugin/manifest.json` import.
 
 ---
 
-## 9. 사용 방법(Step-by-step)
+## 9. 사용 팁
 
-1. Figma에서 PC용(또는 단일) ROOT 프레임을 준비합니다. MO까지 쓰려면 PC·MO ROOT를 **두 개** 선택합니다.  
-2. 플러그인 실행 후 **분석**(또는 PC 전용 / PC+MO 흐름)을 실행합니다. 선택이 없거나 ROOT 개수가 맞지 않으면 에러 메시지가 표시됩니다.  
-3. UI에 표시된 **레이어 규칙**(`code-btn`, `code-slide`, `code-raster`, `code-video`)에 맞춰 Figma 레이어 이름을 정리하는 것이 좋습니다.  
-4. 생성된 코드·미리보기·ZIP을 확인합니다.  
-5. AI 검수를 쓰려면 UI에서 **OpenAI 또는 Gemini** 제공자·모델·API 키를 설정한 뒤 코드 탭에서 **분석** → 필요 시 **반영**을 실행합니다.
+- 레이어 이름을 `code-btn`, `code-slide` 등 규칙에 맞추면 결과가 안정적이다.
+- PC+모바일 이미지 순서가 어긋나면 **같은 이름**을 쓰거나, 모바일 노드에 **`sourceNodeId`**(대응 PC 노드 id)를 넣는다.
+- AI 검수는 제공자·모델·API 키를 UI에서 맞춘 뒤 코드 탭에서 실행한다.
 
 ---
 
 ## 10. 한계점
 
-- ROOT는 **최대 2개**이며, 그 이상 선택 시 오류 처리됩니다.  
-- PC/MO 대응은 **동일 섹션 순서·트리 시그니처·인덱스 walk** 등에 기대므로, 디자이너가 구조를 크게 다르게 가져가면 `pc-only`/`mo-only` 분기·수동 수정 비중이 커질 수 있습니다.  
-- 초기 `alt`는 **레이어명**에 의존합니다.  
-- AI 검수는 **네트워크·API 키·할당량·모델 출력 형식**에 의존하며, JSON 파싱 실패 시 UI에 진단 메시지가 표시될 수 있습니다.  
-- Swiper **라이브러리 로드 방식**은 미리보기와 배포 HTML이 다를 수 있으므로 통합 배포 시 스크립트 포함 여부를 별도 확인해야 합니다.
+- ROOT는 **최대 2개**.  
+- PC/모바일 트리가 크게 다르면 자동 비율이 떨어지고 수동 수정이 늘 수 있다.  
+- 초기 `alt`는 레이어명 의존.  
+- AI는 네트워크·키·모델 품질에 의존한다.
 
 ---
 
-## 11. 향후 개선 방향(제안)
+## 11. 향후 개선(제안)
 
-- Figma 트리·메타데이터를 활용한 **노드 단위 PC/MO 매칭** 고도화(이름·시맨틱 외 추가 휴리스틱 또는, 필요 시 **별도** AI 파이프라인 설계 — 현재 미구현).  
-- 보내기 HTML에 **Swiper(및 기타 CDN) 삽입 옵션**을 명시적으로 토글.  
-- `dataTree`/덤프를 **표준 JSON 파일로 저장**하는 UI 옵션(현재는 메시지로 UI에 전달).  
-- AI 검수 프롬프트·스키마를 도메인별로 외부 설정화.  
-- 혼합 스타일 텍스트(`parts`)에 대한 타이포 최적화·MO 구간과의 일관성 보강.
+- 컴포넌트·메타데이터로 **노드 단위 PC/모바일 짝**을 더 정교하게.  
+- Swiper 등 **CDN 삽입 옵션** 명시.  
+- 덤프를 **JSON 파일로 저장**하는 UI.  
+- AI 프롬프트·스키마 설정 분리.
 
 ---
 
-## 문서·코드 출처 요약
+## 부록 A. UI ↔ 메인 메시지 (개발용)
 
-- 플러그인 진입·UI 크기: `plugin/src/00-entry.js`  
-- 메시지 라우팅·선택 규칙: `plugin/src/099-ui-router.js`  
-- PC/MO: `plugin/src/095-responsive-pcmo.js`  
-- HTML/CSS 생성·`.ap-text` 기본 규칙: `plugin/src/096-html-code-builder.js`  
-- 덤프·`buildCodeAsync` 연동: `plugin/src/097-dump-tree-async.js`  
-- 타이포 변수·줄간 비율·기본값 생략: `plugin/src/080-text-fonts.js`  
-- 섹션 시맨틱·`ap-section__*`·lh/ls 기준 접미사 묶음: `plugin/src/081-section-semantics.js`  
-- 지연 CSS 누적·병합: `plugin/src/082-deferred-css.js`  
-- 슬라이드: `plugin/src/020-slide.js`  
-- 레이어 규칙: `plugin/src/010-format-class.js`  
-- AI·모델 UI: `plugin/ui.html`  
-- 네트워크 허용 도메인: `plugin/manifest.json`
+| UI → 메인 | 의미 |
+|-----------|------|
+| `RUN_ANALYZE` | 선택이 1개면 PC 분석, 2개면 PC+모바일 분석으로 치환. |
+| `RUN_DESKTOP` | PC만. |
+| `RUN_MOBILE` | PC 후 모바일·병합. |
+| `EXPORT_ZIP` | ZIP용(코드 탭 우선 등). |
+| 키 저장/로드 | OpenAI·Gemini API 키. |
+
+| 메인 → UI | 의미 |
+|-----------|------|
+| `RESULT` | 코드·메타(이미지는 청크). |
+| `RESULT_IMAGES_*` | 이미지 dataUrl 스트리밍. |
+| `ZIP_IMAGES_*` | ZIP용 이미지 목록. |
+| `LOADING` / `ERROR` / `PROGRESS` | 진행·오류. |
+
+---
+
+## 부록 B. PC+모바일 덤프 간 넘기는 데이터 (개발용)
+
+데스크톱 한 번 실행에서 모바일 패스로 넘어가는 값의 **이름**만 적는다. (ZIP/미리보기 **파일 경로·순서** 맞추기용.)
+
+| 넘기는 값(개념) | 역할 |
+|----------------|------|
+| 이미지 경로 맵 | PC에서 정한 `assets/images/...` 경로를 모바일에서 그대로 찾아 `_mo` 파일명을 맞춤. |
+| 섹션별 이미지 노드 순서 | 같은 섹션에서 몇 번째 이미지인지 짝을 맞출 때 사용. |
+| 에셋 바이트 캐시 스냅샷 | 미리보기/export/zip 캐시 상속. |
+| 슬라이드 슬롯별 PC 에셋 키 | 슬라이드에서 PC와 파일을 공유할 때. |
+| PC ROOT 참조 | 모바일에서 같은 인덱스 섹션의 PC 프레임을 찾을 때. |
+| PC 래스터 확장자 맵 | 모바일 파일 확장자를 PC와 맞출 때. |
+
+---
+
+## 부록 C. 소스 파일 병합 순서 (`npm run build`)
+
+`plugin/scripts/build-code.js`에 정의된 순서대로 `plugin/src/*.js`가 `code.js`에 이어진다.
+
+`00-entry` → `010-format-class` → `020-slide` → `030-shape` → `040-text-utils` → `050-core-node` → `060-layout` → `070-image-export` → `080-text-fonts` → `081-section-semantics` → `082-deferred-css` → `083-assets-cache` → `067-image-system` → `084-image-render-order` → `085-section-background` → `090-tree-inspect` → `095-responsive-pcmo` → `096-html-code-builder` → `097-dump-tree-async` → `099-ui-router`
+
+(파일명 앞 번호는 관례일 뿐, **실제 붙는 순서는 위 줄**이다.)
+
+---
+
+## 부록 D. 파일 ↔ 담당 영역 (함수명 대신)
+
+| 경로 | 담당 |
+|------|------|
+| `00-entry.js` | 진입, UI 크기 |
+| `010-format-class.js` | `code-*` 이름 규칙 |
+| `020-slide.js` | 슬라이드·Swiper 관련 |
+| `030-shape.js` | Line·Ellipse CSS, 버튼 래핑, `alt` 기본 |
+| `040-text-utils.js` | 텍스트 보조 |
+| `050-core-node.js` | 노드 공통 |
+| `060-layout.js` | 레이아웃·fills·stroke 유틸 |
+| `070-image-export.js` | 이미지 분류·export 폭 상수 |
+| `080-text-fonts.js` | 타이포 변수·줄간 스냅 |
+| `081-section-semantics.js` | 섹션 BEM·역할·GEO 반영 |
+| `082-deferred-css.js` | 지연 스타일 |
+| `083-assets-cache.js` | 에셋 경로·PC/MO 파일명·상속 맵 |
+| `067-image-system.js` | 이미지 파이프라인·export |
+| `084-image-render-order.js` | 이미지 렌더 순서·PC–모바일 prefetch 짝 |
+| `085-section-background.js` | 섹션·호이스트 배경 |
+| `090-tree-inspect.js` | 트리 인스펙트 보조 |
+| `095-responsive-pcmo.js` | PC/MO 병합·`@media`·모바일 노드 매칭(스타일 쪽) |
+| `096-html-code-builder.js` | 최종 HTML/CSS 조립 |
+| `097-dump-tree-async.js` | 분석 덤프·빌드 진입 연결 |
+| `099-ui-router.js` | UI 메시지 라우팅 |
+| `ui.html` | 미리보기·AI 호출 UI |
+| `manifest.json` | 네트워크 허용 도메인 등 |
+
+구체적인 **함수명·옵션 키**는 각 파일 주석과 부록 A·B를 함께 보면 된다.
