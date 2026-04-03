@@ -15,6 +15,11 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
     var cache = {
         projectName: normalizeProjectName(projectName),
         exportCountryCode: normalizeExportCountryCode(options.exportCountryCode),
+        /** 데스크톱 덤프의 assetKey→경로 (MO 단계에서 imgNN 슬롯 정렬·슬라이드 reuseAssetKey 조회용) */
+        inheritedPcImageName: null,
+        /** 데스크톱 섹션별 <img> 렌더 순서 id 배열 (MO 구조 일치 시 PC–MO 짝 맞춤) */
+        inheritedPcSectionImageRenderOrderIds: null,
+        pairedDesktopRootForMo: null,
         /** PC+MO(데스크톱 단계)에서 래스터 파일명에 `_pc` 접미사 — 슬라이드 공유 에셋은 omitPcMoVariant로 제외 */
         usePcMoImageFilenameVariants: !!(options.mobileRoot && options.phase === "desktop"),
         allowedFonts: Array.isArray(allowedFonts)
@@ -33,6 +38,20 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         imageName: {},
         imageList: [],
         imgCountBySec: {},
+    }
+    if (options.inheritedPcImageName && typeof options.inheritedPcImageName === "object") {
+        cache.inheritedPcImageName = options.inheritedPcImageName
+        for (var ink in options.inheritedPcImageName) {
+            if (Object.prototype.hasOwnProperty.call(options.inheritedPcImageName, ink)) {
+                cache.imageName[ink] = options.inheritedPcImageName[ink]
+            }
+        }
+    }
+    if (options.phase === "mobile") {
+        if (options.pairedDesktopRoot) cache.pairedDesktopRootForMo = options.pairedDesktopRoot
+        if (options.inheritedPcSectionImageRenderOrderIds != null) {
+            cache.inheritedPcSectionImageRenderOrderIds = options.inheritedPcSectionImageRenderOrderIds
+        }
     }
     if (options.mobileRoot && options.phase === "desktop") {
         cache.responsiveTextInnerByNodeId = buildResponsiveTextInnerByNodeIdMap(root, options.mobileRoot)
@@ -276,6 +295,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                     ownImageNodeIds: ownImageNodeIds,
                     sectionImageRenderOrderIds: result && result.sectionImageRenderOrderIds ? result.sectionImageRenderOrderIds : [],
                     images: cache.imageList || [],
+                    imageNameByAssetKey: Object.assign(Object.create(null), cache.imageName || {}),
                     vectorTypes: VECTOR_TYPES,
                     usedFonts: usedFonts,
                     assetStoresSnapshot: assetStoresSnapshot,

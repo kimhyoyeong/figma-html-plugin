@@ -41,13 +41,15 @@ function pipelineRasterBackgroundImageDeclAsync(node, useCssVarsForSection, cach
     }
     return pipelineEnsureImageAsync(node, bgCtx).then(function (meta) {
         if (!meta || !meta.dataUrl) return ""
-        var path = cache
-            ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl || "", secNo, {
-                  skipExport: isVideoNodeEffective(node, cache),
-                  imageHash: getPrimaryImageFillHash(node),
-                  reuseAssetKey: meta.reuseAssetKey || undefined,
-              })
-            : ""
+        var bgPathOpts = {
+            skipExport: isVideoNodeEffective(node, cache),
+            imageHash: getPrimaryImageFillHash(node),
+            reuseAssetKey: meta.reuseAssetKey || undefined,
+        }
+        if (cache.imageSuffix === "_mo" && bgCtx.pairPcNode && meta && meta.kind !== "pc-shared-slide" && !meta.reuseAssetKey) {
+            bgPathOpts.pairedPcAssetKey = makePairedPcAssetKeyForInheritedPathLookup(bgCtx.pairPcNode, meta, secNo, cache, true)
+        }
+        var path = cache ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl || "", secNo, bgPathOpts) : ""
         var imgUrl = (path && path.length) ? path : meta.dataUrl
         if (!imgUrl) return ""
         if (useCssVarsForSection) {
@@ -475,13 +477,15 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
                 }
                 return pipelineEnsureImageAsync(exportNode, bleedCtx).then(function (meta) {
                     if (!meta || !meta.dataUrl) return tryFullBleedContainerBgHoistPromise()
-                    var path = cache
-                        ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                              skipExport: isVideoNodeEffective(exportNode, cache),
-                              imageHash: getPrimaryImageFillHash(exportNode),
-                              reuseAssetKey: meta.reuseAssetKey || undefined,
-                          })
-                        : ""
+                    var bleedPathOpts = {
+                        skipExport: isVideoNodeEffective(exportNode, cache),
+                        imageHash: getPrimaryImageFillHash(exportNode),
+                        reuseAssetKey: meta.reuseAssetKey || undefined,
+                    }
+                    if (cache.imageSuffix === "_mo" && bleedCtx.pairPcNode && meta && meta.kind !== "pc-shared-slide" && !meta.reuseAssetKey) {
+                        bleedPathOpts.pairedPcAssetKey = makePairedPcAssetKeyForInheritedPathLookup(bleedCtx.pairPcNode, meta, secNo, cache, true)
+                    }
+                    var path = cache ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, bleedPathOpts) : ""
                     if (path && meta.dataUrl) {
                         var merged = decl ? decl + ";--bg-img:url(" + path + ")" : "--bg-img:url(" + path + ")"
                         return { decl: merged, bgChildId: promote.skipId, hoistBgChildId: null }

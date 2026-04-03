@@ -63,6 +63,50 @@ function getOrInitExportImageYymmddSuffix(cache) {
     return cache._exportImageYymmddSuffix
 }
 
+/** makeAssetKey 의 :mo: 세그먼트만 :pc: 로 바꿈 (슬라이드 등 해시가 PC와 동일할 때 보조 조회용) */
+function moAssetKeyToPcAssetKeyByVariant(moKey) {
+    return String(moKey || "").replace(/^([^:]+:)mo(:)/, "$1pc$2")
+}
+
+function inheritedPcPathForPairedKey(cache, pairedPcAssetKey) {
+    if (!cache || !cache.inheritedPcImageName || !pairedPcAssetKey) return ""
+    var map = cache.inheritedPcImageName
+    if (map[pairedPcAssetKey]) return map[pairedPcAssetKey]
+    var toggled = String(pairedPcAssetKey).replace(/:png:/, ":__FMT__:").replace(/:jpg:/, ":png:").replace(/:__FMT__:/, ":jpg:")
+    if (toggled !== pairedPcAssetKey && map[toggled]) return map[toggled]
+    return ""
+}
+
+/**
+ * PC export 경로 → 동일 imgNN 의 MO 파일명 (확장자는 MO 래스터에 맞춤). `_pc` 없이 img01_kr_YYMMDD 만 있는 경우도 처리.
+ */
+function pcExportPathToMoExportPath(pcPath, moExtDot) {
+    var p = String(pcPath || "").replace(/\\/g, "/").trim()
+    if (!p) return ""
+    moExtDot = String(moExtDot || ".jpg").toLowerCase()
+    if (moExtDot[0] !== ".") moExtDot = "." + moExtDot
+    if (moExtDot === ".jpeg") moExtDot = ".jpg"
+    var dirSlash = p.lastIndexOf("/")
+    var dir = dirSlash >= 0 ? p.slice(0, dirSlash + 1) : ""
+    var base = dirSlash >= 0 ? p.slice(dirSlash + 1) : p
+    var stemMo = ""
+    var mPc = /^(.+_img\d+)_pc((?:_[a-z]{2})?)(_\d{6})\.(png|jpe?g|webp|gif|svg)$/i.exec(base)
+    if (mPc) {
+        stemMo = mPc[1] + "_mo" + mPc[2] + mPc[3]
+    } else {
+        var mBare = /^(.+_img\d+)((?:_[a-z]{2})?)(_\d{6})\.(png|jpe?g|webp|gif|svg)$/i.exec(base)
+        if (mBare && !/_img\d+_mo(?:_|$)/i.test(mBare[1])) {
+            stemMo = mBare[1] + "_mo" + mBare[2] + mBare[3]
+        }
+    }
+    if (!stemMo) {
+        var g = guessMoRasterPathFromPcRasterPath(p, moExtDot.replace(/^\./, ""))
+        if (g) return g.replace(/\.(png|jpe?g|webp|gif)$/i, moExtDot)
+        return p.replace(/\.(png|jpe?g|webp|gif|svg)$/i, moExtDot)
+    }
+    return dir + stemMo + moExtDot
+}
+
 function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
     opts = opts || {}
     if (!cache) return ""
@@ -82,29 +126,48 @@ function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
 
     var secEarly = Number(secNo) || 1
 
-    if (!cache.imageName[key]) {
-        if (!dataUrl || !String(dataUrl).trim()) return ""
+    if (!Object.prototype.hasOwnProperty.call(cache.imageName, key)) {
+        if (!dataUrl || !String(dataUrl).trim()) {
+            cache.imageName[key] = ""
+            return ""
+        }
         var ext = getDataUrlExt(dataUrl)
+        var assignedPath = ""
 
-        var n = (cache.imgCountBySec[secEarly] || 0) + 1
-        cache.imgCountBySec[secEarly] = n
-
-        var project = normalizeProjectName(cache.projectName)
-        var dateStem = getOrInitExportImageYymmddSuffix(cache)
-        var country = normalizeExportCountryCode(cache.exportCountryCode)
-        var countrySeg = country ? "_" + country : ""
-        var variantSeg = ""
-        var isSvg = ext === ".svg"
-        if (!isSvg && !opts.omitPcMoVariant) {
-            if (cache.imageSuffix === "_mo") {
-                variantSeg = "_mo"
-            } else if (cache.usePcMoImageFilenameVariants) {
-                variantSeg = "_pc"
+        if (cache.imageSuffix === "_mo" && cache.inheritedPcImageName) {
+            var pcKey = opts.pairedPcAssetKey || moAssetKeyToPcAssetKeyByVariant(key)
+            var pcPathLook = inheritedPcPathForPairedKey(cache, pcKey)
+            if (pcPathLook) {
+                assignedPath = pcExportPathToMoExportPath(pcPathLook, ext)
+            } else if (opts.pairedPcAssetKey) {
+                cache.imageName[key] = ""
+                return ""
             }
         }
-        var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + variantSeg + countrySeg + dateStem + ext
 
-        cache.imageName[key] = ASSETS_IMAGES_PREFIX + fileName
+        if (!assignedPath) {
+            var n = (cache.imgCountBySec[secEarly] || 0) + 1
+            cache.imgCountBySec[secEarly] = n
+
+            var project = normalizeProjectName(cache.projectName)
+            var dateStem = getOrInitExportImageYymmddSuffix(cache)
+            var country = normalizeExportCountryCode(cache.exportCountryCode)
+            var countrySeg = country ? "_" + country : ""
+            var variantSeg = ""
+            var isSvg = ext === ".svg"
+            if (!isSvg && !opts.omitPcMoVariant) {
+                if (cache.imageSuffix === "_mo") {
+                    variantSeg = "_mo"
+                } else if (cache.usePcMoImageFilenameVariants) {
+                    variantSeg = "_pc"
+                }
+            }
+            var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + variantSeg + countrySeg + dateStem + ext
+
+            assignedPath = ASSETS_IMAGES_PREFIX + fileName
+        }
+
+        cache.imageName[key] = assignedPath
     }
 
     var pathOut = cache.imageName[key] || ""

@@ -23,6 +23,86 @@ function findNodeByIdInSubtree(root, targetId) {
 }
 
 /**
+ * MO prefetch 시 PC 상대 노드 (에셋 imgNN·pairPcNodeIdByMoId).
+ * 1) MO 노드 pluginData sourceNodeId 가 pcOrderedIds 안의 PC id이면 우선
+ * 2) 같은 레이어명(트림)·아직 안 쓴 PC 슬롯 중 |인덱스 차| 최소
+ * 3) 동일 인덱스 슬롯이 아직 미사용이면
+ */
+function resolvePairedPcImageNodeForMoPrefetch(moNode, slotIndex, pairedDesktopSection, pcOrderedIds, cache, secNo) {
+    if (!moNode || !pairedDesktopSection || !pcOrderedIds || !pcOrderedIds.length) return null
+    if (!cache || cache.imageSuffix !== "_mo") return null
+
+    if (!cache.moPcPairUsedBySec) cache.moPcPairUsedBySec = {}
+    var usedMap = cache.moPcPairUsedBySec[secNo]
+    if (!usedMap) return null
+
+    function isPcUsed(pcId) {
+        return pcId != null && usedMap[String(pcId)] === true
+    }
+    function markPc(pcId) {
+        if (pcId != null) usedMap[String(pcId)] = true
+    }
+
+    var src = ""
+    try {
+        if (typeof moNode.getPluginData === "function") src = String(moNode.getPluginData("sourceNodeId") || "").trim()
+    } catch (e0) {}
+    if (src) {
+        var bySrc = findNodeByIdInSubtree(pairedDesktopSection, src)
+        if (!bySrc && cache.pairedDesktopRootForMo) {
+            try {
+                bySrc = findNodeByIdInSubtree(cache.pairedDesktopRootForMo, src)
+            } catch (e1) {}
+        }
+        if (bySrc && bySrc.id != null) {
+            var sid = String(bySrc.id)
+            for (var xi = 0; xi < pcOrderedIds.length; xi++) {
+                if (String(pcOrderedIds[xi]) === sid) {
+                    if (!isPcUsed(sid)) {
+                        markPc(sid)
+                        return bySrc
+                    }
+                    break
+                }
+            }
+        }
+    }
+
+    var moName = String(moNode.name || "").trim()
+    if (moName) {
+        var bestPc = null
+        var bestDist = 1e9
+        for (var j = 0; j < pcOrderedIds.length; j++) {
+            var pid = pcOrderedIds[j]
+            if (pid == null || isPcUsed(pid)) continue
+            var pn = findNodeByIdInSubtree(pairedDesktopSection, pid)
+            if (!pn) continue
+            if (String(pn.name || "").trim() !== moName) continue
+            var dist = Math.abs(j - slotIndex)
+            if (dist < bestDist) {
+                bestDist = dist
+                bestPc = pn
+            }
+        }
+        if (bestPc && bestPc.id != null) {
+            markPc(bestPc.id)
+            return bestPc
+        }
+    }
+
+    var at = pcOrderedIds[slotIndex]
+    if (at != null && !isPcUsed(at)) {
+        var pAt = findNodeByIdInSubtree(pairedDesktopSection, at)
+        if (pAt && pAt.id != null) {
+            markPc(pAt.id)
+            return pAt
+        }
+    }
+
+    return null
+}
+
+/**
  * renderNodeAsync 분기와 동일 순서로, 최종 <img> 한 장이 나가는 노드 id를 누적 (DFS·자식 순서 일치).
  * @param {object} ropts includeHidden, allowedFonts, fontHtmlUnrestricted, sectionSemantics
  */
@@ -273,8 +353,12 @@ function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotInde
         }
     }
     var pairPc = null
-    if (pairedDesktopSection && pcOrderedIds && pcOrderedIds[slotIndex] != null) {
-        pairPc = findNodeByIdInSubtree(pairedDesktopSection, pcOrderedIds[slotIndex])
+    if (pairedDesktopSection && pcOrderedIds && pcOrderedIds.length) {
+        if (cache.imageSuffix === "_mo") {
+            pairPc = resolvePairedPcImageNodeForMoPrefetch(node, slotIndex, pairedDesktopSection, pcOrderedIds, cache, secNo)
+        } else if (pcOrderedIds[slotIndex] != null) {
+            pairPc = findNodeByIdInSubtree(pairedDesktopSection, pcOrderedIds[slotIndex])
+        }
     }
     if (pairPc && node && node.id != null && pairPc.id != null) {
         cache.pairPcNodeIdByMoId = cache.pairPcNodeIdByMoId || Object.create(null)
@@ -298,6 +382,9 @@ function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotInde
         if (cache.usePcMoImageFilenameVariants && !cache.imageSuffix && slideData && imgCtx.insideSwiperSlide) {
             pathOpts.omitPcMoVariant = true
         }
+        if (cache.imageSuffix === "_mo" && pairPc && meta && meta.kind !== "pc-shared-slide" && !meta.reuseAssetKey) {
+            pathOpts.pairedPcAssetKey = makePairedPcAssetKeyForInheritedPathLookup(pairPc, meta, secNo, cache, false)
+        }
         getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl || "", secNo, pathOpts)
         if (slideData && slideIdSet[String(node.id)] && meta.assetKey) {
             cache.slideAssetKeyByNodeId = cache.slideAssetKeyByNodeId || Object.create(null)
@@ -312,6 +399,10 @@ function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotInde
 
 function prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo, bg, slideData, pairedDesktopSection, pcOrderedIds) {
     if (!orderedIds || !orderedIds.length) return Promise.resolve()
+    if (cache.imageSuffix === "_mo" && pairedDesktopSection && pcOrderedIds && pcOrderedIds.length) {
+        if (!cache.moPcPairUsedBySec) cache.moPcPairUsedBySec = {}
+        cache.moPcPairUsedBySec[secNo] = Object.create(null)
+    }
     var ix = 0
     function next() {
         if (ix >= orderedIds.length) return Promise.resolve()

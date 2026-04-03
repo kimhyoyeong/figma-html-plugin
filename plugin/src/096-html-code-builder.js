@@ -83,7 +83,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("  background-image:var(--bg-img,none);")
     codeLines.push("  background-repeat:no-repeat;")
     codeLines.push("  background-position:50% 0;")
-    codeLines.push("  background-size:contain;")
+    codeLines.push("  background-size:cover;")
     codeLines.push("}")
     codeLines.push("")
     codeLines.push("")
@@ -465,25 +465,32 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                 }
 
-                return pipelineEnsureImageAsync(
-                        node,
-                        pipelineImgCtx(node, secNo, {
-                            insideSwiperSlide: !!(opts && opts.insideSwiperSlide),
-                            clipExportParent: parent,
-                        })
-                    )
-                    .then(function (meta) {
+                var imgCtxRasterText = pipelineImgCtx(node, secNo, {
+                    insideSwiperSlide: !!(opts && opts.insideSwiperSlide),
+                    clipExportParent: parent,
+                })
+                return pipelineEnsureImageAsync(node, imgCtxRasterText).then(function (meta) {
                         if (!meta || !meta.dataUrl) {
                             pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, true, opts)
                             return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                         }
+                        var pathOptsText = {
+                            skipExport: isVideoNodeEffective(node, cache),
+                            imageHash: getPrimaryImageFillHash(node),
+                            reuseAssetKey: meta.reuseAssetKey || undefined,
+                        }
+                        if (cache.imageSuffix === "_mo" && imgCtxRasterText.pairPcNode && meta && meta.kind !== "pc-shared-slide" && !meta.reuseAssetKey) {
+                            pathOptsText.pairedPcAssetKey = makePairedPcAssetKeyForInheritedPathLookup(
+                                imgCtxRasterText.pairPcNode,
+                                meta,
+                                secNo,
+                                cache,
+                                false,
+                            )
+                        }
                         var path =
                             cache &&
-                            getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                                skipExport: isVideoNodeEffective(node, cache),
-                                imageHash: getPrimaryImageFillHash(node),
-                                reuseAssetKey: meta.reuseAssetKey || undefined,
-                            })
+                            getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, pathOptsText)
                         var altText = getImageAltText(node)
                         if (id) ctx.ownImageNodeIds[id] = true
                         var rasterOpts = optsWithRasterTextAsImageSemantics(id, opts)
@@ -542,18 +549,23 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             return Promise.resolve(wrapIfBtn(node, indent(depth) + ellipseHtml, depth))
         }
         var svgImgAbs = isAbsoluteLike(node, parent)
-        return pipelineEnsureImageAsync(
-            node,
-            pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide), clipExportParent: parent })
-        ).then(function (meta) {
+        var imgCtxVector = pipelineImgCtx(node, secNo, {
+            insideSwiperSlide: !!(opts && opts.insideSwiperSlide),
+            clipExportParent: parent,
+        })
+        return pipelineEnsureImageAsync(node, imgCtxVector).then(function (meta) {
             if (!meta || !meta.dataUrl) return ""
+            var pathOptsVec = {
+                skipExport: isVideoNodeEffective(node, cache),
+                imageHash: getPrimaryImageFillHash(node),
+                reuseAssetKey: meta.reuseAssetKey || undefined,
+            }
+            if (cache.imageSuffix === "_mo" && imgCtxVector.pairPcNode && meta && meta.kind !== "pc-shared-slide" && !meta.reuseAssetKey) {
+                pathOptsVec.pairedPcAssetKey = makePairedPcAssetKeyForInheritedPathLookup(imgCtxVector.pairPcNode, meta, secNo, cache, false)
+            }
             var path =
                 cache &&
-                getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                    skipExport: isVideoNodeEffective(node, cache),
-                    imageHash: getPrimaryImageFillHash(node),
-                    reuseAssetKey: meta.reuseAssetKey || undefined,
-                })
+                getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, pathOptsVec)
             if (svgImgAbs && id) {
                 var svgAbsDecl = buildAbsDecl(node, parent)
                 if (svgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), svgAbsDecl)
@@ -626,18 +638,23 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             })
         }
         var imgAbs = isAbsoluteLike(node, parent)
-        return pipelineEnsureImageAsync(
-            node,
-            pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide), clipExportParent: parent })
-        ).then(function (meta) {
+        var imgCtxFigure = pipelineImgCtx(node, secNo, {
+            insideSwiperSlide: !!(opts && opts.insideSwiperSlide),
+            clipExportParent: parent,
+        })
+        return pipelineEnsureImageAsync(node, imgCtxFigure).then(function (meta) {
             if (!meta || !meta.dataUrl) return ""
+            var pathOptsFig = {
+                skipExport: isVideoNodeEffective(node, cache),
+                imageHash: getPrimaryImageFillHash(node),
+                reuseAssetKey: meta.reuseAssetKey || undefined,
+            }
+            if (cache.imageSuffix === "_mo" && imgCtxFigure.pairPcNode && meta && meta.kind !== "pc-shared-slide" && !meta.reuseAssetKey) {
+                pathOptsFig.pairedPcAssetKey = makePairedPcAssetKeyForInheritedPathLookup(imgCtxFigure.pairPcNode, meta, secNo, cache, false)
+            }
             var path =
                 cache &&
-                getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                    skipExport: isVideoNodeEffective(node, cache),
-                    imageHash: getPrimaryImageFillHash(node),
-                    reuseAssetKey: meta.reuseAssetKey || undefined,
-                })
+                getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, pathOptsFig)
             if (imgAbs && id) {
                 var imgAbsDecl = buildAbsDecl(node, parent)
                 if (imgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), imgAbsDecl)
@@ -1071,13 +1088,24 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         return String(id)
                     })
                 }
-                var pcIdsPair = visWrap === "mo-only" && pairedDesktopSection ? sectionImageRenderOrderIds[secNo - 1] : null
+                var pairedForPrefetch = null
+                var pcIdsPair = null
+                if (visWrap === "mo-only" && pairedDesktopSection) {
+                    pairedForPrefetch = pairedDesktopSection
+                    pcIdsPair = sectionImageRenderOrderIds[secNo - 1] || null
+                } else if (cache.imageSuffix === "_mo" && cache.pairedDesktopRootForMo) {
+                    var inhOrd = cache.inheritedPcSectionImageRenderOrderIds
+                    if (inhOrd && inhOrd[secNo - 1] && inhOrd[secNo - 1].length) {
+                        pcIdsPair = inhOrd[secNo - 1]
+                        pairedForPrefetch = getSectionNodes(cache.pairedDesktopRootForMo)[secNo - 1] || null
+                    }
+                }
                 return precomputeRasterFormatsForSlotsAsync(
                     sectionNode,
                     orderedIds,
                     secNo,
                     cache,
-                    visWrap === "mo-only" ? pairedDesktopSection : null,
+                    pairedForPrefetch,
                     pcIdsPair,
                 ).then(function () {
                     return prefetchSectionImageAssetsAsync(
@@ -1087,7 +1115,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         secNo,
                         bg,
                         slideData,
-                        visWrap === "mo-only" ? pairedDesktopSection : null,
+                        pairedForPrefetch,
                         pcIdsPair,
                     )
                 })

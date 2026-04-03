@@ -104,6 +104,8 @@ figma.ui.onmessage = function (msg) {
                         pcRasterExtByStem: pcRasterExtByStem,
                         inheritAssetStores: payload.assetStoresSnapshot,
                         inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
+                        inheritedPcImageName: payload.imageNameByAssetKey || {},
+                        inheritedPcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds || [],
                         exportCountryCode: msg.exportCountryCode,
                         pairedDesktopRoot: rootDesktop,
                     }).then(function (moPayload) {
@@ -217,6 +219,8 @@ figma.ui.onmessage = function (msg) {
                             pcRasterExtByStem: pcRasterExtByStemZip,
                             inheritAssetStores: payload.assetStoresSnapshot,
                             inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
+                            inheritedPcImageName: payload.imageNameByAssetKey || {},
+                            inheritedPcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds || [],
                             exportCountryCode: msg.exportCountryCode,
                             pairedDesktopRoot: rootDesktop,
                         }).then(function (moPayload) {

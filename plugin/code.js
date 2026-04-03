@@ -3870,6 +3870,50 @@ function getOrInitExportImageYymmddSuffix(cache) {
     return cache._exportImageYymmddSuffix
 }
 
+/** makeAssetKey 의 :mo: 세그먼트만 :pc: 로 바꿈 (슬라이드 등 해시가 PC와 동일할 때 보조 조회용) */
+function moAssetKeyToPcAssetKeyByVariant(moKey) {
+    return String(moKey || "").replace(/^([^:]+:)mo(:)/, "$1pc$2")
+}
+
+function inheritedPcPathForPairedKey(cache, pairedPcAssetKey) {
+    if (!cache || !cache.inheritedPcImageName || !pairedPcAssetKey) return ""
+    var map = cache.inheritedPcImageName
+    if (map[pairedPcAssetKey]) return map[pairedPcAssetKey]
+    var toggled = String(pairedPcAssetKey).replace(/:png:/, ":__FMT__:").replace(/:jpg:/, ":png:").replace(/:__FMT__:/, ":jpg:")
+    if (toggled !== pairedPcAssetKey && map[toggled]) return map[toggled]
+    return ""
+}
+
+/**
+ * PC export 경로 → 동일 imgNN 의 MO 파일명 (확장자는 MO 래스터에 맞춤). `_pc` 없이 img01_kr_YYMMDD 만 있는 경우도 처리.
+ */
+function pcExportPathToMoExportPath(pcPath, moExtDot) {
+    var p = String(pcPath || "").replace(/\\/g, "/").trim()
+    if (!p) return ""
+    moExtDot = String(moExtDot || ".jpg").toLowerCase()
+    if (moExtDot[0] !== ".") moExtDot = "." + moExtDot
+    if (moExtDot === ".jpeg") moExtDot = ".jpg"
+    var dirSlash = p.lastIndexOf("/")
+    var dir = dirSlash >= 0 ? p.slice(0, dirSlash + 1) : ""
+    var base = dirSlash >= 0 ? p.slice(dirSlash + 1) : p
+    var stemMo = ""
+    var mPc = /^(.+_img\d+)_pc((?:_[a-z]{2})?)(_\d{6})\.(png|jpe?g|webp|gif|svg)$/i.exec(base)
+    if (mPc) {
+        stemMo = mPc[1] + "_mo" + mPc[2] + mPc[3]
+    } else {
+        var mBare = /^(.+_img\d+)((?:_[a-z]{2})?)(_\d{6})\.(png|jpe?g|webp|gif|svg)$/i.exec(base)
+        if (mBare && !/_img\d+_mo(?:_|$)/i.test(mBare[1])) {
+            stemMo = mBare[1] + "_mo" + mBare[2] + mBare[3]
+        }
+    }
+    if (!stemMo) {
+        var g = guessMoRasterPathFromPcRasterPath(p, moExtDot.replace(/^\./, ""))
+        if (g) return g.replace(/\.(png|jpe?g|webp|gif)$/i, moExtDot)
+        return p.replace(/\.(png|jpe?g|webp|gif|svg)$/i, moExtDot)
+    }
+    return dir + stemMo + moExtDot
+}
+
 function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
     opts = opts || {}
     if (!cache) return ""
@@ -3889,29 +3933,48 @@ function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
 
     var secEarly = Number(secNo) || 1
 
-    if (!cache.imageName[key]) {
-        if (!dataUrl || !String(dataUrl).trim()) return ""
+    if (!Object.prototype.hasOwnProperty.call(cache.imageName, key)) {
+        if (!dataUrl || !String(dataUrl).trim()) {
+            cache.imageName[key] = ""
+            return ""
+        }
         var ext = getDataUrlExt(dataUrl)
+        var assignedPath = ""
 
-        var n = (cache.imgCountBySec[secEarly] || 0) + 1
-        cache.imgCountBySec[secEarly] = n
-
-        var project = normalizeProjectName(cache.projectName)
-        var dateStem = getOrInitExportImageYymmddSuffix(cache)
-        var country = normalizeExportCountryCode(cache.exportCountryCode)
-        var countrySeg = country ? "_" + country : ""
-        var variantSeg = ""
-        var isSvg = ext === ".svg"
-        if (!isSvg && !opts.omitPcMoVariant) {
-            if (cache.imageSuffix === "_mo") {
-                variantSeg = "_mo"
-            } else if (cache.usePcMoImageFilenameVariants) {
-                variantSeg = "_pc"
+        if (cache.imageSuffix === "_mo" && cache.inheritedPcImageName) {
+            var pcKey = opts.pairedPcAssetKey || moAssetKeyToPcAssetKeyByVariant(key)
+            var pcPathLook = inheritedPcPathForPairedKey(cache, pcKey)
+            if (pcPathLook) {
+                assignedPath = pcExportPathToMoExportPath(pcPathLook, ext)
+            } else if (opts.pairedPcAssetKey) {
+                cache.imageName[key] = ""
+                return ""
             }
         }
-        var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + variantSeg + countrySeg + dateStem + ext
 
-        cache.imageName[key] = ASSETS_IMAGES_PREFIX + fileName
+        if (!assignedPath) {
+            var n = (cache.imgCountBySec[secEarly] || 0) + 1
+            cache.imgCountBySec[secEarly] = n
+
+            var project = normalizeProjectName(cache.projectName)
+            var dateStem = getOrInitExportImageYymmddSuffix(cache)
+            var country = normalizeExportCountryCode(cache.exportCountryCode)
+            var countrySeg = country ? "_" + country : ""
+            var variantSeg = ""
+            var isSvg = ext === ".svg"
+            if (!isSvg && !opts.omitPcMoVariant) {
+                if (cache.imageSuffix === "_mo") {
+                    variantSeg = "_mo"
+                } else if (cache.usePcMoImageFilenameVariants) {
+                    variantSeg = "_pc"
+                }
+            }
+            var fileName = "page_" + project + "_sec" + pad2(secEarly) + "_img" + pad2(n) + variantSeg + countrySeg + dateStem + ext
+
+            assignedPath = ASSETS_IMAGES_PREFIX + fileName
+        }
+
+        cache.imageName[key] = assignedPath
     }
 
     var pathOut = cache.imageName[key] || ""
@@ -4057,6 +4120,38 @@ function makeAssetKey(node, kind, format, ctx) {
     // 같은 Figma 이미지 해시(ih)라도 섹션마다 별도 파일·export 캐시(083 imageName[key]가 섹션 간 공유되지 않게)
     var secN = ctx && ctx.secNo != null && ctx.secNo !== "" ? Number(ctx.secNo) || 1 : 1
     return mode + ":" + variant + ":" + kind + ":" + fmt + ":s" + secN + ":" + sh
+}
+
+/**
+ * MO dump 시 imgNN 슬롯을 PC와 동일하게 맞추기 위해, 데스크톱 단계 imageName 맵 조회용 PC assetKey.
+ * (MO assetKey의 해시에는 MO node id가 들어가 단순 :mo:→:pc: 치환만으로는 PC 키와 불일치함.)
+ * @param {boolean} [pcSectionBgImage] PC가 섹션/프로모트 배경 IMAGE export와 동일 컨텍스트일 때 true
+ */
+function makePairedPcAssetKeyForInheritedPathLookup(pairPcNode, meta, secNo, cache, pcSectionBgImage) {
+    if (!pairPcNode || !meta || !cache || meta.kind === "pc-shared-slide") return ""
+    var kind = meta.kind
+    if (!kind || kind === "skip") return ""
+    var format = meta.format
+    if (!format) {
+        if (kind === "svg") format = null
+        else format = "JPG"
+    }
+    var fmt = format === "PNG" ? "png" : format === "JPG" ? "jpg" : "-"
+    ensureImagePipelineOnCache(cache)
+    var mode = cache.imagePipeline.mode
+    var pcCtx = {
+        cache: cache,
+        secNo: secNo,
+        pairPcNode: null,
+        insideSwiperSlide: false,
+        fromPrefetchSlot: false,
+        sectionBackgroundImageFillOnly: pcSectionBgImage === true,
+        clipExportParent: null,
+        rasterExportSourceNode: null,
+    }
+    var sh = sourceHashForAssetKey(pairPcNode, kind, pcCtx)
+    var secN = Number(secNo) || 1
+    return mode + ":pc:" + kind + ":" + fmt + ":s" + secN + ":" + sh
 }
 
 function readUint32BEImg(bytes, offset) {
@@ -4691,6 +4786,86 @@ function findNodeByIdInSubtree(root, targetId) {
 }
 
 /**
+ * MO prefetch 시 PC 상대 노드 (에셋 imgNN·pairPcNodeIdByMoId).
+ * 1) MO 노드 pluginData sourceNodeId 가 pcOrderedIds 안의 PC id이면 우선
+ * 2) 같은 레이어명(트림)·아직 안 쓴 PC 슬롯 중 |인덱스 차| 최소
+ * 3) 동일 인덱스 슬롯이 아직 미사용이면
+ */
+function resolvePairedPcImageNodeForMoPrefetch(moNode, slotIndex, pairedDesktopSection, pcOrderedIds, cache, secNo) {
+    if (!moNode || !pairedDesktopSection || !pcOrderedIds || !pcOrderedIds.length) return null
+    if (!cache || cache.imageSuffix !== "_mo") return null
+
+    if (!cache.moPcPairUsedBySec) cache.moPcPairUsedBySec = {}
+    var usedMap = cache.moPcPairUsedBySec[secNo]
+    if (!usedMap) return null
+
+    function isPcUsed(pcId) {
+        return pcId != null && usedMap[String(pcId)] === true
+    }
+    function markPc(pcId) {
+        if (pcId != null) usedMap[String(pcId)] = true
+    }
+
+    var src = ""
+    try {
+        if (typeof moNode.getPluginData === "function") src = String(moNode.getPluginData("sourceNodeId") || "").trim()
+    } catch (e0) {}
+    if (src) {
+        var bySrc = findNodeByIdInSubtree(pairedDesktopSection, src)
+        if (!bySrc && cache.pairedDesktopRootForMo) {
+            try {
+                bySrc = findNodeByIdInSubtree(cache.pairedDesktopRootForMo, src)
+            } catch (e1) {}
+        }
+        if (bySrc && bySrc.id != null) {
+            var sid = String(bySrc.id)
+            for (var xi = 0; xi < pcOrderedIds.length; xi++) {
+                if (String(pcOrderedIds[xi]) === sid) {
+                    if (!isPcUsed(sid)) {
+                        markPc(sid)
+                        return bySrc
+                    }
+                    break
+                }
+            }
+        }
+    }
+
+    var moName = String(moNode.name || "").trim()
+    if (moName) {
+        var bestPc = null
+        var bestDist = 1e9
+        for (var j = 0; j < pcOrderedIds.length; j++) {
+            var pid = pcOrderedIds[j]
+            if (pid == null || isPcUsed(pid)) continue
+            var pn = findNodeByIdInSubtree(pairedDesktopSection, pid)
+            if (!pn) continue
+            if (String(pn.name || "").trim() !== moName) continue
+            var dist = Math.abs(j - slotIndex)
+            if (dist < bestDist) {
+                bestDist = dist
+                bestPc = pn
+            }
+        }
+        if (bestPc && bestPc.id != null) {
+            markPc(bestPc.id)
+            return bestPc
+        }
+    }
+
+    var at = pcOrderedIds[slotIndex]
+    if (at != null && !isPcUsed(at)) {
+        var pAt = findNodeByIdInSubtree(pairedDesktopSection, at)
+        if (pAt && pAt.id != null) {
+            markPc(pAt.id)
+            return pAt
+        }
+    }
+
+    return null
+}
+
+/**
  * renderNodeAsync 분기와 동일 순서로, 최종 <img> 한 장이 나가는 노드 id를 누적 (DFS·자식 순서 일치).
  * @param {object} ropts includeHidden, allowedFonts, fontHtmlUnrestricted, sectionSemantics
  */
@@ -4941,8 +5116,12 @@ function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotInde
         }
     }
     var pairPc = null
-    if (pairedDesktopSection && pcOrderedIds && pcOrderedIds[slotIndex] != null) {
-        pairPc = findNodeByIdInSubtree(pairedDesktopSection, pcOrderedIds[slotIndex])
+    if (pairedDesktopSection && pcOrderedIds && pcOrderedIds.length) {
+        if (cache.imageSuffix === "_mo") {
+            pairPc = resolvePairedPcImageNodeForMoPrefetch(node, slotIndex, pairedDesktopSection, pcOrderedIds, cache, secNo)
+        } else if (pcOrderedIds[slotIndex] != null) {
+            pairPc = findNodeByIdInSubtree(pairedDesktopSection, pcOrderedIds[slotIndex])
+        }
     }
     if (pairPc && node && node.id != null && pairPc.id != null) {
         cache.pairPcNodeIdByMoId = cache.pairPcNodeIdByMoId || Object.create(null)
@@ -4966,6 +5145,9 @@ function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotInde
         if (cache.usePcMoImageFilenameVariants && !cache.imageSuffix && slideData && imgCtx.insideSwiperSlide) {
             pathOpts.omitPcMoVariant = true
         }
+        if (cache.imageSuffix === "_mo" && pairPc && meta && meta.kind !== "pc-shared-slide" && !meta.reuseAssetKey) {
+            pathOpts.pairedPcAssetKey = makePairedPcAssetKeyForInheritedPathLookup(pairPc, meta, secNo, cache, false)
+        }
         getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl || "", secNo, pathOpts)
         if (slideData && slideIdSet[String(node.id)] && meta.assetKey) {
             cache.slideAssetKeyByNodeId = cache.slideAssetKeyByNodeId || Object.create(null)
@@ -4980,6 +5162,10 @@ function prefetchOneImageNodeAsync(node, cache, secNo, bg, sectionNode, slotInde
 
 function prefetchSectionImageAssetsAsync(sectionNode, orderedIds, cache, secNo, bg, slideData, pairedDesktopSection, pcOrderedIds) {
     if (!orderedIds || !orderedIds.length) return Promise.resolve()
+    if (cache.imageSuffix === "_mo" && pairedDesktopSection && pcOrderedIds && pcOrderedIds.length) {
+        if (!cache.moPcPairUsedBySec) cache.moPcPairUsedBySec = {}
+        cache.moPcPairUsedBySec[secNo] = Object.create(null)
+    }
     var ix = 0
     function next() {
         if (ix >= orderedIds.length) return Promise.resolve()
@@ -5035,13 +5221,15 @@ function pipelineRasterBackgroundImageDeclAsync(node, useCssVarsForSection, cach
     }
     return pipelineEnsureImageAsync(node, bgCtx).then(function (meta) {
         if (!meta || !meta.dataUrl) return ""
-        var path = cache
-            ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl || "", secNo, {
-                  skipExport: isVideoNodeEffective(node, cache),
-                  imageHash: getPrimaryImageFillHash(node),
-                  reuseAssetKey: meta.reuseAssetKey || undefined,
-              })
-            : ""
+        var bgPathOpts = {
+            skipExport: isVideoNodeEffective(node, cache),
+            imageHash: getPrimaryImageFillHash(node),
+            reuseAssetKey: meta.reuseAssetKey || undefined,
+        }
+        if (cache.imageSuffix === "_mo" && bgCtx.pairPcNode && meta && meta.kind !== "pc-shared-slide" && !meta.reuseAssetKey) {
+            bgPathOpts.pairedPcAssetKey = makePairedPcAssetKeyForInheritedPathLookup(bgCtx.pairPcNode, meta, secNo, cache, true)
+        }
+        var path = cache ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl || "", secNo, bgPathOpts) : ""
         var imgUrl = (path && path.length) ? path : meta.dataUrl
         if (!imgUrl) return ""
         if (useCssVarsForSection) {
@@ -5469,13 +5657,15 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
                 }
                 return pipelineEnsureImageAsync(exportNode, bleedCtx).then(function (meta) {
                     if (!meta || !meta.dataUrl) return tryFullBleedContainerBgHoistPromise()
-                    var path = cache
-                        ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                              skipExport: isVideoNodeEffective(exportNode, cache),
-                              imageHash: getPrimaryImageFillHash(exportNode),
-                              reuseAssetKey: meta.reuseAssetKey || undefined,
-                          })
-                        : ""
+                    var bleedPathOpts = {
+                        skipExport: isVideoNodeEffective(exportNode, cache),
+                        imageHash: getPrimaryImageFillHash(exportNode),
+                        reuseAssetKey: meta.reuseAssetKey || undefined,
+                    }
+                    if (cache.imageSuffix === "_mo" && bleedCtx.pairPcNode && meta && meta.kind !== "pc-shared-slide" && !meta.reuseAssetKey) {
+                        bleedPathOpts.pairedPcAssetKey = makePairedPcAssetKeyForInheritedPathLookup(bleedCtx.pairPcNode, meta, secNo, cache, true)
+                    }
+                    var path = cache ? getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, bleedPathOpts) : ""
                     if (path && meta.dataUrl) {
                         var merged = decl ? decl + ";--bg-img:url(" + path + ")" : "--bg-img:url(" + path + ")"
                         return { decl: merged, bgChildId: promote.skipId, hoistBgChildId: null }
@@ -7096,25 +7286,32 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                 }
 
-                return pipelineEnsureImageAsync(
-                        node,
-                        pipelineImgCtx(node, secNo, {
-                            insideSwiperSlide: !!(opts && opts.insideSwiperSlide),
-                            clipExportParent: parent,
-                        })
-                    )
-                    .then(function (meta) {
+                var imgCtxRasterText = pipelineImgCtx(node, secNo, {
+                    insideSwiperSlide: !!(opts && opts.insideSwiperSlide),
+                    clipExportParent: parent,
+                })
+                return pipelineEnsureImageAsync(node, imgCtxRasterText).then(function (meta) {
                         if (!meta || !meta.dataUrl) {
                             pushTextNodeDeferredStyles(ctx, secClass, id, ts, node, parent, textAbs, true, opts)
                             return buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth)
                         }
+                        var pathOptsText = {
+                            skipExport: isVideoNodeEffective(node, cache),
+                            imageHash: getPrimaryImageFillHash(node),
+                            reuseAssetKey: meta.reuseAssetKey || undefined,
+                        }
+                        if (cache.imageSuffix === "_mo" && imgCtxRasterText.pairPcNode && meta && meta.kind !== "pc-shared-slide" && !meta.reuseAssetKey) {
+                            pathOptsText.pairedPcAssetKey = makePairedPcAssetKeyForInheritedPathLookup(
+                                imgCtxRasterText.pairPcNode,
+                                meta,
+                                secNo,
+                                cache,
+                                false,
+                            )
+                        }
                         var path =
                             cache &&
-                            getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                                skipExport: isVideoNodeEffective(node, cache),
-                                imageHash: getPrimaryImageFillHash(node),
-                                reuseAssetKey: meta.reuseAssetKey || undefined,
-                            })
+                            getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, pathOptsText)
                         var altText = getImageAltText(node)
                         if (id) ctx.ownImageNodeIds[id] = true
                         var rasterOpts = optsWithRasterTextAsImageSemantics(id, opts)
@@ -7173,18 +7370,23 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             return Promise.resolve(wrapIfBtn(node, indent(depth) + ellipseHtml, depth))
         }
         var svgImgAbs = isAbsoluteLike(node, parent)
-        return pipelineEnsureImageAsync(
-            node,
-            pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide), clipExportParent: parent })
-        ).then(function (meta) {
+        var imgCtxVector = pipelineImgCtx(node, secNo, {
+            insideSwiperSlide: !!(opts && opts.insideSwiperSlide),
+            clipExportParent: parent,
+        })
+        return pipelineEnsureImageAsync(node, imgCtxVector).then(function (meta) {
             if (!meta || !meta.dataUrl) return ""
+            var pathOptsVec = {
+                skipExport: isVideoNodeEffective(node, cache),
+                imageHash: getPrimaryImageFillHash(node),
+                reuseAssetKey: meta.reuseAssetKey || undefined,
+            }
+            if (cache.imageSuffix === "_mo" && imgCtxVector.pairPcNode && meta && meta.kind !== "pc-shared-slide" && !meta.reuseAssetKey) {
+                pathOptsVec.pairedPcAssetKey = makePairedPcAssetKeyForInheritedPathLookup(imgCtxVector.pairPcNode, meta, secNo, cache, false)
+            }
             var path =
                 cache &&
-                getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                    skipExport: isVideoNodeEffective(node, cache),
-                    imageHash: getPrimaryImageFillHash(node),
-                    reuseAssetKey: meta.reuseAssetKey || undefined,
-                })
+                getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, pathOptsVec)
             if (svgImgAbs && id) {
                 var svgAbsDecl = buildAbsDecl(node, parent)
                 if (svgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), svgAbsDecl)
@@ -7257,18 +7459,23 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             })
         }
         var imgAbs = isAbsoluteLike(node, parent)
-        return pipelineEnsureImageAsync(
-            node,
-            pipelineImgCtx(node, secNo, { insideSwiperSlide: !!(opts && opts.insideSwiperSlide), clipExportParent: parent })
-        ).then(function (meta) {
+        var imgCtxFigure = pipelineImgCtx(node, secNo, {
+            insideSwiperSlide: !!(opts && opts.insideSwiperSlide),
+            clipExportParent: parent,
+        })
+        return pipelineEnsureImageAsync(node, imgCtxFigure).then(function (meta) {
             if (!meta || !meta.dataUrl) return ""
+            var pathOptsFig = {
+                skipExport: isVideoNodeEffective(node, cache),
+                imageHash: getPrimaryImageFillHash(node),
+                reuseAssetKey: meta.reuseAssetKey || undefined,
+            }
+            if (cache.imageSuffix === "_mo" && imgCtxFigure.pairPcNode && meta && meta.kind !== "pc-shared-slide" && !meta.reuseAssetKey) {
+                pathOptsFig.pairedPcAssetKey = makePairedPcAssetKeyForInheritedPathLookup(imgCtxFigure.pairPcNode, meta, secNo, cache, false)
+            }
             var path =
                 cache &&
-                getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, {
-                    skipExport: isVideoNodeEffective(node, cache),
-                    imageHash: getPrimaryImageFillHash(node),
-                    reuseAssetKey: meta.reuseAssetKey || undefined,
-                })
+                getOrAssignImagePath(cache, meta.assetKey, meta.dataUrl, secNo, pathOptsFig)
             if (imgAbs && id) {
                 var imgAbsDecl = buildAbsDecl(node, parent)
                 if (imgAbsDecl) pushDeferredStyle(ctx, selInSection(secClass, cssInnerSelForNode(id, opts, false), visWrapFromOpts(opts)), imgAbsDecl)
@@ -7702,13 +7909,24 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         return String(id)
                     })
                 }
-                var pcIdsPair = visWrap === "mo-only" && pairedDesktopSection ? sectionImageRenderOrderIds[secNo - 1] : null
+                var pairedForPrefetch = null
+                var pcIdsPair = null
+                if (visWrap === "mo-only" && pairedDesktopSection) {
+                    pairedForPrefetch = pairedDesktopSection
+                    pcIdsPair = sectionImageRenderOrderIds[secNo - 1] || null
+                } else if (cache.imageSuffix === "_mo" && cache.pairedDesktopRootForMo) {
+                    var inhOrd = cache.inheritedPcSectionImageRenderOrderIds
+                    if (inhOrd && inhOrd[secNo - 1] && inhOrd[secNo - 1].length) {
+                        pcIdsPair = inhOrd[secNo - 1]
+                        pairedForPrefetch = getSectionNodes(cache.pairedDesktopRootForMo)[secNo - 1] || null
+                    }
+                }
                 return precomputeRasterFormatsForSlotsAsync(
                     sectionNode,
                     orderedIds,
                     secNo,
                     cache,
-                    visWrap === "mo-only" ? pairedDesktopSection : null,
+                    pairedForPrefetch,
                     pcIdsPair,
                 ).then(function () {
                     return prefetchSectionImageAssetsAsync(
@@ -7718,7 +7936,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                         secNo,
                         bg,
                         slideData,
-                        visWrap === "mo-only" ? pairedDesktopSection : null,
+                        pairedForPrefetch,
                         pcIdsPair,
                     )
                 })
@@ -8073,6 +8291,11 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
     var cache = {
         projectName: normalizeProjectName(projectName),
         exportCountryCode: normalizeExportCountryCode(options.exportCountryCode),
+        /** 데스크톱 덤프의 assetKey→경로 (MO 단계에서 imgNN 슬롯 정렬·슬라이드 reuseAssetKey 조회용) */
+        inheritedPcImageName: null,
+        /** 데스크톱 섹션별 <img> 렌더 순서 id 배열 (MO 구조 일치 시 PC–MO 짝 맞춤) */
+        inheritedPcSectionImageRenderOrderIds: null,
+        pairedDesktopRootForMo: null,
         /** PC+MO(데스크톱 단계)에서 래스터 파일명에 `_pc` 접미사 — 슬라이드 공유 에셋은 omitPcMoVariant로 제외 */
         usePcMoImageFilenameVariants: !!(options.mobileRoot && options.phase === "desktop"),
         allowedFonts: Array.isArray(allowedFonts)
@@ -8091,6 +8314,20 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         imageName: {},
         imageList: [],
         imgCountBySec: {},
+    }
+    if (options.inheritedPcImageName && typeof options.inheritedPcImageName === "object") {
+        cache.inheritedPcImageName = options.inheritedPcImageName
+        for (var ink in options.inheritedPcImageName) {
+            if (Object.prototype.hasOwnProperty.call(options.inheritedPcImageName, ink)) {
+                cache.imageName[ink] = options.inheritedPcImageName[ink]
+            }
+        }
+    }
+    if (options.phase === "mobile") {
+        if (options.pairedDesktopRoot) cache.pairedDesktopRootForMo = options.pairedDesktopRoot
+        if (options.inheritedPcSectionImageRenderOrderIds != null) {
+            cache.inheritedPcSectionImageRenderOrderIds = options.inheritedPcSectionImageRenderOrderIds
+        }
     }
     if (options.mobileRoot && options.phase === "desktop") {
         cache.responsiveTextInnerByNodeId = buildResponsiveTextInnerByNodeIdMap(root, options.mobileRoot)
@@ -8334,6 +8571,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                     ownImageNodeIds: ownImageNodeIds,
                     sectionImageRenderOrderIds: result && result.sectionImageRenderOrderIds ? result.sectionImageRenderOrderIds : [],
                     images: cache.imageList || [],
+                    imageNameByAssetKey: Object.assign(Object.create(null), cache.imageName || {}),
                     vectorTypes: VECTOR_TYPES,
                     usedFonts: usedFonts,
                     assetStoresSnapshot: assetStoresSnapshot,
@@ -8453,6 +8691,8 @@ figma.ui.onmessage = function (msg) {
                         pcRasterExtByStem: pcRasterExtByStem,
                         inheritAssetStores: payload.assetStoresSnapshot,
                         inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
+                        inheritedPcImageName: payload.imageNameByAssetKey || {},
+                        inheritedPcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds || [],
                         exportCountryCode: msg.exportCountryCode,
                         pairedDesktopRoot: rootDesktop,
                     }).then(function (moPayload) {
@@ -8566,6 +8806,8 @@ figma.ui.onmessage = function (msg) {
                             pcRasterExtByStem: pcRasterExtByStemZip,
                             inheritAssetStores: payload.assetStoresSnapshot,
                             inheritedSlideAssetKeyBySlot: payload.slideAssetKeyBySlot || {},
+                            inheritedPcImageName: payload.imageNameByAssetKey || {},
+                            inheritedPcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds || [],
                             exportCountryCode: msg.exportCountryCode,
                             pairedDesktopRoot: rootDesktop,
                         }).then(function (moPayload) {

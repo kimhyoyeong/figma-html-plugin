@@ -79,6 +79,38 @@ function makeAssetKey(node, kind, format, ctx) {
     return mode + ":" + variant + ":" + kind + ":" + fmt + ":s" + secN + ":" + sh
 }
 
+/**
+ * MO dump 시 imgNN 슬롯을 PC와 동일하게 맞추기 위해, 데스크톱 단계 imageName 맵 조회용 PC assetKey.
+ * (MO assetKey의 해시에는 MO node id가 들어가 단순 :mo:→:pc: 치환만으로는 PC 키와 불일치함.)
+ * @param {boolean} [pcSectionBgImage] PC가 섹션/프로모트 배경 IMAGE export와 동일 컨텍스트일 때 true
+ */
+function makePairedPcAssetKeyForInheritedPathLookup(pairPcNode, meta, secNo, cache, pcSectionBgImage) {
+    if (!pairPcNode || !meta || !cache || meta.kind === "pc-shared-slide") return ""
+    var kind = meta.kind
+    if (!kind || kind === "skip") return ""
+    var format = meta.format
+    if (!format) {
+        if (kind === "svg") format = null
+        else format = "JPG"
+    }
+    var fmt = format === "PNG" ? "png" : format === "JPG" ? "jpg" : "-"
+    ensureImagePipelineOnCache(cache)
+    var mode = cache.imagePipeline.mode
+    var pcCtx = {
+        cache: cache,
+        secNo: secNo,
+        pairPcNode: null,
+        insideSwiperSlide: false,
+        fromPrefetchSlot: false,
+        sectionBackgroundImageFillOnly: pcSectionBgImage === true,
+        clipExportParent: null,
+        rasterExportSourceNode: null,
+    }
+    var sh = sourceHashForAssetKey(pairPcNode, kind, pcCtx)
+    var secN = Number(secNo) || 1
+    return mode + ":pc:" + kind + ":" + fmt + ":s" + secN + ":" + sh
+}
+
 function readUint32BEImg(bytes, offset) {
     return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0
 }
