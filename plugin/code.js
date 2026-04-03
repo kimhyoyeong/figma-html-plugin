@@ -3195,102 +3195,6 @@ function renumberApSectionElemGlobally(sectionNode, map, elemPart) {
     }
 }
 
-/** 지연 CSS 선언 문자열 → 속성 맵 (disambiguation 비교용) */
-function parseDeclStringToMapForSem(decl) {
-    var m = Object.create(null)
-    if (!decl || !String(decl).trim()) return m
-    var parts = String(decl).split(";")
-    for (var pi = 0; pi < parts.length; pi++) {
-        var p = parts[pi].trim()
-        if (!p) continue
-        var c = p.indexOf(":")
-        if (c === -1) continue
-        m[p.substring(0, c).trim()] = p.substring(c + 1).trim()
-    }
-    return m
-}
-
-/** TEXT 단일 스타일 타이포 맵 — parts·비TEXT면 null */
-function textTypoMapForDisambig(nodeId) {
-    try {
-        var n = figma.getNodeById(nodeId)
-        if (!n || n.type !== "TEXT") return null
-        var ts = getTextSummarySync(n)
-        if (!ts || (ts.parts && ts.parts.length)) return null
-        return parseDeclStringToMapForSem(buildTextVarsDecl(ts))
-    } catch (e) {
-        return null
-    }
-}
-
-/** 선언 맵 차이가 --ap-lh / --ap-ls 에서만 나는지 (맵 없음이면 병합 안 함) */
-function textTypoDiffersOnlyLhLs(mapA, mapB) {
-    if (!mapA || !mapB) return false
-    var keys = Object.create(null)
-    for (var ka in mapA) if (Object.prototype.hasOwnProperty.call(mapA, ka)) keys[ka] = 1
-    for (var kb in mapB) if (Object.prototype.hasOwnProperty.call(mapB, kb)) keys[kb] = 1
-    for (var kk in keys) {
-        if (!Object.prototype.hasOwnProperty.call(keys, kk)) continue
-        var a = mapA[kk]
-        var b = mapB[kk]
-        if (a === b) continue
-        if (kk !== "--ap-lh" && kk !== "--ap-ls") return false
-    }
-    return true
-}
-
-/**
- * 동일 클래스를 공유하는 id(트리 순 정렬)를
- * --ap-lh/--ap-ls 만 다른 TEXT끼리 한 그룹으로 묶음. 비TEXT·맵 없음은 단독 그룹.
- */
-function partitionDuplicateClassIdsByLhLsOnly(idsSorted, rank) {
-    var n = idsSorted.length
-    var parent = []
-    for (var i = 0; i < n; i++) parent[i] = i
-    function find(x) {
-        return parent[x] === x ? x : (parent[x] = find(parent[x]))
-    }
-    function union(a, b) {
-        var ra = find(a)
-        var rb = find(b)
-        if (ra !== rb) parent[rb] = ra
-    }
-    var maps = []
-    for (var mi = 0; mi < n; mi++) maps[mi] = textTypoMapForDisambig(idsSorted[mi])
-    for (var i = 0; i < n; i++) {
-        for (var j = i + 1; j < n; j++) {
-            if (textTypoDiffersOnlyLhLs(maps[i], maps[j])) union(i, j)
-        }
-    }
-    var buckets = Object.create(null)
-    for (var ii = 0; ii < n; ii++) {
-        var r = find(ii)
-        if (!buckets[r]) buckets[r] = []
-        buckets[r].push(idsSorted[ii])
-    }
-    var groups = []
-    for (var br in buckets) {
-        if (Object.prototype.hasOwnProperty.call(buckets, br)) groups.push(buckets[br])
-    }
-    function minRank(grp) {
-        var m = 999999
-        for (var g = 0; g < grp.length; g++) {
-            var x = rank(grp[g])
-            if (x < m) m = x
-        }
-        return m
-    }
-    groups.sort(function (ga, gb) {
-        return minRank(ga) - minRank(gb)
-    })
-    for (var si = 0; si < groups.length; si++) {
-        groups[si].sort(function (a, b) {
-            return rank(a) - rank(b)
-        })
-    }
-    return groups
-}
-
 /** 동일 ap-section__* 가 여러 노드면: 그 외 역할은 첫 노드 접미사 없음·둘째부터 --02… (image/content 는 renumberApSectionElemGlobally) */
 function disambiguateSectionSemantics(sectionNode, map) {
     var classToIds = {}
@@ -3314,7 +3218,6 @@ function disambiguateSectionSemantics(sectionNode, map) {
         var x = order.indexOf(id)
         return x < 0 ? 999999 : x
     }
-    var TEXT_ROLE_BASE_RE = /^ap-section__(title|subtitle|desc|description|caption|cta|label|body)$/
     for (var cls in classToIds) {
         var ids = classToIds[cls]
         if (ids.length <= 1) continue
@@ -3324,29 +3227,11 @@ function disambiguateSectionSemantics(sectionNode, map) {
         var clsStr = String(cls || "")
         var baseNm = clsStr.replace(/--\d{2}$/, "")
         if (baseNm === "ap-section__content" || baseNm === "ap-section__image") continue
-        if (TEXT_ROLE_BASE_RE.test(baseNm)) {
-            var groupsLh = partitionDuplicateClassIdsByLhLsOnly(ids, rank)
-            var suffixStart = 1
-            var escB = baseNm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-            var sufM = new RegExp("^" + escB + "--(\\d{2})$").exec(clsStr)
-            if (sufM) suffixStart = parseInt(sufM[1], 10) || 1
-            for (var gi = 0; gi < groupsLh.length; gi++) {
-                var newClsLh = gi === 0 ? clsStr : baseNm + "--" + pad2(suffixStart + gi)
-                var g = groupsLh[gi]
-                for (var t = 0; t < g.length; t++) {
-                    var idt = g[t]
-                    var arrM = map[idt]
-                    var idx = arrM.indexOf(clsStr)
-                    if (idx >= 0) arrM[idx] = newClsLh
-                }
-            }
-            continue
-        }
         for (var k = 0; k < ids.length; k++) {
-            var newCls2 = k === 0 ? clsStr : baseNm + "--" + pad2(k + 1)
-            var arrM2 = map[ids[k]]
-            var idx2 = arrM2.indexOf(clsStr)
-            if (idx2 >= 0) arrM2[idx2] = newCls2
+            var newCls = k === 0 ? clsStr : baseNm + "--" + pad2(k + 1)
+            var arrM = map[ids[k]]
+            var idx = arrM.indexOf(clsStr)
+            if (idx >= 0) arrM[idx] = newCls
         }
     }
     renumberApSectionElemGlobally(sectionNode, map, "image")
@@ -6813,34 +6698,18 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("  margin:0;")
     codeLines.push("  box-sizing:border-box;")
     codeLines.push("}")
-    codeLines.push(".ap-post {")
-    codeLines.push("  --ap-fs-min:6px;")
-    codeLines.push("  overflow-x:hidden;")
-    codeLines.push("}")
     codeLines.push("")
     codeLines.push(".ap-post__inner {")
     codeLines.push("  container:article/inline-size;")
     codeLines.push("  --ap-width:" + baseWidth + ";")
-    codeLines.push("  max-width:" + baseWidth + "px;width:100%;")
+    //codeLines.push("  max-width:" + baseWidth + "px;width:100%;")
     codeLines.push("  margin:0 auto;")
     codeLines.push("}")
     codeLines.push("")
 
     codeLines.push(".ap-section {")
     codeLines.push("  position:relative;")
-    codeLines.push("}")
-    codeLines.push(".ap-section::before {")
-    codeLines.push('  content:"";')
-    codeLines.push("  position:absolute;")
-    codeLines.push("  z-index:-1;")
-    codeLines.push("  top:0;")
-    codeLines.push("  bottom:0;")
-    codeLines.push("  left:50%;")
-    codeLines.push("  width:100vw;")
-    codeLines.push("  transform:translateX(-50vw);")
-    codeLines.push("  pointer-events:none;")
-    codeLines.push("  --bg-img:inherit;")
-    codeLines.push("  --bgc:inherit;")
+    codeLines.push("  overflow:hidden;")
     codeLines.push("  background-color:var(--bgc,transparent);")
     codeLines.push("  background-image:var(--bg-img,none);")
     codeLines.push("  background-repeat:no-repeat;")
@@ -6848,6 +6717,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("  background-size:contain;")
     codeLines.push("}")
     codeLines.push("")
+    codeLines.push("")
+
     codeLines.push(".ap-abs{")
     codeLines.push("  position:absolute;")
     codeLines.push("  left:calc(var(--ap-left, 0)/var(--ap-width)*100cqi);")
@@ -6860,7 +6731,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     // text
     codeLines.push(".ap-text {")
     codeLines.push("  margin:0;")
-    codeLines.push("  font-size:clamp(var(--ap-fs-min),calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));")
+    codeLines.push("  font-size:clamp(0px,calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));")
     codeLines.push("  line-height:var(--ap-lh, 1.2);")
     codeLines.push("  letter-spacing:calc(var(--ap-ls, 0)/var(--ap-width)*100cqi);")
     codeLines.push("  font-weight:var(--ap-fw, 400);")
@@ -6868,7 +6739,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("  color:var(--ap-clr, #000);")
     codeLines.push("}")
     codeLines.push(".ap-text__part {")
-    codeLines.push("  font-size:clamp(var(--ap-fs-min),calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));")
+    codeLines.push("  font-size:clamp(0px,calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));")
     codeLines.push("  line-height:var(--ap-lh, 1.2);")
     codeLines.push("  letter-spacing:calc(var(--ap-ls, 0)/var(--ap-width)*100cqi);")
     codeLines.push("  font-weight:var(--ap-fw, 400);")
@@ -6933,8 +6804,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after { content:none; }")
     codeLines.push(".ap-post .swiper-button-prev,")
     codeLines.push(".ap-post .swiper-button-next {")
-    codeLines.push("  width: calc(40 / var(--ap-width) * 100cqi);")
-    codeLines.push("  height: calc(80 / var(--ap-width) * 100cqi);")
+    codeLines.push("  width: clamp(0px, calc(40 / var(--ap-width) * 100cqi), 40px);")
+    codeLines.push("  height: clamp(0px, calc(80 / var(--ap-width) * 100cqi), 80px);")
     codeLines.push("  background-color: var(--swiper-navigation-color);")
     codeLines.push('  -webkit-mask: url("' + apSwiperNavArrowDataUrl + '") no-repeat center / contain;')
     codeLines.push('  mask: url("' + apSwiperNavArrowDataUrl + '") no-repeat center / contain;')
@@ -7341,7 +7212,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var useFlexImg = useApFlexClass(node, absImgGrp, isFlex(node))
             var declPartsImgGrp = []
             return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgImgGrp) {
-                if (bgImgGrp && !skipHoistedSectionSurfaceBgDecl(node, opts)) declPartsImgGrp.push(bgImgGrp)
+                if (bgImgGrp) declPartsImgGrp.push(bgImgGrp)
                 var strokeImgGrp = buildStrokeDecl(node)
                 if (strokeImgGrp) declPartsImgGrp.push(strokeImgGrp)
                 if (absImgGrp) {
@@ -7411,12 +7282,6 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         })
     }
 
-    /** 085: 직계 컨테이너 배경을 section `--bgc`/`--bg-img`(+::before)로 올린 경우, 그 노드에는 surface 배경 선언 생략 */
-    function skipHoistedSectionSurfaceBgDecl(node, opts) {
-        if (!opts || opts.hoistSectionBgChildId == null || !node || node.id == null) return false
-        return String(opts.hoistSectionBgChildId) === String(node.id)
-    }
-
     function renderFrameNodeAsync(node, parent, secNo, secClass, depth, opts) {
         var id = node.id != null ? String(node.id) : ""
         var abs = isAbsoluteLike(node, parent)
@@ -7466,8 +7331,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
         // frame height: 배경(fill/이미지) 또는 stroke가 있을 때만 고정. 없으면 생략해 콘텐츠 증가 시 유지보수에 유리.
         return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl) {
-            var skipSurf = skipHoistedSectionSurfaceBgDecl(node, opts)
-            if (bgDecl && !skipSurf) {
+            if (bgDecl) {
                 declParts.push(bgDecl)
                 var hasWidth = declParts.some(function (s) {
                     var t = String(s)
@@ -7622,8 +7486,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var declParts2Flex = []
 
         return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl2) {
-            var skipSurf2 = skipHoistedSectionSurfaceBgDecl(node, opts)
-            if (bgDecl2 && !skipSurf2) declParts2Visual.push(bgDecl2)
+            if (bgDecl2) declParts2Visual.push(bgDecl2)
             var strokeDecl2 = buildStrokeDecl(node)
             if (strokeDecl2) declParts2Visual.push(strokeDecl2)
 
@@ -7657,7 +7520,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (
                 boxGrp &&
                 boxGrp.h != null &&
-                (bgDecl2 || declParts2Visual.length > 0 || allAbsChildrenGrp || sbColMinHGrp) &&
+                (declParts2Visual.length > 0 || allAbsChildrenGrp || sbColMinHGrp) &&
                 (!flex || node.layoutSizingVertical === "FIXED" || allAbsChildrenGrp)
             ) {
                 declParts2Visual.push("min-height:calc(" + cssOutLayoutPx(boxGrp.h) + "/var(--ap-width)*100cqi)")
@@ -7760,7 +7623,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var leafCls = apNodeClassList("ap-layer" + (absLeaf ? " ap-abs" : ""), id, opts)
         return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl) {
             var declParts = []
-            if (bgDecl && !skipHoistedSectionSurfaceBgDecl(node, opts)) declParts.push(bgDecl)
+            if (bgDecl) declParts.push(bgDecl)
             var strokeDeclLeaf = buildStrokeDecl(node)
             if (strokeDeclLeaf) declParts.push(strokeDeclLeaf)
             if (absLeaf) {
@@ -7788,7 +7651,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var leafSel = getLeafSelectorForNode(ch, opts)
         var isChContainer = isContainer(ch)
         return Promise.all([buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch, cache) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}), chAbs ? Promise.resolve(buildAbsDecl(ch, sectionNode) || "") : Promise.resolve("")]).then(function (res) {
-            var itemDeclParts = res[0] && !skipHoistedSectionSurfaceBgDecl(ch, opts) ? [res[0]] : []
+            var itemDeclParts = [res[0]].filter(Boolean)
             if (res[1] && !isImageCandidate(ch, cache)) itemDeclParts.push(res[1])
             var strokeDeclVirtual = buildStrokeDecl(ch)
             if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)
@@ -7867,7 +7730,6 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     sectionSemantics: sectionSemantics,
                     mobileRoot: mobileRoot || null,
                     visibilityWrapper: vw || undefined,
-                    hoistSectionBgChildId: bg.hoistBgChildId != null ? bg.hoistBgChildId : null,
                 }
                 var sectionDeclParts = []
 
@@ -7979,7 +7841,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                                 return Promise.resolve(absDecl || "")
                             })(),
                         ]).then(function (res) {
-                            var itemDeclParts = res[0] && !skipHoistedSectionSurfaceBgDecl(ch, sectionRenderOpts) ? [res[0]] : []
+                            var itemDeclParts = [res[0]].filter(Boolean)
                             if (res[1] && !isImageCandidate(ch, cache)) itemDeclParts.push(res[1])
                             var strokeDeclVirtual = buildStrokeDecl(ch)
                             if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)

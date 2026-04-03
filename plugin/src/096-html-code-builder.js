@@ -67,34 +67,18 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("  margin:0;")
     codeLines.push("  box-sizing:border-box;")
     codeLines.push("}")
-    codeLines.push(".ap-post {")
-    codeLines.push("  --ap-fs-min:6px;")
-    codeLines.push("  overflow-x:hidden;")
-    codeLines.push("}")
     codeLines.push("")
     codeLines.push(".ap-post__inner {")
     codeLines.push("  container:article/inline-size;")
     codeLines.push("  --ap-width:" + baseWidth + ";")
-    codeLines.push("  max-width:" + baseWidth + "px;width:100%;")
+    //codeLines.push("  max-width:" + baseWidth + "px;width:100%;")
     codeLines.push("  margin:0 auto;")
     codeLines.push("}")
     codeLines.push("")
 
     codeLines.push(".ap-section {")
     codeLines.push("  position:relative;")
-    codeLines.push("}")
-    codeLines.push(".ap-section::before {")
-    codeLines.push('  content:"";')
-    codeLines.push("  position:absolute;")
-    codeLines.push("  z-index:-1;")
-    codeLines.push("  top:0;")
-    codeLines.push("  bottom:0;")
-    codeLines.push("  left:50%;")
-    codeLines.push("  width:100vw;")
-    codeLines.push("  transform:translateX(-50vw);")
-    codeLines.push("  pointer-events:none;")
-    codeLines.push("  --bg-img:inherit;")
-    codeLines.push("  --bgc:inherit;")
+    codeLines.push("  overflow:hidden;")
     codeLines.push("  background-color:var(--bgc,transparent);")
     codeLines.push("  background-image:var(--bg-img,none);")
     codeLines.push("  background-repeat:no-repeat;")
@@ -102,6 +86,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("  background-size:contain;")
     codeLines.push("}")
     codeLines.push("")
+    codeLines.push("")
+
     codeLines.push(".ap-abs{")
     codeLines.push("  position:absolute;")
     codeLines.push("  left:calc(var(--ap-left, 0)/var(--ap-width)*100cqi);")
@@ -114,7 +100,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     // text
     codeLines.push(".ap-text {")
     codeLines.push("  margin:0;")
-    codeLines.push("  font-size:clamp(var(--ap-fs-min),calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));")
+    codeLines.push("  font-size:clamp(0px,calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));")
     codeLines.push("  line-height:var(--ap-lh, 1.2);")
     codeLines.push("  letter-spacing:calc(var(--ap-ls, 0)/var(--ap-width)*100cqi);")
     codeLines.push("  font-weight:var(--ap-fw, 400);")
@@ -122,7 +108,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push("  color:var(--ap-clr, #000);")
     codeLines.push("}")
     codeLines.push(".ap-text__part {")
-    codeLines.push("  font-size:clamp(var(--ap-fs-min),calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));")
+    codeLines.push("  font-size:clamp(0px,calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));")
     codeLines.push("  line-height:var(--ap-lh, 1.2);")
     codeLines.push("  letter-spacing:calc(var(--ap-ls, 0)/var(--ap-width)*100cqi);")
     codeLines.push("  font-weight:var(--ap-fw, 400);")
@@ -187,8 +173,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after { content:none; }")
     codeLines.push(".ap-post .swiper-button-prev,")
     codeLines.push(".ap-post .swiper-button-next {")
-    codeLines.push("  width: calc(40 / var(--ap-width) * 100cqi);")
-    codeLines.push("  height: calc(80 / var(--ap-width) * 100cqi);")
+    codeLines.push("  width: clamp(0px, calc(40 / var(--ap-width) * 100cqi), 40px);")
+    codeLines.push("  height: clamp(0px, calc(80 / var(--ap-width) * 100cqi), 80px);")
     codeLines.push("  background-color: var(--swiper-navigation-color);")
     codeLines.push('  -webkit-mask: url("' + apSwiperNavArrowDataUrl + '") no-repeat center / contain;')
     codeLines.push('  mask: url("' + apSwiperNavArrowDataUrl + '") no-repeat center / contain;')
@@ -595,7 +581,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var useFlexImg = useApFlexClass(node, absImgGrp, isFlex(node))
             var declPartsImgGrp = []
             return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgImgGrp) {
-                if (bgImgGrp && !skipHoistedSectionSurfaceBgDecl(node, opts)) declPartsImgGrp.push(bgImgGrp)
+                if (bgImgGrp) declPartsImgGrp.push(bgImgGrp)
                 var strokeImgGrp = buildStrokeDecl(node)
                 if (strokeImgGrp) declPartsImgGrp.push(strokeImgGrp)
                 if (absImgGrp) {
@@ -665,12 +651,6 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         })
     }
 
-    /** 085: 직계 컨테이너 배경을 section `--bgc`/`--bg-img`(+::before)로 올린 경우, 그 노드에는 surface 배경 선언 생략 */
-    function skipHoistedSectionSurfaceBgDecl(node, opts) {
-        if (!opts || opts.hoistSectionBgChildId == null || !node || node.id == null) return false
-        return String(opts.hoistSectionBgChildId) === String(node.id)
-    }
-
     function renderFrameNodeAsync(node, parent, secNo, secClass, depth, opts) {
         var id = node.id != null ? String(node.id) : ""
         var abs = isAbsoluteLike(node, parent)
@@ -720,8 +700,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
         // frame height: 배경(fill/이미지) 또는 stroke가 있을 때만 고정. 없으면 생략해 콘텐츠 증가 시 유지보수에 유리.
         return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl) {
-            var skipSurf = skipHoistedSectionSurfaceBgDecl(node, opts)
-            if (bgDecl && !skipSurf) {
+            if (bgDecl) {
                 declParts.push(bgDecl)
                 var hasWidth = declParts.some(function (s) {
                     var t = String(s)
@@ -876,8 +855,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var declParts2Flex = []
 
         return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl2) {
-            var skipSurf2 = skipHoistedSectionSurfaceBgDecl(node, opts)
-            if (bgDecl2 && !skipSurf2) declParts2Visual.push(bgDecl2)
+            if (bgDecl2) declParts2Visual.push(bgDecl2)
             var strokeDecl2 = buildStrokeDecl(node)
             if (strokeDecl2) declParts2Visual.push(strokeDecl2)
 
@@ -911,7 +889,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (
                 boxGrp &&
                 boxGrp.h != null &&
-                (bgDecl2 || declParts2Visual.length > 0 || allAbsChildrenGrp || sbColMinHGrp) &&
+                (declParts2Visual.length > 0 || allAbsChildrenGrp || sbColMinHGrp) &&
                 (!flex || node.layoutSizingVertical === "FIXED" || allAbsChildrenGrp)
             ) {
                 declParts2Visual.push("min-height:calc(" + cssOutLayoutPx(boxGrp.h) + "/var(--ap-width)*100cqi)")
@@ -1014,7 +992,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var leafCls = apNodeClassList("ap-layer" + (absLeaf ? " ap-abs" : ""), id, opts)
         return buildBackgroundDeclAsync(node, false, cache, secNo).then(function (bgDecl) {
             var declParts = []
-            if (bgDecl && !skipHoistedSectionSurfaceBgDecl(node, opts)) declParts.push(bgDecl)
+            if (bgDecl) declParts.push(bgDecl)
             var strokeDeclLeaf = buildStrokeDecl(node)
             if (strokeDeclLeaf) declParts.push(strokeDeclLeaf)
             if (absLeaf) {
@@ -1042,7 +1020,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         var leafSel = getLeafSelectorForNode(ch, opts)
         var isChContainer = isContainer(ch)
         return Promise.all([buildBackgroundDeclAsync(ch, false, cache, secNo, {skipImageFill: isImageCandidate(ch, cache) || isVectorOnlyTree(ch), skipSolidFill: isVectorOnlyTree(ch)}), chAbs ? Promise.resolve(buildAbsDecl(ch, sectionNode) || "") : Promise.resolve("")]).then(function (res) {
-            var itemDeclParts = res[0] && !skipHoistedSectionSurfaceBgDecl(ch, opts) ? [res[0]] : []
+            var itemDeclParts = [res[0]].filter(Boolean)
             if (res[1] && !isImageCandidate(ch, cache)) itemDeclParts.push(res[1])
             var strokeDeclVirtual = buildStrokeDecl(ch)
             if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)
@@ -1121,7 +1099,6 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     sectionSemantics: sectionSemantics,
                     mobileRoot: mobileRoot || null,
                     visibilityWrapper: vw || undefined,
-                    hoistSectionBgChildId: bg.hoistBgChildId != null ? bg.hoistBgChildId : null,
                 }
                 var sectionDeclParts = []
 
@@ -1233,7 +1210,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                                 return Promise.resolve(absDecl || "")
                             })(),
                         ]).then(function (res) {
-                            var itemDeclParts = res[0] && !skipHoistedSectionSurfaceBgDecl(ch, sectionRenderOpts) ? [res[0]] : []
+                            var itemDeclParts = [res[0]].filter(Boolean)
                             if (res[1] && !isImageCandidate(ch, cache)) itemDeclParts.push(res[1])
                             var strokeDeclVirtual = buildStrokeDecl(ch)
                             if (strokeDeclVirtual) itemDeclParts.push(strokeDeclVirtual)

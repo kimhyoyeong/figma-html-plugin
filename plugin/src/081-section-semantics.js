@@ -501,102 +501,6 @@ function renumberApSectionElemGlobally(sectionNode, map, elemPart) {
     }
 }
 
-/** 지연 CSS 선언 문자열 → 속성 맵 (disambiguation 비교용) */
-function parseDeclStringToMapForSem(decl) {
-    var m = Object.create(null)
-    if (!decl || !String(decl).trim()) return m
-    var parts = String(decl).split(";")
-    for (var pi = 0; pi < parts.length; pi++) {
-        var p = parts[pi].trim()
-        if (!p) continue
-        var c = p.indexOf(":")
-        if (c === -1) continue
-        m[p.substring(0, c).trim()] = p.substring(c + 1).trim()
-    }
-    return m
-}
-
-/** TEXT 단일 스타일 타이포 맵 — parts·비TEXT면 null */
-function textTypoMapForDisambig(nodeId) {
-    try {
-        var n = figma.getNodeById(nodeId)
-        if (!n || n.type !== "TEXT") return null
-        var ts = getTextSummarySync(n)
-        if (!ts || (ts.parts && ts.parts.length)) return null
-        return parseDeclStringToMapForSem(buildTextVarsDecl(ts))
-    } catch (e) {
-        return null
-    }
-}
-
-/** 선언 맵 차이가 --ap-lh / --ap-ls 에서만 나는지 (맵 없음이면 병합 안 함) */
-function textTypoDiffersOnlyLhLs(mapA, mapB) {
-    if (!mapA || !mapB) return false
-    var keys = Object.create(null)
-    for (var ka in mapA) if (Object.prototype.hasOwnProperty.call(mapA, ka)) keys[ka] = 1
-    for (var kb in mapB) if (Object.prototype.hasOwnProperty.call(mapB, kb)) keys[kb] = 1
-    for (var kk in keys) {
-        if (!Object.prototype.hasOwnProperty.call(keys, kk)) continue
-        var a = mapA[kk]
-        var b = mapB[kk]
-        if (a === b) continue
-        if (kk !== "--ap-lh" && kk !== "--ap-ls") return false
-    }
-    return true
-}
-
-/**
- * 동일 클래스를 공유하는 id(트리 순 정렬)를
- * --ap-lh/--ap-ls 만 다른 TEXT끼리 한 그룹으로 묶음. 비TEXT·맵 없음은 단독 그룹.
- */
-function partitionDuplicateClassIdsByLhLsOnly(idsSorted, rank) {
-    var n = idsSorted.length
-    var parent = []
-    for (var i = 0; i < n; i++) parent[i] = i
-    function find(x) {
-        return parent[x] === x ? x : (parent[x] = find(parent[x]))
-    }
-    function union(a, b) {
-        var ra = find(a)
-        var rb = find(b)
-        if (ra !== rb) parent[rb] = ra
-    }
-    var maps = []
-    for (var mi = 0; mi < n; mi++) maps[mi] = textTypoMapForDisambig(idsSorted[mi])
-    for (var i = 0; i < n; i++) {
-        for (var j = i + 1; j < n; j++) {
-            if (textTypoDiffersOnlyLhLs(maps[i], maps[j])) union(i, j)
-        }
-    }
-    var buckets = Object.create(null)
-    for (var ii = 0; ii < n; ii++) {
-        var r = find(ii)
-        if (!buckets[r]) buckets[r] = []
-        buckets[r].push(idsSorted[ii])
-    }
-    var groups = []
-    for (var br in buckets) {
-        if (Object.prototype.hasOwnProperty.call(buckets, br)) groups.push(buckets[br])
-    }
-    function minRank(grp) {
-        var m = 999999
-        for (var g = 0; g < grp.length; g++) {
-            var x = rank(grp[g])
-            if (x < m) m = x
-        }
-        return m
-    }
-    groups.sort(function (ga, gb) {
-        return minRank(ga) - minRank(gb)
-    })
-    for (var si = 0; si < groups.length; si++) {
-        groups[si].sort(function (a, b) {
-            return rank(a) - rank(b)
-        })
-    }
-    return groups
-}
-
 /** 동일 ap-section__* 가 여러 노드면: 그 외 역할은 첫 노드 접미사 없음·둘째부터 --02… (image/content 는 renumberApSectionElemGlobally) */
 function disambiguateSectionSemantics(sectionNode, map) {
     var classToIds = {}
@@ -620,7 +524,6 @@ function disambiguateSectionSemantics(sectionNode, map) {
         var x = order.indexOf(id)
         return x < 0 ? 999999 : x
     }
-    var TEXT_ROLE_BASE_RE = /^ap-section__(title|subtitle|desc|description|caption|cta|label|body)$/
     for (var cls in classToIds) {
         var ids = classToIds[cls]
         if (ids.length <= 1) continue
@@ -630,29 +533,11 @@ function disambiguateSectionSemantics(sectionNode, map) {
         var clsStr = String(cls || "")
         var baseNm = clsStr.replace(/--\d{2}$/, "")
         if (baseNm === "ap-section__content" || baseNm === "ap-section__image") continue
-        if (TEXT_ROLE_BASE_RE.test(baseNm)) {
-            var groupsLh = partitionDuplicateClassIdsByLhLsOnly(ids, rank)
-            var suffixStart = 1
-            var escB = baseNm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-            var sufM = new RegExp("^" + escB + "--(\\d{2})$").exec(clsStr)
-            if (sufM) suffixStart = parseInt(sufM[1], 10) || 1
-            for (var gi = 0; gi < groupsLh.length; gi++) {
-                var newClsLh = gi === 0 ? clsStr : baseNm + "--" + pad2(suffixStart + gi)
-                var g = groupsLh[gi]
-                for (var t = 0; t < g.length; t++) {
-                    var idt = g[t]
-                    var arrM = map[idt]
-                    var idx = arrM.indexOf(clsStr)
-                    if (idx >= 0) arrM[idx] = newClsLh
-                }
-            }
-            continue
-        }
         for (var k = 0; k < ids.length; k++) {
-            var newCls2 = k === 0 ? clsStr : baseNm + "--" + pad2(k + 1)
-            var arrM2 = map[ids[k]]
-            var idx2 = arrM2.indexOf(clsStr)
-            if (idx2 >= 0) arrM2[idx2] = newCls2
+            var newCls = k === 0 ? clsStr : baseNm + "--" + pad2(k + 1)
+            var arrM = map[ids[k]]
+            var idx = arrM.indexOf(clsStr)
+            if (idx >= 0) arrM[idx] = newCls
         }
     }
     renumberApSectionElemGlobally(sectionNode, map, "image")
