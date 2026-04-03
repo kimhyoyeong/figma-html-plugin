@@ -1,0 +1,294 @@
+<style>.ap-post,.ap-post *{margin:0;box-sizing:border-box}
+  .ap-post{overflow-x:hidden}
+  .ap-post__inner{container:article/inline-size;--ap-width:1920;max-width:1920px;width:100%;margin:0 auto}
+  .ap-section{position:relative;isolation:isolate;overflow:visible}
+  .ap-section > *{position:relative;z-index:1}
+  .ap-section::before{content:"";position:absolute;z-index:0;top:0;bottom:0;left:50%;width:100vw;transform:translateX(-50vw);pointer-events:none;--bg-img:inherit;--bgc:inherit;background-color:var(--bgc,transparent);background-image:var(--bg-img,none);background-repeat:no-repeat;background-position:50% 0;background-size:contain}
+  .ap-abs{position:absolute;left:calc(var(--ap-left,0)/var(--ap-width)*100cqi);top:calc(var(--ap-top,0)/var(--ap-width)*100cqi);width:calc(var(--ap-w,0)/var(--ap-width)*100cqi);height:calc(var(--ap-h,0)/var(--ap-width)*100cqi)}
+  .ap-text{margin:0;font-size:clamp(0px,calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));line-height:var(--ap-lh,1.2);letter-spacing:calc(var(--ap-ls,0)/var(--ap-width)*100cqi);font-weight:var(--ap-fw,400);text-align:var(--ap-ta,center);color:var(--ap-clr,#000)}
+  .ap-text__part{font-size:clamp(0px,calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));line-height:var(--ap-lh,1.2);letter-spacing:calc(var(--ap-ls,0)/var(--ap-width)*100cqi);font-weight:var(--ap-fw,400);color:var(--ap-clr,#000)}
+  .pc-only{display:block}
+  .mo-only{display:none}
+  .ap-image img{width:calc(var(--ap-w,0) / var(--ap-width) * 100cqi);height:calc(var(--ap-h,0) / var(--ap-width) * 100cqi);display:block}
+  .ap-image.ap-abs img{width:100%;height:100%;object-fit:cover}
+  .ap-video{display:flex;align-items:center;justify-content:center;width:calc(var(--ap-w,0) / var(--ap-width) * 100cqi);height:calc(var(--ap-h,0) / var(--ap-width) * 100cqi);aspect-ratio: calc(var(--ap-w,1) / var(--ap-h,1))}
+  .ap-video.ap-abs{width:100%;height:100%;min-height:0;aspect-ratio:auto}
+  .ap-video video{width:100%;height:100%;object-fit:contain;display:block}
+  .ap-line{display:block;flex-shrink:0;min-height:1px;width:calc(var(--ap-line-w,100)/var(--ap-width)*100cqi);height:calc(var(--ap-line-h,1)/var(--ap-width)*100cqi);background:var(--ap-line-color,#000);transform-origin:left center;transform:rotate(var(--ap-line-rot,0)deg)}
+  .ap-line.ap-abs{min-height:0}
+  .ap-ellipse{display:block;flex-shrink:0;width:calc(var(--ap-ellipse-w,100)/var(--ap-width)*100cqi);height:calc(var(--ap-ellipse-h,100)/var(--ap-width)*100cqi);border-radius:50%;background:var(--ap-ellipse-bgc,transparent);border:calc(var(--ap-ellipse-bd,0)/var(--ap-width)*100cqi) solid var(--ap-ellipse-bdc,transparent)}
+  .ap-ellipse.ap-abs{width:100%;height:100%;box-sizing:border-box}
+  .ap-section--swiper{overflow: visible;height: auto;min-height: auto}
+  .ap-post .swiper{overflow: hidden;width:100%;--swiper-navigation-color:#000;--swiper-pagination-bullet-size:10px}
+  .ap-post .swiper-pagination{position: relative;width:100%;margin-top: calc(80 / var(--ap-width) * 100cqi)}
+  .ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after{content:none}
+  .ap-post .swiper-button-prev,.ap-post .swiper-button-next{width: calc(40 / var(--ap-width) * 100cqi);height: calc(80 / var(--ap-width) * 100cqi);background-color: var(--swiper-navigation-color);-webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2027%2044%22%3E%3Cpath%20d%3D%22M27%2C22L27%2C22L5%2C44l-2.1-2.1L22.8%2C22L2.9%2C2.1L5%2C0L27%2C22L27%2C22z%22%20fill%3D%22%23000%22%2F%3E%3C%2Fsvg%3E") no-repeat center / contain;mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2027%2044%22%3E%3Cpath%20d%3D%22M27%2C22L27%2C22L5%2C44l-2.1-2.1L22.8%2C22L2.9%2C2.1L5%2C0L27%2C22L27%2C22z%22%20fill%3D%22%23000%22%2F%3E%3C%2Fsvg%3E") no-repeat center / contain;background-repeat: no-repeat;background-size: contain}
+  .ap-post .swiper-button-prev{transform: rotate(180deg)}
+  .ap-post .swiper-pagination-bullet{background-color: var(--swiper-navigation-color)}
+  .ap-section--01{--bgc:#000000;display:flex;flex-direction:column;align-items:center;gap:calc(200/var(--ap-width)*100cqi);padding:calc(180/var(--ap-width)*100cqi) calc(510/var(--ap-width)*100cqi) calc(180/var(--ap-width)*100cqi) calc(510/var(--ap-width)*100cqi)}
+  .ap-section--01 .ap-section__layer{display:flex;flex-direction:column;align-items:center;gap:calc(80/var(--ap-width)*100cqi)}
+  .ap-section--01 .ap-section__image--01{--ap-w:248;--ap-h:54}
+  .ap-section--01 .ap-section__image--02{--ap-w:599;--ap-h:126}
+  .ap-section--01 .ap-section__container{display:flex;align-items:center;gap:calc(10/var(--ap-width)*100cqi);--ap-w:900;width:calc(var(--ap-w)/var(--ap-width)*100cqi)}
+  .ap-section--01 .ap-section__image--03{--ap-w:900;--ap-h:1280}
+  .ap-section--02{--bgc:#292525;display:flex;flex-direction:column;align-items:flex-start;gap:calc(60/var(--ap-width)*100cqi);padding:calc(180/var(--ap-width)*100cqi) calc(320/var(--ap-width)*100cqi) calc(180/var(--ap-width)*100cqi) calc(320/var(--ap-width)*100cqi)}
+  .ap-section--02 .ap-section__container{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:calc(10/var(--ap-width)*100cqi);--ap-w:1280;width:calc(var(--ap-w)/var(--ap-width)*100cqi)}
+  .ap-section--02 .ap-section__content--01{display:flex;justify-content:center;align-items:flex-start}
+  .ap-section--02 .ap-section__title{width:100%;--ap-fs:58;--ap-lh:1.05;--ap-fw:500;--ap-clr:#ffffff;text-transform:uppercase}
+  .ap-section--02 .ap-section__desc{width:100%;--ap-fs:28;--ap-lh:1.3;--ap-clr:#ffffff}
+  .ap-section--02 .ap-section__container--02{--ap-w:1280;--ap-h:720}
+  .ap-section--03{display:flex;flex-direction:column}
+  .ap-section--03 .ap-section__container{position:relative;width:100%;background-color:#000000;min-height:calc(1350/var(--ap-width)*100cqi)}
+  .ap-section--03 .ap-section__content--01{display:flex;align-items:center;gap:calc(10/var(--ap-width)*100cqi);border-radius:calc(8/var(--ap-width)*100cqi);--ap-left:607;--ap-top:180;--ap-w:661;--ap-h:950}
+  .ap-section--03 .ap-section__image--01{--ap-w:661;--ap-h:950}
+  .ap-section--03 .ap-section__content--02{display:flex;flex-direction:column;align-items:flex-start;gap:calc(9/var(--ap-width)*100cqi);--ap-left:223;--ap-top:278;--ap-w:320;--ap-h:240}
+  .ap-section--03 .ap-section__image--02{--ap-w:320;--ap-h:240}
+  .ap-section--03 .ap-section__content--03{display:flex;flex-direction:column;align-items:flex-start;gap:calc(9/var(--ap-width)*100cqi);--ap-left:314;--ap-top:912;--ap-w:344;--ap-h:258}
+  .ap-section--03 .ap-section__image--03{--ap-w:344;--ap-h:258}
+  .ap-section--03 .ap-section__content--04{display:flex;flex-direction:column;align-items:flex-start;gap:calc(10/var(--ap-width)*100cqi);--ap-left:1204;--ap-top:361;--ap-w:520;--ap-h:390}
+  .ap-section--03 .ap-section__image--04{--ap-w:520;--ap-h:390}
+  .ap-section--03 .ap-section__subtitle{--ap-left:229;--ap-top:575;--ap-w:306;--ap-h:128;--ap-fs:46;--ap-lh:1.05;--ap-fw:500;--ap-clr:#ffffff;text-transform:uppercase}
+  .ap-section--03 .ap-section__title{--ap-left:1111;--ap-top:809;--ap-w:626;--ap-h:145;--ap-fs:54;--ap-lh:1;--ap-fw:500;--ap-ta:left;--ap-clr:#ffffff;text-transform:uppercase}
+  .ap-section--04{--bgc:#000000;display:flex;align-items:center}
+  .ap-section--04 .ap-section__container{position:relative;--ap-w:960;width:calc(var(--ap-w)/var(--ap-width)*100cqi);background-color:#c3a68a;min-height:calc(960/var(--ap-width)*100cqi)}
+  .ap-section--04 .ap-section__image{--ap-left:0;--ap-top:0;--ap-w:960;--ap-h:960}
+  .ap-section--04 .ap-section__content--01{display:flex;flex-direction:column;align-items:center;gap:calc(16/var(--ap-width)*100cqi);--ap-left:262;--ap-top:736;--ap-w:435;--ap-h:176}
+  .ap-section--04 .ap-section__group{display:flex;flex-direction:column;align-items:center;gap:calc(14/var(--ap-width)*100cqi);width:100%}
+  .ap-section--04 .ap-section__subtitle{width:100%;--ap-fs:38;--ap-lh:1.05;--ap-fw:700}
+  .ap-section--04 .ap-section__desc{width:100%;--ap-fs:26;--ap-lh:1.1;--ap-fw:500}
+  .ap-section--04 .ap-section__group--02{display:flex;flex-direction:column;align-items:flex-start;gap:calc(16/var(--ap-width)*100cqi);--ap-w:186;width:calc(var(--ap-w)/var(--ap-width)*100cqi)}
+  .ap-section--04 .ap-section__desc--02{width:100%;--ap-fs:24;--ap-lh:1.15;--ap-fw:500}
+  .ap-section--04 .ap-section__block{display:flex;justify-content:center;align-items:flex-start;padding:calc(6/var(--ap-width)*100cqi) calc(16/var(--ap-width)*100cqi) calc(6/var(--ap-width)*100cqi) calc(16/var(--ap-width)*100cqi);width:100%;background-color:#000000;white-space:nowrap}
+  .ap-section--04 .ap-section__desc--03{--ap-fs:22;--ap-lh:1;--ap-fw:500;--ap-clr:#ffffff}
+  .ap-section--04 .ap-section__container--02{display:flex;flex-direction:column;align-items:flex-start;gap:calc(60/var(--ap-width)*100cqi);padding:calc(250/var(--ap-width)*100cqi) calc(116/var(--ap-width)*100cqi) calc(250/var(--ap-width)*100cqi) calc(116/var(--ap-width)*100cqi);--ap-w:960;width:calc(var(--ap-w)/var(--ap-width)*100cqi);background-color:#000000;min-height:calc(960/var(--ap-width)*100cqi)}
+  .ap-section--04 .ap-section__content--02{display:flex;flex-direction:column;align-items:flex-start;gap:calc(20/var(--ap-width)*100cqi);width:100%}
+  .ap-section--04 .ap-section__title{width:100%;--ap-fs:48;--ap-lh:1.35;--ap-fw:700;--ap-ta:left;--ap-clr:#ffffff}
+  .ap-section--04 .ap-section__desc--04{width:100%;--ap-fs:28;--ap-lh:1.45;--ap-ta:left;--ap-clr:#ffffff}
+  .ap-section--04 .ap-section__content--03{display:flex;flex-direction:column;justify-content:center;align-items:center}
+  .ap-section--04 .ap-section__desc--05{width:100%;--ap-fs:18;--ap-lh:1.65;--ap-ta:left;--ap-clr:#bababa}
+  .ap-section--05{height:auto;min-height:auto;--bgc:#000000;display:flex;justify-content:center;gap:calc(10/var(--ap-width)*100cqi);padding:calc(180/var(--ap-width)*100cqi) calc(210/var(--ap-width)*100cqi) calc(180/var(--ap-width)*100cqi) calc(210/var(--ap-width)*100cqi)}
+  .ap-section--05 .ap-section__content--01{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:calc(40/var(--ap-width)*100cqi);--ap-w:460;width:calc(var(--ap-w)/var(--ap-width)*100cqi)}
+  .ap-section--05 .ap-section__group{display:flex;align-items:center;gap:calc(10/var(--ap-width)*100cqi);width:100%}
+  .ap-section--05 .ap-section__image--01{--ap-w:460;--ap-h:650}
+  .ap-section--05 .ap-section__group--02{display:flex;flex-direction:column;align-items:flex-start;gap:calc(15/var(--ap-width)*100cqi);width:100%}
+  .ap-section--05 .ap-section__title{width:100%;--ap-fs:28;--ap-lh:1.3;--ap-fw:500;--ap-clr:#ffffff;--ap-ls:-0.020em}
+  .ap-section--05 .ap-section__desc{width:100%;--ap-clr:#ffffff;--ap-fs:20;--ap-lh:1.4}
+  .ap-section--05 .ap-section__subtitle{width:100%;--ap-fs:28;--ap-lh:1.3;--ap-fw:500;--ap-clr:#ffffff}
+  .ap-section--06{--bgc:#292525;display:flex;flex-direction:column;align-items:flex-start;gap:calc(20/var(--ap-width)*100cqi);padding:calc(180/var(--ap-width)*100cqi) calc(320/var(--ap-width)*100cqi) calc(180/var(--ap-width)*100cqi) calc(320/var(--ap-width)*100cqi)}
+  .ap-section--06 .ap-section__container{--ap-w:1280;--ap-h:720}
+  .ap-section--07{display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-end;gap:calc(10/var(--ap-width)*100cqi)}
+  .ap-section--07 .ap-section__container{display:flex;align-items:center;gap:calc(85/var(--ap-width)*100cqi);padding:calc(180/var(--ap-width)*100cqi) calc(320/var(--ap-width)*100cqi) calc(180/var(--ap-width)*100cqi) calc(320/var(--ap-width)*100cqi);width:100%;background-color:#000000}
+  .ap-section--07 .ap-section__content{display:flex;flex-direction:column;align-items:flex-start;gap:calc(20/var(--ap-width)*100cqi);--ap-w:560;width:calc(var(--ap-w)/var(--ap-width)*100cqi)}
+  .ap-section--07 .ap-section__group{display:flex;flex-direction:column;align-items:flex-end;gap:calc(20/var(--ap-width)*100cqi);padding:0 0 calc(50/var(--ap-width)*100cqi) 0;width:100%}
+  .ap-section--07 .ap-section__block{display:flex;flex-direction:column;align-items:flex-start;gap:calc(16/var(--ap-width)*100cqi);width:100%}
+  .ap-section--07 .ap-section__title{width:100%;--ap-fs:68;--ap-lh:1;--ap-fw:500;--ap-ta:left;--ap-clr:#ffffff;text-transform:uppercase}
+  .ap-section--07 .ap-section__group--02{display:flex;align-items:center;gap:calc(20/var(--ap-width)*100cqi);width:100%}
+  .ap-section--07 .ap-section__block--02{display:flex;justify-content:center;align-items:center;gap:calc(10/var(--ap-width)*100cqi);padding:calc(11/var(--ap-width)*100cqi) calc(20/var(--ap-width)*100cqi) calc(8/var(--ap-width)*100cqi) calc(20/var(--ap-width)*100cqi);border-width:calc(2/var(--ap-width)*100cqi) calc(2/var(--ap-width)*100cqi) calc(2/var(--ap-width)*100cqi) calc(2/var(--ap-width)*100cqi);border-style:solid;border-color:#ffffff;border-radius:calc(100/var(--ap-width)*100cqi);white-space:nowrap}
+  .ap-section--07 .ap-section__desc{--ap-fs:24;--ap-lh:1;--ap-fw:700;--ap-clr:#ffffff}
+  .ap-section--07 .ap-section__desc--02{--ap-fs:20;--ap-lh:1;--ap-ta:left;--ap-clr:#ffffff}
+  .ap-section--07 .ap-section__image{--ap-w:635;--ap-h:780}
+  .ap-section--08{--ap-section-h:580;min-height:calc(var(--ap-section-h)/var(--ap-width)*100cqi);--bgc:#e9e7e8;--bg-img:url(assets/images/page_project_sec08_img01_260402.jpg);display:flex;position:relative;flex-direction:column;align-items:flex-start;gap:calc(10/var(--ap-width)*100cqi)}
+  .ap-section--08 .ap-section__container{display:flex;flex-direction:column;align-items:center;gap:calc(36/var(--ap-width)*100cqi);--ap-left:1173;--ap-top:223;--ap-w:331;--ap-h:134}
+  .ap-section--08 .ap-section__title{width:100%;--ap-fs:38;--ap-fw:700;--ap-ta:left}
+  .ap-section--08 .ap-section__content{display:flex;flex-direction:column;align-items:center;gap:calc(8/var(--ap-width)*100cqi);--ap-w:226;width:calc(var(--ap-w)/var(--ap-width)*100cqi)}
+  .ap-section--08 .ap-section__group{display:flex;justify-content:center;align-items:center;gap:calc(10/var(--ap-width)*100cqi);padding:calc(16/var(--ap-width)*100cqi) 0 calc(16/var(--ap-width)*100cqi) 0;width:100%;background-color:#000000;border-width:calc(1/var(--ap-width)*100cqi) calc(1/var(--ap-width)*100cqi) calc(1/var(--ap-width)*100cqi) calc(1/var(--ap-width)*100cqi);border-style:solid;border-color:#222222;min-height:calc(52/var(--ap-width)*100cqi);white-space:nowrap}
+  .ap-section--08 .ap-section__desc{--ap-fs:18;--ap-lh:1;--ap-fw:500;--ap-ta:left;--ap-clr:#ffffff}</style>
+  
+  <article class="ap-post" data-article-year="2026">
+    <div class="ap-post__inner">
+      <section class="ap-section ap-section--01">
+        <div class="ap-section__layer">
+          <div class="ap-image ap-section__image--01"><img src="assets/images/page_project_sec01_img01_260402.svg" alt="헤라_new_logo" /></div>
+          <div class="ap-image ap-section__image--02"><img src="assets/images/page_project_sec01_img02_260402.png" alt="HERA_NAME-IT-BLACK-CALL-IT-ICON_Typo_white_center_2 1" /></div>
+        </div>
+        <div class="ap-section__container">
+          <div class="ap-image ap-section__image--03"><img src="assets/images/page_project_sec01_img03_260402.jpg" alt="Frame 3" /></div>
+        </div>
+      </section>
+  
+      <section class="ap-section ap-section--02">
+        <div class="ap-section__container">
+          <div class="ap-section__content--01">
+            <p class="ap-text ap-section__title">The Making of the Icon</p>
+          </div>
+          <div class="ap-section__content--01">
+            <p class="ap-text ap-section__desc">Why complicate when it could be effortless?​</p>
+          </div>
+        </div>
+        <div class="ap-video ap-section__container--02"><video src="" controls playsinline muted loop autoplay preload="metadata"></video></div>
+      </section>
+  
+      <section class="ap-section ap-section--03">
+        <div class="ap-section__container">
+          <div class="ap-abs ap-section__content--01">
+            <div class="ap-image ap-section__image--01"><img src="assets/images/page_project_sec03_img01_260402.jpg" alt="Frame 9" /></div>
+          </div>
+          <div class="ap-abs ap-section__content--02">
+            <div class="ap-image ap-section__image--02"><img src="assets/images/page_project_sec03_img02_260402.jpg" alt="Frame 10" /></div>
+          </div>
+          <div class="ap-abs ap-section__content--03">
+            <div class="ap-image ap-section__image--03"><img src="assets/images/page_project_sec03_img03_260402.jpg" alt="Frame 12" /></div>
+          </div>
+          <div class="ap-abs ap-section__content--04">
+            <div class="ap-image ap-section__image--04"><img src="assets/images/page_project_sec03_img04_260402.jpg" alt="Frame 11" /></div>
+          </div>
+          <p class="ap-text ap-abs ap-section__subtitle">One cushion<br>made it<br>possible.​</p>
+          <p class="ap-text ap-abs ap-section__title">What began<br>as innovation​ became<br>a daily essential.​</p>
+        </div>
+      </section>
+  
+      <section class="ap-section ap-section--04">
+        <div class="ap-section__container">
+          <div class="ap-image ap-abs ap-section__image"><img src="assets/images/page_project_sec04_img01_260402.jpg" alt="BLACK-CUSHION_Product_KV_Online_No_Restriction_3 1" /></div>
+          <div class="ap-abs ap-section__content--01">
+            <div class="ap-section__group">
+              <p class="ap-text ap-section__subtitle">블랙 쿠션 파운데이션</p>
+              <p class="ap-text ap-section__desc">BLACK CUSHION FOUNDATION</p>
+            </div>
+            <div class="ap-section__group--02">
+              <p class="ap-text ap-section__desc--02">SPF34/PA++</p>
+              <div class="ap-section__block">
+                <p class="ap-text ap-section__desc--03">15G/10 SHADES</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="ap-section__container--02">
+          <div class="ap-section__content--02">
+            <p class="ap-text ap-section__title">넘볼 수 없는 쿠션의 근본.<br>8년 연속 No.1* 쿠션 파운데이션</p>
+            <p class="ap-text ap-section__desc--04">초밀착 커버로 30시간 무너짐 없는 빌더블 새틴 스킨</p>
+          </div>
+          <div class="ap-section__content--03">
+            <p class="ap-text ap-section__desc--05">* 한국 일반 쿠션 내 구매액 점유율 1위 브랜드 헤라, 2017.4Q~2024.4Q, <br>칸타 월드 패널 조사 결과</p>
+          </div>
+        </div>
+      </section>
+  
+      <section class="ap-section ap-section--05 ap-section--swiper">
+        <div class="swiper" data-slide-view="3" data-slide-view-mo="3">
+          <div class="swiper-wrapper">
+            <div class="swiper-slide">
+              <div class="ap-section__content--01">
+                <div class="ap-section__group">
+                  <div class="ap-image ap-section__image--01"><img data-slide-pc-img="1" src="assets/images/page_project_sec05_img01_260402.jpg" alt="Frame 33" /></div>
+                </div>
+                <div class="ap-section__group--02">
+                  <p class="ap-text ap-section__title">30H LONG LASTING<br>빌더블 새틴 피니쉬</p>
+                  <p class="ap-text ap-section__desc">얇고 매끈하게 초밀착!<br> 모공과 결점을 촘촘히 커버</p>
+                </div>
+              </div>
+            </div>
+            <div class="swiper-slide">
+              <div class="ap-section__content--01">
+                <div class="ap-section__group">
+                  <div class="ap-image ap-section__image--01"><img data-slide-pc-img="1" src="assets/images/page_project_sec05_img02_260402.jpg" alt="Frame 33" /></div>
+                </div>
+                <div class="ap-section__group--02">
+                  <p class="ap-text ap-section__subtitle">다크닝 없이<br>섬세하고 정교한 컬러</p>
+                  <p class="ap-text ap-section__desc">하루 종일 맑고 깨끗한 피부 톤 지속</p>
+                </div>
+              </div>
+            </div>
+            <div class="swiper-slide">
+              <div class="ap-section__content--01">
+                <div class="ap-section__group">
+                  <div class="ap-image ap-section__image--01"><img data-slide-pc-img="1" src="assets/images/page_project_sec05_img03_260402.jpg" alt="Frame 33" /></div>
+                </div>
+                <div class="ap-section__group--02">
+                  <p class="ap-text ap-section__title">숨쉬듯 가볍고 편안한<br>BREATHABLE 텍스쳐</p>
+                  <p class="ap-text ap-section__desc">텁텁함, 당김 없이 편안한 밀착감</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="swiper-pagination"></div>
+          <div class="swiper-button-prev"></div>
+          <div class="swiper-button-next"></div>
+        </div>
+      </section>
+  
+      <section class="ap-section ap-section--06">
+        <div class="ap-video ap-section__container"><video src="" controls playsinline muted loop autoplay preload="metadata"></video></div>
+      </section>
+  
+      <section class="ap-section ap-section--07">
+        <div class="ap-section__container">
+          <div class="ap-section__content">
+            <div class="ap-section__group">
+              <div class="ap-section__block">
+                <p class="ap-text ap-section__title">ICONIC BLACK<br>LOOK</p>
+              </div>
+            </div>
+            <div class="ap-section__group--02">
+              <div class="ap-section__block--02">
+                <p class="ap-text ap-section__desc">FACE</p>
+              </div>
+              <p class="ap-text ap-section__desc--02">블랙쿠션 파운데이션 21N1</p>
+            </div>
+            <div class="ap-section__group--02">
+              <div class="ap-section__block--02">
+                <p class="ap-text ap-section__desc">EYES</p>
+              </div>
+              <p class="ap-text ap-section__desc--02">쿼드아이 컬러 03 #누디토프 리치컬링 마스카라</p>
+            </div>
+            <div class="ap-section__group--02">
+              <div class="ap-section__block--02">
+                <p class="ap-text ap-section__desc">CHEEKS</p>
+              </div>
+              <p class="ap-text ap-section__desc--02">블러쉬 로지베일</p>
+            </div>
+            <div class="ap-section__group--02">
+              <div class="ap-section__block--02">
+                <p class="ap-text ap-section__desc">LIPS</p>
+              </div>
+              <p class="ap-text ap-section__desc--02">센슈얼 누드 글로스 325 선키스드</p>
+            </div>
+          </div>
+          <div class="ap-image ap-section__image"><img src="assets/images/page_project_sec07_img01_260402.jpg" alt="img" /></div>
+        </div>
+      </section>
+  
+      <section class="ap-section ap-section--08">
+        <div class="ap-abs ap-section__container">
+          <p class="ap-text ap-section__title">블랙 쿠션 파운데이션</p>
+          <div class="ap-section__content">
+            <a href="#" class="ap-btn ap-section__group">
+              <p class="ap-text ap-section__desc">자세히 보기</p>
+            </a>
+          </div>
+        </div>
+      </section>
+  
+    </div>
+  </article>
+  <script>
+  document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll(".swiper").forEach(function (el) {
+      if (typeof Swiper === "undefined") return;
+  
+      var pcView = parseFloat(el.getAttribute("data-slide-view") || "1");
+      var moView = parseFloat(el.getAttribute("data-slide-view-mo") || "1");
+  
+      if (!isFinite(pcView) || pcView <= 0) pcView = 1;
+      if (!isFinite(moView) || moView <= 0) moView = 1;
+  
+      new Swiper(el, {
+        slidesPerView: moView,
+        watchOverflow: true,
+        pagination: {
+          el: el.querySelector(".swiper-pagination"),
+          clickable: true
+        },
+        navigation: {
+          nextEl: el.querySelector(".swiper-button-next"),
+          prevEl: el.querySelector(".swiper-button-prev")
+        },
+        breakpoints: {
+          768: {
+            slidesPerView: pcView
+          }
+        }
+      });
+    });
+  });
+  </script>
