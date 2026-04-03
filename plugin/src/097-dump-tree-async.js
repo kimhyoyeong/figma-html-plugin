@@ -5,10 +5,12 @@
  * 분석/ZIP 경로에서 호출되는 제품 파이프라인의 한 축(비동기 트리 워크 + buildCodeAsync 연계).
  *
  * dumpTreeAsync — ROOT 기준 레이어 인스펙트 트리 텍스트(dataTree) 생성, buildCodeAsync 호출로 code·이미지·폰트 목록 반환.
+ *   시작·성공·실패 시 removeOrphanedTempExportNodesFromDocument 로 `__bg_fill_only__` 등 임시 노드 정리(067).
  *   내부 walkAsync 등으로 섹션별 덤프, phase(desktop/mobile)에 따라 캐시·export 폭 처리.
  */
 function dumpTreeAsync(root, projectName, allowedFonts, options) {
     options = options || {}
+    removeOrphanedTempExportNodesFromDocument()
     var prevExportWidth = _currentExportWidth
     if (options.exportWidth != null) _currentExportWidth = Math.max(200, Number(options.exportWidth))
 
@@ -281,6 +283,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                     .filter(Boolean)
                     .sort()
                 _currentExportWidth = prevExportWidth
+                removeOrphanedTempExportNodesFromDocument()
                 ensureImagePipelineOnCache(cache)
                 var assetStoresSnapshot = {
                     preview: Object.assign({}, cache.assetStores.preview),
@@ -305,6 +308,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         })
         .catch(function (err) {
             _currentExportWidth = prevExportWidth
+            removeOrphanedTempExportNodesFromDocument()
             throw err
         })
 }

@@ -348,8 +348,9 @@ function buildFlexDeclDiff(dLv, mLv, node, moAbsSelf) {
     if (d.justify !== m.justify) parts.push("justify-content:" + m.justify)
     if (d.align !== m.align) parts.push("align-items:" + m.align)
 
-    if (d.gap !== m.gap && m.gap !== 0) {
-        parts.push("gap:calc(" + m.gap + "/var(--ap-width)*100cqi)")
+    if (d.gap !== m.gap) {
+        if (m.gap === 0) parts.push("gap:0")
+        else parts.push("gap:calc(" + m.gap + "/var(--ap-width)*100cqi)")
     }
 
     if (d.pt !== m.pt || d.pr !== m.pr || d.pb !== m.pb || d.pl !== m.pl) {

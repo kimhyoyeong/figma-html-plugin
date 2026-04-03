@@ -1,5 +1,6 @@
 /**
  * 067-image-system — 정책·포맷·export·에셋 캐시 (node.id 기반 이미지 캐시 없음)
+ * disposeTempExportNode / removeOrphanedTempExportNodesFromDocument — 배경 fill 전용 임시 프레임(`__bg_fill_only__`) 정리
  */
 function createImageAssetStores() {
     return { preview: Object.create(null), export: Object.create(null), zip: Object.create(null) }
@@ -10,7 +11,45 @@ function disposeTempExportNode(n) {
     if (!n) return
     try {
         if ("removed" in n && n.removed) return
+    } catch (e0) {}
+    try {
+        if ("locked" in n && n.locked) n.locked = false
+    } catch (eL) {}
+    try {
         n.remove()
+    } catch (e1) {}
+    try {
+        if ("removed" in n && !n.removed) n.remove()
+    } catch (e2) {}
+}
+
+/** 분석·export 중단 시 남는 임시 레이어(이름 고정) 전부 제거 — 모든 페이지 순회 */
+var TEMP_EXPORT_NODE_NAMES = ["__bg_fill_only__"]
+
+function removeOrphanedTempExportNodesFromDocument() {
+    try {
+        var root = figma.root
+        if (!root || !root.children) return
+        for (var p = 0; p < root.children.length; p++) {
+            var pg = root.children[p]
+            if (!pg || pg.type !== "PAGE") continue
+            var found = []
+            try {
+                found = pg.findAll(function (node) {
+                    var nm = ""
+                    try {
+                        nm = String(node.name || "")
+                    } catch (eN) {}
+                    for (var t = 0; t < TEMP_EXPORT_NODE_NAMES.length; t++) {
+                        if (nm === TEMP_EXPORT_NODE_NAMES[t]) return true
+                    }
+                    return false
+                })
+            } catch (eF) {
+                continue
+            }
+            for (var j = 0; j < found.length; j++) disposeTempExportNode(found[j])
+        }
     } catch (e) {}
 }
 
@@ -410,14 +449,16 @@ function exportFillOnlySyntheticFrameAsync(node, format, ctx) {
         } catch (e3) {}
         return Promise.resolve(null)
     }
+    function disposeTmpAndReturn(res) {
+        disposeTempExportNode(tmp)
+        return res
+    }
     return exportRasterAssetAsync(tmp, format, ctx).then(
         function (res) {
-            disposeTempExportNode(tmp)
-            return res
+            return disposeTmpAndReturn(res)
         },
         function () {
-            disposeTempExportNode(tmp)
-            return null
+            return disposeTmpAndReturn(null)
         }
     )
 }
@@ -495,8 +536,9 @@ function exportSectionBackgroundImageRasterAsync(node, format, ctx) {
 /** 배경 래스터: fill·비텍스트 레이어는 유지, TEXT 노드만 클론에서 제거 후 export */
 function exportRasterWithoutTextSubtreeAsync(node, format, ctx) {
     if (!node) return Promise.resolve(null)
+    var clone = null
     try {
-        var clone = node.clone()
+        clone = node.clone()
         function stripTextUnder(n) {
             if (!n || !isContainer(n) || !n.children) return
             var i = n.children.length
@@ -524,6 +566,7 @@ function exportRasterWithoutTextSubtreeAsync(node, format, ctx) {
             }
         )
     } catch (e) {
+        disposeTempExportNode(clone)
         return Promise.resolve(null)
     }
 }

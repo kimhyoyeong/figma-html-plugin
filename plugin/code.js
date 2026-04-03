@@ -1370,8 +1370,9 @@ function buildFlexDeclDiff(dLv, mLv, node, moAbsSelf) {
     if (d.justify !== m.justify) parts.push("justify-content:" + m.justify)
     if (d.align !== m.align) parts.push("align-items:" + m.align)
 
-    if (d.gap !== m.gap && m.gap !== 0) {
-        parts.push("gap:calc(" + m.gap + "/var(--ap-width)*100cqi)")
+    if (d.gap !== m.gap) {
+        if (m.gap === 0) parts.push("gap:0")
+        else parts.push("gap:calc(" + m.gap + "/var(--ap-width)*100cqi)")
     }
 
     if (d.pt !== m.pt || d.pr !== m.pr || d.pb !== m.pb || d.pl !== m.pl) {
@@ -4043,6 +4044,7 @@ function guessMoRasterPathFromPcRasterPath(pcPathWithExt, ext) {
 
 /**
  * 067-image-system — 정책·포맷·export·에셋 캐시 (node.id 기반 이미지 캐시 없음)
+ * disposeTempExportNode / removeOrphanedTempExportNodesFromDocument — 배경 fill 전용 임시 프레임(`__bg_fill_only__`) 정리
  */
 function createImageAssetStores() {
     return { preview: Object.create(null), export: Object.create(null), zip: Object.create(null) }
@@ -4053,7 +4055,45 @@ function disposeTempExportNode(n) {
     if (!n) return
     try {
         if ("removed" in n && n.removed) return
+    } catch (e0) {}
+    try {
+        if ("locked" in n && n.locked) n.locked = false
+    } catch (eL) {}
+    try {
         n.remove()
+    } catch (e1) {}
+    try {
+        if ("removed" in n && !n.removed) n.remove()
+    } catch (e2) {}
+}
+
+/** 분석·export 중단 시 남는 임시 레이어(이름 고정) 전부 제거 — 모든 페이지 순회 */
+var TEMP_EXPORT_NODE_NAMES = ["__bg_fill_only__"]
+
+function removeOrphanedTempExportNodesFromDocument() {
+    try {
+        var root = figma.root
+        if (!root || !root.children) return
+        for (var p = 0; p < root.children.length; p++) {
+            var pg = root.children[p]
+            if (!pg || pg.type !== "PAGE") continue
+            var found = []
+            try {
+                found = pg.findAll(function (node) {
+                    var nm = ""
+                    try {
+                        nm = String(node.name || "")
+                    } catch (eN) {}
+                    for (var t = 0; t < TEMP_EXPORT_NODE_NAMES.length; t++) {
+                        if (nm === TEMP_EXPORT_NODE_NAMES[t]) return true
+                    }
+                    return false
+                })
+            } catch (eF) {
+                continue
+            }
+            for (var j = 0; j < found.length; j++) disposeTempExportNode(found[j])
+        }
     } catch (e) {}
 }
 
@@ -4453,14 +4493,16 @@ function exportFillOnlySyntheticFrameAsync(node, format, ctx) {
         } catch (e3) {}
         return Promise.resolve(null)
     }
+    function disposeTmpAndReturn(res) {
+        disposeTempExportNode(tmp)
+        return res
+    }
     return exportRasterAssetAsync(tmp, format, ctx).then(
         function (res) {
-            disposeTempExportNode(tmp)
-            return res
+            return disposeTmpAndReturn(res)
         },
         function () {
-            disposeTempExportNode(tmp)
-            return null
+            return disposeTmpAndReturn(null)
         }
     )
 }
@@ -4538,8 +4580,9 @@ function exportSectionBackgroundImageRasterAsync(node, format, ctx) {
 /** 배경 래스터: fill·비텍스트 레이어는 유지, TEXT 노드만 클론에서 제거 후 export */
 function exportRasterWithoutTextSubtreeAsync(node, format, ctx) {
     if (!node) return Promise.resolve(null)
+    var clone = null
     try {
-        var clone = node.clone()
+        clone = node.clone()
         function stripTextUnder(n) {
             if (!n || !isContainer(n) || !n.children) return
             var i = n.children.length
@@ -4567,6 +4610,7 @@ function exportRasterWithoutTextSubtreeAsync(node, format, ctx) {
             }
         )
     } catch (e) {
+        disposeTempExportNode(clone)
         return Promise.resolve(null)
     }
 }
@@ -5940,16 +5984,166 @@ function getSectionNodes(root) {
  * 095-responsive-pcmo — PC HTML + @media로 MO 스타일·배경·picture 병합
  *
  * 구조 불일치 시 096이 `.pc-only .ap-section--NN` / `.mo-only .ap-section--NN` 지연 규칙 출력 — parseCodeIntoParts·injectBgOverridesForMo 가 래퍼+자손 선택자 인식.
- * buildMobileOverrides — 레이아웃 등은 인덱스 walk; 이미지 크기는 렌더순서(096)·슬롯·sourceNodeId 매칭
- * getSectionStructureMatch — 섹션별 PC/MO 짝 구조 일치 여부(하이브리드 경고용, code-video·code-raster 슬롯은 하위 무시)
+ * buildMobileOverrides — 레이아웃·프레임 walk 시 형제는 `img`/`txt` 이름 우선 짝 + 나머지 이름 정렬 짝(순서만 바뀐 섹션 허용); 이미지 크기는 렌더순서·슬롯·sourceNodeId
+ * getSectionStructureMatch — 동일 짝 규칙으로 구조 일치 판정(code-video·code-raster 슬롯은 하위 무시)
  * parseCodeIntoParts — 산출 HTML에서 base/section 스타일/article 분리
  * injectBgOverridesForMo — sectionStyles의 --bg-img를 MO용 _mo 경로로 @media에 병합
  * rewriteMoOnlyRasterBgUrls — .mo-only 규칙 안 배경 URL만 MO 파일명·확장자에 맞춤
  * mergeImagesWithMoBackgroundFallback — ZIP/미리보기 imageList에 누락된 _mo 배경 보강
  * apSlidePcImgAttr — 슬라이드 안 이미지는 picture 변환 생략 표시
  * combinePcMoAsBreakpoint — 위 요소 합쳐 최종 HTML 문자열
+ * pushMoFlexChildOrderOverridesIfNeeded — 짝 맞은 flex 플로우 자식의 PC·MO 레이어 인덱스가 하나라도 다를 때만 order(MO 인덱스) 출력
  */
 // ----- 6. Section Utils (배경은 buildSectionBackgroundAsync) -----
+/**
+ * PC/MO visible 형제 짝: `img`·`txt` 레이어명(대소문자 무시) 동수면 시각 좌표로 짝, `txt`는 양쪽에 같은 개수일 때만 짝.
+ * 나머지: 한쪽이라도 **같은 레이어명이 형제 중 2회 이상**이면 이름 정렬이 PC·MO 기준축을 어긋나게 하므로 **문서 순 인덱스 짝**만 사용.
+ * 그 외에만 이름(동명이면 생성 순 idx) 정렬 후 짝. `img` 개수 불일치 등이면 null → 호출부에서 인덱스 짝 fallback.
+ */
+function pairVisibleSiblingsFlexible(dk, mk) {
+    if (!dk || !mk || dk.length !== mk.length) return null
+    function lowerName(n) {
+        return String(n && n.name || "").trim().toLowerCase()
+    }
+    function remainderHasDuplicateLayerName(nodes) {
+        var counts = Object.create(null)
+        for (var ri = 0; ri < nodes.length; ri++) {
+            var k = lowerName(nodes[ri])
+            if (k === "") k = "\0"
+            counts[k] = (counts[k] || 0) + 1
+            if (counts[k] > 1) return true
+        }
+        return false
+    }
+    function pluckByName(nodes, tag) {
+        var hit = []
+        var rest = []
+        for (var i = 0; i < nodes.length; i++) {
+            if (lowerName(nodes[i]) === tag) hit.push(nodes[i])
+            else rest.push(nodes[i])
+        }
+        return {hit: hit, rest: rest}
+    }
+    function sortNodesVisual(nodes) {
+        return nodes
+            .map(function (n, idx) {
+                var k = idx
+                try {
+                    var b = getAbs(n)
+                    if (b) k = (Number(b.x) || 0) * 1e9 + (Number(b.y) || 0) + idx * 1e-6
+                } catch (eVis) {}
+                return {n: n, k: k}
+            })
+            .sort(function (a, b) {
+                return a.k - b.k
+            })
+            .map(function (x) {
+                return x.n
+            })
+    }
+    function sortNodesByNameStable(nodes) {
+        return nodes
+            .map(function (n, idx) {
+                var ln = lowerName(n)
+                return {n: n, k: (ln || "\0") + "\x01" + idx}
+            })
+            .sort(function (a, b) {
+                return a.k.localeCompare(b.k)
+            })
+            .map(function (x) {
+                return x.n
+            })
+    }
+    var pairs = []
+    var dR = dk.slice()
+    var mR = mk.slice()
+    var dImg = pluckByName(dR, "img")
+    var mImg = pluckByName(mR, "img")
+    if (dImg.hit.length !== mImg.hit.length) return null
+    var dIs = sortNodesVisual(dImg.hit)
+    var mIs = sortNodesVisual(mImg.hit)
+    for (var ii = 0; ii < dIs.length; ii++) pairs.push([dIs[ii], mIs[ii]])
+    dR = dImg.rest
+    mR = mImg.rest
+    if (dR.length !== mR.length) return null
+
+    var dTxt = pluckByName(dR, "txt")
+    var mTxt = pluckByName(mR, "txt")
+    if (dTxt.hit.length === mTxt.hit.length && dTxt.hit.length > 0) {
+        var dTs = sortNodesVisual(dTxt.hit)
+        var mTs = sortNodesVisual(mTxt.hit)
+        for (var ti = 0; ti < dTs.length; ti++) pairs.push([dTs[ti], mTs[ti]])
+        dR = dTxt.rest
+        mR = mTxt.rest
+    }
+    if (dR.length !== mR.length) return null
+    if (remainderHasDuplicateLayerName(dR) || remainderHasDuplicateLayerName(mR)) {
+        for (var zi = 0; zi < dR.length; zi++) pairs.push([dR[zi], mR[zi]])
+    } else {
+        var dN = sortNodesByNameStable(dR)
+        var mN = sortNodesByNameStable(mR)
+        for (var ji = 0; ji < dN.length; ji++) pairs.push([dN[ji], mN[ji]])
+    }
+    return pairs
+}
+
+function pcMoChildPairsOrIndex(dKids, mKids) {
+    var flex = pairVisibleSiblingsFlexible(dKids, mKids)
+    if (flex) return flex
+    var out = []
+    for (var i = 0; i < dKids.length && i < mKids.length; i++) out.push([dKids[i], mKids[i]])
+    return out
+}
+
+/**
+ * PC·MO flex 플로우 자식(absolute 제외) 짝이 pcMoChildPairsOrIndex로 1:1 맞고,
+ * 각 짝에 대해 「PC 레이어 목록에서의 인덱스」와 「MO 레이어 목록에서의 인덱스」가
+ * 전부 같으면 아무 것도 안 함(순서 동일).
+ * 하나라도 다르면 “노드 구성은 같은데 순서만 다름”으로 보고, HTML(PC DOM) 순서는 유지한 채
+ * @media에서 각 PC 자식에 order:<MO에서의 인덱스> 를 줘서 시각 순서만 MO와 같게 함.
+ * (짝 자체는 pairVisibleSiblingsFlexible 규칙을 따름; 순서 비교는 dFlow/mFlow 내 인덱스.)
+ */
+function flowChildIndex(flowArr, node) {
+    for (var fi = 0; fi < flowArr.length; fi++) {
+        if (flowArr[fi] === node) return fi
+    }
+    return -1
+}
+
+function pushMoFlexChildOrderOverridesIfNeeded(dNode, mNode, secClass, moOpts, pushMoMoRule, isExported) {
+    if (!dNode || !mNode || !isFlex(dNode) || !isFlex(mNode)) return
+    var dFlow = (dNode.children || []).filter(function (c) {
+        return c && isVisible(c) && !isAbsoluteLike(c, dNode)
+    })
+    var mFlow = (mNode.children || []).filter(function (c) {
+        return c && isVisible(c) && !isAbsoluteLike(c, mNode)
+    })
+    if (dFlow.length !== mFlow.length || dFlow.length < 2) return
+    var pairs = pcMoChildPairsOrIndex(dFlow, mFlow)
+    if (!pairs || pairs.length !== dFlow.length) return
+    var need = false
+    for (var pi = 0; pi < pairs.length; pi++) {
+        var dChk = pairs[pi][0]
+        var mChk = pairs[pi][1]
+        var pcIdx = flowChildIndex(dFlow, dChk)
+        var moIdx = flowChildIndex(mFlow, mChk)
+        if (pcIdx < 0 || moIdx < 0) return
+        if (pcIdx !== moIdx) need = true
+    }
+    if (!need) return
+    for (var j = 0; j < pairs.length; j++) {
+        var dCh = pairs[j][0]
+        if (dCh.id == null || !isExported(dCh.id)) continue
+        var mCh2 = pairs[j][1]
+        var moI = flowChildIndex(mFlow, mCh2)
+        if (moI < 0) continue
+        var leafSel = cssInnerSelForNode(String(dCh.id), moOpts, false)
+        if (!leafSel) continue
+        var fullSel = ".ap-section--" + secClass + " " + leafSel
+        pushMoMoRule(fullSel, "order:" + moI)
+    }
+}
+
 /** 구조 일치 섹션만: PC가 code-video인 슬롯의 MO 노드 id → true (MO 레이어명 불일치 허용) */
 function buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
     var out = Object.create(null)
@@ -5967,9 +6161,10 @@ function buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
         var mKids = (mNode.children || []).filter(function (c) {
             return c && isVisible(c)
         })
-        for (var i = 0; i < dKids.length && i < mKids.length; i++) {
-            var d = dKids[i]
-            var m = mKids[i]
+        var pairVi = pcMoChildPairsOrIndex(dKids, mKids)
+        for (var i = 0; i < pairVi.length; i++) {
+            var d = pairVi[i][0]
+            var m = pairVi[i][1]
             if (d.type !== m.type) continue
             if (!d.id) {
                 if (d.type === "FRAME" && isContainer(d)) walkInherit(d, m)
@@ -6006,9 +6201,10 @@ function buildMoRasterInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
         var mKids = (mNode.children || []).filter(function (c) {
             return c && isVisible(c)
         })
-        for (var ri = 0; ri < dKids.length && ri < mKids.length; ri++) {
-            var d = dKids[ri]
-            var m = mKids[ri]
+        var pairR = pcMoChildPairsOrIndex(dKids, mKids)
+        for (var ri = 0; ri < pairR.length; ri++) {
+            var d = pairR[ri][0]
+            var m = pairR[ri][1]
             if (d.type !== m.type) continue
             if (!d.id) {
                 if (d.type === "FRAME" && isContainer(d)) walkRasterInherit(d, m)
@@ -6038,9 +6234,10 @@ function collectMoVideoNodesByPcLayerName(dSec, mSec) {
         var mKids = (mNode.children || []).filter(function (c) {
             return c && isVisible(c)
         })
-        for (var i = 0; i < dKids.length && i < mKids.length; i++) {
-            var d = dKids[i]
-            var m = mKids[i]
+        var pairV = pcMoChildPairsOrIndex(dKids, mKids)
+        for (var i = 0; i < pairV.length; i++) {
+            var d = pairV[i][0]
+            var m = pairV[i][1]
             if (d.type !== m.type) continue
             if (!d.id) {
                 if (d.type === "FRAME" && isContainer(d)) walk(d, m)
@@ -6056,7 +6253,7 @@ function collectMoVideoNodesByPcLayerName(dSec, mSec) {
     walk(dSec, mSec)
     return map
 }
-/** PC HTML 기준 MO 미디어쿼리 오버라이드 (프레임/텍스트는 인덱스 walk, 이미지는 렌더 순서 반영 시맨틱) */
+/** PC HTML 기준 MO 미디어쿼리 오버라이드 (프레임/텍스트 walk는 pcMoChildPairsOrIndex, 이미지는 렌더 순서·슬롯) */
 function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
     options = options || {}
     var exportedSet = options.exportedNodeIds || null
@@ -6171,6 +6368,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
 
     function walkPair(dNode, mNode, mParent, secClass, imageByName, textByName, textOverrideDone, semMap, videoByName, videoOverrideDone) {
         var moOpts = { sectionSemantics: semMap || {} }
+        pushMoFlexChildOrderOverridesIfNeeded(dNode, mNode, secClass, moOpts, pushMoMoRule, isExported)
         var dKids = (dNode.children || []).filter(function (c) {
             return c && isVisible(c)
         })
@@ -6178,9 +6376,10 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             return c && isVisible(c)
         })
 
-        for (var i = 0; i < dKids.length && i < mKids.length; i++) {
-            var d = dKids[i]
-            var m = mKids[i]
+        var pairW = pcMoChildPairsOrIndex(dKids, mKids)
+        for (var i = 0; i < pairW.length; i++) {
+            var d = pairW[i][0]
+            var m = pairW[i][1]
             if (d.type !== m.type) continue
             if (!d.id) {
                 if (d.type === "FRAME" && isContainer(d))
@@ -6483,7 +6682,7 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
 
     /**
      * PC·MO 트리를 각각 해시(nodeSig)하면 MO에 code-video/code-raster 명이 없을 때만 하위 구조가 전부 시그니처에 남아 불일치가 난다.
-     * 같은 인덱스 자식끼리 짝을 지어 비교하고, 한쪽이라도 code-video·code-raster면 단일 슬롯으로 합쳐지므로 그 서브트리는 일치로 본다.
+     * 형제는 pcMoChildPairsOrIndex(img·txt 이름·나머지 정렬). 한쪽이라도 code-video·code-raster면 그 서브트리는 일치로 본다.
      */
     function pairedStructureMatch(dNode, mNode, depth) {
         depth = depth || 0
@@ -6502,8 +6701,9 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
         var dk = visibleChildren(dNode)
         var mk = visibleChildren(mNode)
         if (dk.length !== mk.length) return false
-        for (var ci = 0; ci < dk.length; ci++) {
-            if (!pairedStructureMatch(dk[ci], mk[ci], depth + 1)) return false
+        var plist = pcMoChildPairsOrIndex(dk, mk)
+        for (var ci = 0; ci < plist.length; ci++) {
+            if (!pairedStructureMatch(plist[ci][0], plist[ci][1], depth + 1)) return false
         }
         return true
     }
@@ -8283,10 +8483,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
  * 분석/ZIP 경로에서 호출되는 제품 파이프라인의 한 축(비동기 트리 워크 + buildCodeAsync 연계).
  *
  * dumpTreeAsync — ROOT 기준 레이어 인스펙트 트리 텍스트(dataTree) 생성, buildCodeAsync 호출로 code·이미지·폰트 목록 반환.
+ *   시작·성공·실패 시 removeOrphanedTempExportNodesFromDocument 로 `__bg_fill_only__` 등 임시 노드 정리(067).
  *   내부 walkAsync 등으로 섹션별 덤프, phase(desktop/mobile)에 따라 캐시·export 폭 처리.
  */
 function dumpTreeAsync(root, projectName, allowedFonts, options) {
     options = options || {}
+    removeOrphanedTempExportNodesFromDocument()
     var prevExportWidth = _currentExportWidth
     if (options.exportWidth != null) _currentExportWidth = Math.max(200, Number(options.exportWidth))
 
@@ -8559,6 +8761,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                     .filter(Boolean)
                     .sort()
                 _currentExportWidth = prevExportWidth
+                removeOrphanedTempExportNodesFromDocument()
                 ensureImagePipelineOnCache(cache)
                 var assetStoresSnapshot = {
                     preview: Object.assign({}, cache.assetStores.preview),
@@ -8583,6 +8786,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
         })
         .catch(function (err) {
             _currentExportWidth = prevExportWidth
+            removeOrphanedTempExportNodesFromDocument()
             throw err
         })
 }
