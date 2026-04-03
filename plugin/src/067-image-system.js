@@ -5,6 +5,15 @@ function createImageAssetStores() {
     return { preview: Object.create(null), export: Object.create(null), zip: Object.create(null) }
 }
 
+/** export용 clone·임시 프레임 — then만 쓰면 reject/중간 예외 시 문서에 남음 */
+function disposeTempExportNode(n) {
+    if (!n) return
+    try {
+        if ("removed" in n && n.removed) return
+        n.remove()
+    } catch (e) {}
+}
+
 function ensureImagePipelineOnCache(cache) {
     if (!cache.assetStores) cache.assetStores = createImageAssetStores()
     if (!cache.imagePipeline) cache.imagePipeline = { mode: "export", variant: "pc" }
@@ -369,12 +378,16 @@ function exportFillOnlySyntheticFrameAsync(node, format, ctx) {
         } catch (e3) {}
         return Promise.resolve(null)
     }
-    return exportRasterAssetAsync(tmp, format, ctx).then(function (res) {
-        try {
-            if (tmp) tmp.remove()
-        } catch (e4) {}
-        return res
-    })
+    return exportRasterAssetAsync(tmp, format, ctx).then(
+        function (res) {
+            disposeTempExportNode(tmp)
+            return res
+        },
+        function () {
+            disposeTempExportNode(tmp)
+            return null
+        }
+    )
 }
 
 function exportFillOnlyRasterAsync(node, format, ctx) {
@@ -384,15 +397,20 @@ function exportFillOnlyRasterAsync(node, format, ctx) {
         clone = node.clone()
         while (clone.children && clone.children.length > 0) clone.removeChild(clone.children[0])
     } catch (e) {
+        disposeTempExportNode(clone)
         return exportFillOnlySyntheticFrameAsync(node, format, ctx)
     }
-    return exportRasterAssetAsync(clone, format, ctx).then(function (res) {
-        try {
-            if (clone) clone.remove()
-        } catch (e2) {}
-        if (res && res.dataUrl) return res
-        return exportFillOnlySyntheticFrameAsync(node, format, ctx)
-    })
+    return exportRasterAssetAsync(clone, format, ctx).then(
+        function (res) {
+            disposeTempExportNode(clone)
+            if (res && res.dataUrl) return res
+            return exportFillOnlySyntheticFrameAsync(node, format, ctx)
+        },
+        function () {
+            disposeTempExportNode(clone)
+            return exportFillOnlySyntheticFrameAsync(node, format, ctx)
+        }
+    )
 }
 
 /** 최상단 IMAGE fill의 원본 바이트만 (자식·벡터 없음). crop/scale은 프레임과 다를 수 있음 */
@@ -463,12 +481,16 @@ function exportRasterWithoutTextSubtreeAsync(node, format, ctx) {
             }
         }
         stripTextUnder(clone)
-        return exportRasterAssetAsync(clone, format, ctx).then(function (res) {
-            try {
-                clone.remove()
-            } catch (e2) {}
-            return res
-        })
+        return exportRasterAssetAsync(clone, format, ctx).then(
+            function (res) {
+                disposeTempExportNode(clone)
+                return res
+            },
+            function () {
+                disposeTempExportNode(clone)
+                return null
+            }
+        )
     } catch (e) {
         return Promise.resolve(null)
     }
