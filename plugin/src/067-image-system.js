@@ -574,20 +574,21 @@ function exportRasterWithoutTextSubtreeAsync(node, format, ctx) {
 function exportRasterAssetAsync(node, format, ctx) {
     if (!node) return Promise.resolve(null)
     /** ZIP 산출물: 피그마 노드 실제(1×) 픽셀 크기 — WIDTH 제약 시 1200 등으로 강제 축소됨 */
-    var w =
-        ctx && ctx.cache && ctx.cache.imagePipeline && ctx.cache.imagePipeline.mode === "zip"
-            ? null
-            : _currentExportWidth
+    var zipMode = !!(ctx && ctx.cache && ctx.cache.imagePipeline && ctx.cache.imagePipeline.mode === "zip")
+    var mo2x = !!(ctx && ctx.cache && ctx.cache.imagePipeline && ctx.cache.imagePipeline.variant === "mo")
+    var w = zipMode ? null : _currentExportWidth
     // false: 노드 선택 박스(클립된 시각 영역) 기준. true면 자손·오버플로가 절대 바운딩까지 PNG에 포함됨.
     var exportBoundsOpts = { useAbsoluteBounds: false }
     function pack(dataUrl, fmtEff) {
         return dataUrl ? { dataUrl: dataUrl, format: fmtEff } : null
     }
-    function doExport(widthOrNull, fmtEff) {
-        var opts =
-            widthOrNull != null
-                ? { constraint: { type: "WIDTH", value: widthOrNull }, format: fmtEff }
-                : { format: fmtEff }
+    /** constraint: null = 제약 없음, { type:'WIDTH', value:n }, { type:'SCALE', value:n } */
+    function doExport(constraint, fmtEff) {
+        var opts = { format: fmtEff }
+        if (constraint && constraint.type === "WIDTH" && constraint.value != null)
+            opts.constraint = { type: "WIDTH", value: constraint.value }
+        else if (constraint && constraint.type === "SCALE" && constraint.value != null)
+            opts.constraint = { type: "SCALE", value: constraint.value }
         for (var k in exportBoundsOpts) {
             if (Object.prototype.hasOwnProperty.call(exportBoundsOpts, k)) opts[k] = exportBoundsOpts[k]
         }
@@ -608,9 +609,14 @@ function exportRasterAssetAsync(node, format, ctx) {
             })
     }
     function tryFmtSeq(fmtEff) {
-        return doExport(w, fmtEff).then(function (r) {
+        var first = null
+        if (w != null) first = { type: "WIDTH", value: w }
+        else if (mo2x) first = { type: "SCALE", value: 2 }
+        return doExport(first, fmtEff).then(function (r) {
             if (r) return r
-            return doExport(800, fmtEff)
+            if (w == null && mo2x) return doExport(null, fmtEff)
+            if (w != null) return doExport({ type: "WIDTH", value: 800 }, fmtEff)
+            return doExport(null, fmtEff)
         }).then(function (r) {
             if (r) return r
             return doExport(null, fmtEff)
