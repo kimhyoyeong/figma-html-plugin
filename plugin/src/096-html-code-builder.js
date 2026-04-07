@@ -62,102 +62,116 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
     codeLines.push("<style>")
     codeLines.push("")
-    codeLines.push(".ap-post,")
-    codeLines.push(".ap-post * {")
-    codeLines.push("  margin:0;")
-    codeLines.push("  box-sizing:border-box;")
-    codeLines.push("}")
-    codeLines.push("")
-    codeLines.push(".ap-post__inner {")
-    codeLines.push("  container:article/inline-size;")
-    codeLines.push("  --ap-width:" + baseWidth + ";")
-    //codeLines.push("  max-width:" + baseWidth + "px;width:100%;")
-    codeLines.push("  margin:0 auto;")
-    codeLines.push("}")
-    codeLines.push("")
 
-    codeLines.push(".ap-section {")
-    codeLines.push("  position:relative;")
-    codeLines.push("  overflow:hidden;")
-    codeLines.push("  background-color:var(--bgc,transparent);")
-    codeLines.push("  background-image:var(--bg-img,none);")
-    codeLines.push("  background-repeat:no-repeat;")
-    codeLines.push("  background-position:50% 0;")
-    codeLines.push("  background-size:cover;")
-    codeLines.push("}")
+    // ----- 루트·섹션·abs -----
+    codeLines.push(".ap-post,.ap-post *{margin:0;box-sizing:border-box;}")
+    codeLines.push(".ap-post__inner{container:article/inline-size;--ap-width:" + baseWidth + ";margin:0 auto;}")
     codeLines.push("")
-    codeLines.push("")
-
-    codeLines.push(".ap-abs{")
-    codeLines.push("  position:absolute;")
-    codeLines.push("  left:calc(var(--ap-left, 0)/var(--ap-width)*100cqi);")
-    codeLines.push("  top:calc(var(--ap-top, 0)/var(--ap-width)*100cqi);")
-    codeLines.push("  width:calc(var(--ap-w, 0)/var(--ap-width)*100cqi);")
-    codeLines.push("  height:calc(var(--ap-h, 0)/var(--ap-width)*100cqi);")
-    codeLines.push("}")
-    codeLines.push("")
-
-    // text
-    codeLines.push(".ap-text {")
-    codeLines.push("  margin:0;")
-    codeLines.push("  font-size:clamp(0px,calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));")
-    codeLines.push("  line-height:var(--ap-lh, 1.2);")
-    codeLines.push("  letter-spacing:calc(var(--ap-ls, 0)/var(--ap-width)*100cqi);")
-    codeLines.push("  font-weight:var(--ap-fw, 400);")
-    codeLines.push("  text-align:var(--ap-ta, center);")
-    codeLines.push("  color:var(--ap-clr, #000);")
-    codeLines.push("}")
-    codeLines.push(".ap-text__part {")
     codeLines.push(
-        "  font-size:clamp(0px,calc(var(--ap-part-fs)/var(--ap-width)*100cqi),calc(var(--ap-part-fs)*1px));"
+        ".ap-section{" +
+            "position:relative;" +
+            "overflow:hidden;" +
+            "background-color:var(--bgc,transparent);" +
+            "background-image:var(--bg-img,none);" +
+            "background-repeat:no-repeat;" +
+            "background-position:50% 0;" +
+            "background-size:cover;" +
+            "}"
     )
-    codeLines.push("  line-height:var(--ap-part-lh);")
-    codeLines.push("  letter-spacing:calc(var(--ap-part-ls)/var(--ap-width)*100cqi);")
-    codeLines.push("  font-weight:var(--ap-part-fw);")
-    codeLines.push("  color:var(--ap-part-clr);")
-    codeLines.push("}")
     codeLines.push("")
-    codeLines.push(".pc-only{ display:block; }")
-    codeLines.push(".mo-only{ display:none; }")
+    codeLines.push(
+        ".ap-abs{" +
+            "position:absolute;" +
+            "left:calc(var(--ap-left,0)/var(--ap-width)*100cqi);" +
+            "top:calc(var(--ap-top,0)/var(--ap-width)*100cqi);" +
+            "width:calc(var(--ap-w,0)/var(--ap-width)*100cqi);" +
+            "height:calc(var(--ap-h,0)/var(--ap-width)*100cqi);" +
+            "}"
+    )
     codeLines.push("")
 
-    // image: 인라인은 --ap-w로 크기, absolute는 wrapper 크기에 맞춤(중복 제거)
-    codeLines.push(".ap-image img {")
-    codeLines.push("  width:calc(var(--ap-w, 0) / var(--ap-width) * 100cqi);")
-    codeLines.push("  height:calc(var(--ap-h, 0) / var(--ap-width) * 100cqi);")
-    codeLines.push("  display:block;")
-    codeLines.push("}")
-    codeLines.push(".ap-image.ap-abs img { width:100%; height:100%; object-fit:cover; }")
+    // ----- 텍스트 -----
+    codeLines.push(
+        ".ap-text{" +
+            "margin:0;" +
+            "font-size:clamp(0px,calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));" +
+            "line-height:var(--ap-lh,1.2);" +
+            "letter-spacing:calc(var(--ap-ls,0)/var(--ap-width)*100cqi);" +
+            "font-weight:var(--ap-fw,400);" +
+            "text-align:var(--ap-ta,center);" +
+            "color:var(--ap-clr,#000);" +
+            "}"
+    )
+    codeLines.push(
+        ".ap-text__part{" +
+            "font-size:clamp(0px,calc(var(--ap-part-fs)/var(--ap-width)*100cqi),calc(var(--ap-part-fs)*1px));" +
+            "line-height:var(--ap-part-lh);" +
+            "letter-spacing:calc(var(--ap-part-ls)/var(--ap-width)*100cqi);" +
+            "font-weight:var(--ap-part-fw);" +
+            "color:var(--ap-part-clr);" +
+            "}"
+    )
     codeLines.push("")
-    codeLines.push(".ap-video {")
-    codeLines.push("  display:flex; align-items:center; justify-content:center;")
-    codeLines.push("  width:calc(var(--ap-w, 0) / var(--ap-width) * 100cqi);")
-    codeLines.push("  height:calc(var(--ap-h, 0) / var(--ap-width) * 100cqi);")
-    codeLines.push("  aspect-ratio: calc(var(--ap-w, 1) / var(--ap-h, 1));")
-    codeLines.push("}")
-    codeLines.push(".ap-video.ap-abs { width:100%; height:100%; min-height:0; aspect-ratio:auto; }")
-    codeLines.push(".ap-video video { width:100%; height:100%; object-fit:contain; display:block; }")
+    codeLines.push(".pc-only{display:block;}")
+    codeLines.push(".mo-only{display:none;}")
     codeLines.push("")
-    codeLines.push(".ap-line {")
-    codeLines.push("  display:block; flex-shrink:0; min-height:1px;")
-    codeLines.push("  width:calc(var(--ap-line-w, 100)/var(--ap-width)*100cqi);")
-    codeLines.push("  height:calc(var(--ap-line-h, 1)/var(--ap-width)*100cqi);")
-    codeLines.push("  background:var(--ap-line-color,#000);")
-    codeLines.push("  transform-origin:left center;")
-    codeLines.push("  transform:rotate(var(--ap-line-rot, 0)deg);")
-    codeLines.push("}")
-    codeLines.push(".ap-line.ap-abs { min-height:0; }")
+
+    // ----- 이미지(인라인 --ap-w / ap-abs 는 래퍼에 맞춤) -----
+    codeLines.push(
+        ".ap-image img{" +
+            "display:block;" +
+            "width:calc(var(--ap-w,0)/var(--ap-width)*100cqi);" +
+            "height:auto;" +
+            "}"
+    )
+    codeLines.push(".ap-image.ap-abs img{width:100%;height:100%;object-fit:cover;}")
     codeLines.push("")
-    codeLines.push(".ap-ellipse {")
-    codeLines.push("  display:block; flex-shrink:0;")
-    codeLines.push("  width:calc(var(--ap-ellipse-w, 100)/var(--ap-width)*100cqi);")
-    codeLines.push("  height:calc(var(--ap-ellipse-h, 100)/var(--ap-width)*100cqi);")
-    codeLines.push("  border-radius:50%;")
-    codeLines.push("  background:var(--ap-ellipse-bgc,transparent);")
-    codeLines.push("  border:calc(var(--ap-ellipse-bd, 0)/var(--ap-width)*100cqi) solid var(--ap-ellipse-bdc,transparent);")
-    codeLines.push("}")
-    codeLines.push(".ap-ellipse.ap-abs { width:100%; height:100%; box-sizing:border-box; }")
+
+    // ----- 비디오 -----
+    codeLines.push(
+        ".ap-video{" +
+            "display:flex;" +
+            "align-items:center;" +
+            "justify-content:center;" +
+            "width:calc(var(--ap-w,0)/var(--ap-width)*100cqi);" +
+            "height:calc(var(--ap-h,0)/var(--ap-width)*100cqi);" +
+            "aspect-ratio:calc(var(--ap-w,1)/var(--ap-h,1));" +
+            "}"
+    )
+    codeLines.push(".ap-video.ap-abs{width:100%;height:100%;min-height:0;aspect-ratio:auto;}")
+    codeLines.push(".ap-video video{width:100%;height:100%;object-fit:contain;display:block;}")
     codeLines.push("")
+
+    // ----- 라인·타원 -----
+    codeLines.push(
+        ".ap-line{" +
+            "display:block;" +
+            "flex-shrink:0;" +
+            "min-height:1px;" +
+            "width:calc(var(--ap-line-w,100)/var(--ap-width)*100cqi);" +
+            "height:calc(var(--ap-line-h,1)/var(--ap-width)*100cqi);" +
+            "background:var(--ap-line-color,#000);" +
+            "transform-origin:left center;" +
+            "transform:rotate(var(--ap-line-rot,0)deg);" +
+            "}"
+    )
+    codeLines.push(".ap-line.ap-abs{min-height:0;}")
+    codeLines.push("")
+    codeLines.push(
+        ".ap-ellipse{" +
+            "display:block;" +
+            "flex-shrink:0;" +
+            "width:calc(var(--ap-ellipse-w,100)/var(--ap-width)*100cqi);" +
+            "height:calc(var(--ap-ellipse-h,100)/var(--ap-width)*100cqi);" +
+            "border-radius:50%;" +
+            "background:var(--ap-ellipse-bgc,transparent);" +
+            "border:calc(var(--ap-ellipse-bd,0)/var(--ap-width)*100cqi) solid var(--ap-ellipse-bdc,transparent);" +
+            "}"
+    )
+    codeLines.push(".ap-ellipse.ap-abs{width:100%;height:100%;box-sizing:border-box;}")
+    codeLines.push("")
+
+    // ----- Swiper(셀 overflow·화살표 mask) -----
     codeLines.push("/* 슬라이드: 다음 장 피크·카드 폭이 슬라이드 셀보다 클 때 섹션/셀 overflow로 잘리지 않게 */")
     /** Swiper 기본 화살표 경로 · data URL은 수동 인코딩 대신 encodeURIComponent로만 생성(파서 호환) */
     var apSwiperNavArrowDataUrl =
@@ -165,26 +179,27 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         encodeURIComponent(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 27 44"><path d="M27,22L27,22L5,44l-2.1-2.1L22.8,22L2.9,2.1L5,0L27,22L27,22z" fill="#000"/></svg>'
         )
-    codeLines.push(".ap-section--swiper { overflow: visible; height: auto; min-height: auto; }")
-    codeLines.push(".ap-post .swiper {")
-    codeLines.push("  overflow: hidden; width:100%; ")
-    codeLines.push("  --swiper-navigation-color:#000;")
-    codeLines.push("  --swiper-pagination-bullet-size:10px;")
-    codeLines.push("}")
-    codeLines.push(".ap-post .swiper-pagination {position: relative;width:100%;margin-top: calc(80 / var(--ap-width) * 100cqi); }")
-    codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after { content:none; }")
-    codeLines.push(".ap-post .swiper-button-prev,")
-    codeLines.push(".ap-post .swiper-button-next {")
-    codeLines.push("  width: clamp(0px, calc(40 / var(--ap-width) * 100cqi), 40px);")
-    codeLines.push("  height: clamp(0px, calc(80 / var(--ap-width) * 100cqi), 80px);")
-    codeLines.push("  background-color: var(--swiper-navigation-color);")
-    codeLines.push('  -webkit-mask: url("' + apSwiperNavArrowDataUrl + '") no-repeat center / contain;')
-    codeLines.push('  mask: url("' + apSwiperNavArrowDataUrl + '") no-repeat center / contain;')
-    codeLines.push("  background-repeat: no-repeat;")
-    codeLines.push("  background-size: contain;")
-    codeLines.push("}")
-    codeLines.push(".ap-post .swiper-button-prev { transform: rotate(180deg); }")
-    codeLines.push(".ap-post .swiper-pagination-bullet{background-color: var(--swiper-navigation-color);}")
+    codeLines.push(".ap-section--swiper{overflow:visible;height:auto;min-height:auto;}")
+    codeLines.push(".ap-post .swiper{overflow:hidden;width:100%;--swiper-navigation-color:#000;--swiper-pagination-bullet-size:10px;}")
+    codeLines.push(".ap-post .swiper-pagination{position:relative;width:100%;margin-top:calc(80/var(--ap-width)*100cqi);}")
+    codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after{content:none;}")
+    codeLines.push(
+        ".ap-post .swiper-button-prev,.ap-post .swiper-button-next{" +
+            "width:clamp(0px,calc(40/var(--ap-width)*100cqi),40px);" +
+            "height:clamp(0px,calc(80/var(--ap-width)*100cqi),80px);" +
+            "background-color:var(--swiper-navigation-color);" +
+            "-webkit-mask:url(\"" +
+            apSwiperNavArrowDataUrl +
+            '\") no-repeat center/contain;' +
+            'mask:url("' +
+            apSwiperNavArrowDataUrl +
+            '") no-repeat center/contain;' +
+            "background-repeat:no-repeat;" +
+            "background-size:contain;" +
+            "}"
+    )
+    codeLines.push(".ap-post .swiper-button-prev{transform:rotate(180deg);}")
+    codeLines.push(".ap-post .swiper-pagination-bullet{background-color:var(--swiper-navigation-color);}")
     codeLines.push("")
     // </style>는 deferred 스타일 합친 뒤에 한 번만 닫음
 

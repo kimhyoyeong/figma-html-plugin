@@ -29,6 +29,20 @@ function getTopmostVisibleFill(node, opts) {
     return null
 }
 
+/** 맨 위 solid 아래(더 아래 레이어)에 보이는 IMAGE fill이 있으면 반환 — 이미지+딤을 한 장으로 raster export 할 때 사용 */
+function getVisibleImageFillBelowTopIndex(node, topFillIndex) {
+    try {
+        if (!node || !node.fills || node.fills === figma.mixed) return null
+        var fills = node.fills || []
+        for (var i = topFillIndex - 1; i >= 0; i--) {
+            var f = fills[i]
+            if (!f || f.visible === false) continue
+            if (f.type === "IMAGE") return { type: "IMAGE", fill: f, index: i }
+        }
+    } catch (e) {}
+    return null
+}
+
 function pipelineRasterBackgroundImageDeclAsync(node, useCssVarsForSection, cache, secNo) {
     var bgCtx = { cache: cache, secNo: secNo, slotIndex: 0, insideSwiperSlide: false, sectionBackgroundImageFillOnly: true }
     if (cache.imageSuffix === "_mo" && node && node.id != null && cache.pairPcNodeIdByMoId) {
@@ -73,8 +87,22 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
 
     var parts = []
 
-    // 맨 위 fill 기준으로만 판단
+    // 맨 위 fill 기준으로만 판단 (단, solid 아래에 image면 fill-only 합성 래스터 한 장으로 export — 자식 텍스트 제외)
     if (topFill.type === "SOLID") {
+        if (getVisibleImageFillBelowTopIndex(node, topFill.index)) {
+            return pipelineRasterBackgroundImageDeclAsync(node, useCssVarsForSection, cache, secNo).then(function (rasterDecl) {
+                if (rasterDecl) return rasterDecl
+                var solid = topFill.fill
+                var color = solid && solid.color ? rgbToHex(solid.color) : ""
+                if (!color) return ""
+                var opacity = typeof solid.opacity === "number" ? r2(solid.opacity) : null
+                var finalColor = color
+                if (opacity != null && opacity >= 0 && opacity < 1) {
+                    finalColor = hexToRgba(color, opacity) || color
+                }
+                return useCssVarsForSection ? "--bgc:" + finalColor : "background-color:" + finalColor
+            })
+        }
         var solid = topFill.fill
         var color = solid && solid.color ? rgbToHex(solid.color) : ""
         if (!color) return Promise.resolve("")

@@ -4784,12 +4784,6 @@ function pipelineEnsureImageAsync(node, ctx) {
     })
 }
 
-function resolvePipelineImageAsync(node, ctx) {
-    return pipelineEnsureImageAsync(node, ctx).then(function (r) {
-        return r && r.dataUrl ? r.dataUrl : null
-    })
-}
-
 function sendImagesToUI(images, ingestId) {
     if (!images || !images.length) return
     for (var i = 0; i < images.length; i++) {
@@ -5253,6 +5247,20 @@ function getTopmostVisibleFill(node, opts) {
     return null
 }
 
+/** 맨 위 solid 아래(더 아래 레이어)에 보이는 IMAGE fill이 있으면 반환 — 이미지+딤을 한 장으로 raster export 할 때 사용 */
+function getVisibleImageFillBelowTopIndex(node, topFillIndex) {
+    try {
+        if (!node || !node.fills || node.fills === figma.mixed) return null
+        var fills = node.fills || []
+        for (var i = topFillIndex - 1; i >= 0; i--) {
+            var f = fills[i]
+            if (!f || f.visible === false) continue
+            if (f.type === "IMAGE") return { type: "IMAGE", fill: f, index: i }
+        }
+    } catch (e) {}
+    return null
+}
+
 function pipelineRasterBackgroundImageDeclAsync(node, useCssVarsForSection, cache, secNo) {
     var bgCtx = { cache: cache, secNo: secNo, slotIndex: 0, insideSwiperSlide: false, sectionBackgroundImageFillOnly: true }
     if (cache.imageSuffix === "_mo" && node && node.id != null && cache.pairPcNodeIdByMoId) {
@@ -5297,8 +5305,22 @@ function buildBackgroundDeclAsync(node, useCssVarsForSection, cache, secNo, opts
 
     var parts = []
 
-    // 맨 위 fill 기준으로만 판단
+    // 맨 위 fill 기준으로만 판단 (단, solid 아래에 image면 fill-only 합성 래스터 한 장으로 export — 자식 텍스트 제외)
     if (topFill.type === "SOLID") {
+        if (getVisibleImageFillBelowTopIndex(node, topFill.index)) {
+            return pipelineRasterBackgroundImageDeclAsync(node, useCssVarsForSection, cache, secNo).then(function (rasterDecl) {
+                if (rasterDecl) return rasterDecl
+                var solid = topFill.fill
+                var color = solid && solid.color ? rgbToHex(solid.color) : ""
+                if (!color) return ""
+                var opacity = typeof solid.opacity === "number" ? r2(solid.opacity) : null
+                var finalColor = color
+                if (opacity != null && opacity >= 0 && opacity < 1) {
+                    finalColor = hexToRgba(color, opacity) || color
+                }
+                return useCssVarsForSection ? "--bgc:" + finalColor : "background-color:" + finalColor
+            })
+        }
         var solid = topFill.fill
         var color = solid && solid.color ? rgbToHex(solid.color) : ""
         if (!color) return Promise.resolve("")
@@ -5992,7 +6014,6 @@ function getSectionNodes(root) {
  * mergeImagesWithMoBackgroundFallback — ZIP/미리보기 imageList에 누락된 _mo 배경 보강
  * apSlidePcImgAttr — 슬라이드 안 이미지는 picture 변환 생략 표시
  * combinePcMoAsBreakpoint — 위 요소 합쳐 최종 HTML 문자열
- * pushMoFlexChildOrderOverridesIfNeeded — 짝 맞은 flex 플로우 자식의 PC·MO 레이어 인덱스가 하나라도 다를 때만 order(MO 인덱스) 출력
  */
 // ----- 6. Section Utils (배경은 buildSectionBackgroundAsync) -----
 /**
@@ -6093,55 +6114,6 @@ function pcMoChildPairsOrIndex(dKids, mKids) {
     var out = []
     for (var i = 0; i < dKids.length && i < mKids.length; i++) out.push([dKids[i], mKids[i]])
     return out
-}
-
-/**
- * PC·MO flex 플로우 자식(absolute 제외) 짝이 pcMoChildPairsOrIndex로 1:1 맞고,
- * 각 짝에 대해 「PC 레이어 목록에서의 인덱스」와 「MO 레이어 목록에서의 인덱스」가
- * 전부 같으면 아무 것도 안 함(순서 동일).
- * 하나라도 다르면 “노드 구성은 같은데 순서만 다름”으로 보고, HTML(PC DOM) 순서는 유지한 채
- * @media에서 각 PC 자식에 order:<MO에서의 인덱스> 를 줘서 시각 순서만 MO와 같게 함.
- * (짝 자체는 pairVisibleSiblingsFlexible 규칙을 따름; 순서 비교는 dFlow/mFlow 내 인덱스.)
- */
-function flowChildIndex(flowArr, node) {
-    for (var fi = 0; fi < flowArr.length; fi++) {
-        if (flowArr[fi] === node) return fi
-    }
-    return -1
-}
-
-function pushMoFlexChildOrderOverridesIfNeeded(dNode, mNode, secClass, moOpts, pushMoMoRule, isExported) {
-    if (!dNode || !mNode || !isFlex(dNode) || !isFlex(mNode)) return
-    var dFlow = (dNode.children || []).filter(function (c) {
-        return c && isVisible(c) && !isAbsoluteLike(c, dNode)
-    })
-    var mFlow = (mNode.children || []).filter(function (c) {
-        return c && isVisible(c) && !isAbsoluteLike(c, mNode)
-    })
-    if (dFlow.length !== mFlow.length || dFlow.length < 2) return
-    var pairs = pcMoChildPairsOrIndex(dFlow, mFlow)
-    if (!pairs || pairs.length !== dFlow.length) return
-    var need = false
-    for (var pi = 0; pi < pairs.length; pi++) {
-        var dChk = pairs[pi][0]
-        var mChk = pairs[pi][1]
-        var pcIdx = flowChildIndex(dFlow, dChk)
-        var moIdx = flowChildIndex(mFlow, mChk)
-        if (pcIdx < 0 || moIdx < 0) return
-        if (pcIdx !== moIdx) need = true
-    }
-    if (!need) return
-    for (var j = 0; j < pairs.length; j++) {
-        var dCh = pairs[j][0]
-        if (dCh.id == null || !isExported(dCh.id)) continue
-        var mCh2 = pairs[j][1]
-        var moI = flowChildIndex(mFlow, mCh2)
-        if (moI < 0) continue
-        var leafSel = cssInnerSelForNode(String(dCh.id), moOpts, false)
-        if (!leafSel) continue
-        var fullSel = ".ap-section--" + secClass + " " + leafSel
-        pushMoMoRule(fullSel, "order:" + moI)
-    }
 }
 
 /** 구조 일치 섹션만: PC가 code-video인 슬롯의 MO 노드 id → true (MO 레이어명 불일치 허용) */
@@ -6368,7 +6340,6 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
 
     function walkPair(dNode, mNode, mParent, secClass, imageByName, textByName, textOverrideDone, semMap, videoByName, videoOverrideDone) {
         var moOpts = { sectionSemantics: semMap || {} }
-        pushMoFlexChildOrderOverridesIfNeeded(dNode, mNode, secClass, moOpts, pushMoMoRule, isExported)
         var dKids = (dNode.children || []).filter(function (c) {
             return c && isVisible(c)
         })
@@ -6438,7 +6409,9 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 }
                 var strokeDiff = buildStrokeDeclDiff(d, m)
                 if (strokeDiff) declParts.push(strokeDiff)
-                // PC 프레임과 동일 조건(bg|stroke|radius) + 높이가 다를 때만 MO min-height (Auto Layout+HUG 세로 제외)
+                // MO min-height: PC가 쓰는 경우(dWantsMin)만 높이 불일치·PC 박스 없음으로 보정.
+                // PC가 안 쓰는 경우(HUG 등)에는 PC/MO 바운딩 높이 차이만으로는 넣지 않음(1열·3열 전환 시 dh≠mh가 항상이라 빈 영역 발생).
+                // 그때는 MO만 flexColumnSpaceBetweenNeedsMinHeight 일 때만.
                 var mBoxH = getAbs(m)
                 var dBoxH = getAbs(d)
                 var mMinReason = frameHasMinHeightVisualReason(m)
@@ -6450,7 +6423,13 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                         var mh = layoutPxNum(mBoxH.h)
                         var dh = dBoxH && dBoxH.h != null ? layoutPxNum(dBoxH.h) : null
                         var dWantsMin = dMinReason || sbMinD
-                        if (!dWantsMin || dh === null || mh !== dh)
+                        var needMoMinH = false
+                        if (dWantsMin) {
+                            needMoMinH = dh === null || mh !== dh
+                        } else {
+                            needMoMinH = sbMinM && !sbMinD
+                        }
+                        if (needMoMinH)
                             declParts.push("min-height:calc(" + cssOutLayoutPx(mBoxH.h) + "/var(--ap-width)*100cqi)")
                     }
                 }
@@ -7083,102 +7062,116 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
     codeLines.push("<style>")
     codeLines.push("")
-    codeLines.push(".ap-post,")
-    codeLines.push(".ap-post * {")
-    codeLines.push("  margin:0;")
-    codeLines.push("  box-sizing:border-box;")
-    codeLines.push("}")
-    codeLines.push("")
-    codeLines.push(".ap-post__inner {")
-    codeLines.push("  container:article/inline-size;")
-    codeLines.push("  --ap-width:" + baseWidth + ";")
-    //codeLines.push("  max-width:" + baseWidth + "px;width:100%;")
-    codeLines.push("  margin:0 auto;")
-    codeLines.push("}")
-    codeLines.push("")
 
-    codeLines.push(".ap-section {")
-    codeLines.push("  position:relative;")
-    codeLines.push("  overflow:hidden;")
-    codeLines.push("  background-color:var(--bgc,transparent);")
-    codeLines.push("  background-image:var(--bg-img,none);")
-    codeLines.push("  background-repeat:no-repeat;")
-    codeLines.push("  background-position:50% 0;")
-    codeLines.push("  background-size:cover;")
-    codeLines.push("}")
+    // ----- 루트·섹션·abs -----
+    codeLines.push(".ap-post,.ap-post *{margin:0;box-sizing:border-box;}")
+    codeLines.push(".ap-post__inner{container:article/inline-size;--ap-width:" + baseWidth + ";margin:0 auto;}")
     codeLines.push("")
-    codeLines.push("")
-
-    codeLines.push(".ap-abs{")
-    codeLines.push("  position:absolute;")
-    codeLines.push("  left:calc(var(--ap-left, 0)/var(--ap-width)*100cqi);")
-    codeLines.push("  top:calc(var(--ap-top, 0)/var(--ap-width)*100cqi);")
-    codeLines.push("  width:calc(var(--ap-w, 0)/var(--ap-width)*100cqi);")
-    codeLines.push("  height:calc(var(--ap-h, 0)/var(--ap-width)*100cqi);")
-    codeLines.push("}")
-    codeLines.push("")
-
-    // text
-    codeLines.push(".ap-text {")
-    codeLines.push("  margin:0;")
-    codeLines.push("  font-size:clamp(0px,calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));")
-    codeLines.push("  line-height:var(--ap-lh, 1.2);")
-    codeLines.push("  letter-spacing:calc(var(--ap-ls, 0)/var(--ap-width)*100cqi);")
-    codeLines.push("  font-weight:var(--ap-fw, 400);")
-    codeLines.push("  text-align:var(--ap-ta, center);")
-    codeLines.push("  color:var(--ap-clr, #000);")
-    codeLines.push("}")
-    codeLines.push(".ap-text__part {")
     codeLines.push(
-        "  font-size:clamp(0px,calc(var(--ap-part-fs)/var(--ap-width)*100cqi),calc(var(--ap-part-fs)*1px));"
+        ".ap-section{" +
+            "position:relative;" +
+            "overflow:hidden;" +
+            "background-color:var(--bgc,transparent);" +
+            "background-image:var(--bg-img,none);" +
+            "background-repeat:no-repeat;" +
+            "background-position:50% 0;" +
+            "background-size:cover;" +
+            "}"
     )
-    codeLines.push("  line-height:var(--ap-part-lh);")
-    codeLines.push("  letter-spacing:calc(var(--ap-part-ls)/var(--ap-width)*100cqi);")
-    codeLines.push("  font-weight:var(--ap-part-fw);")
-    codeLines.push("  color:var(--ap-part-clr);")
-    codeLines.push("}")
     codeLines.push("")
-    codeLines.push(".pc-only{ display:block; }")
-    codeLines.push(".mo-only{ display:none; }")
+    codeLines.push(
+        ".ap-abs{" +
+            "position:absolute;" +
+            "left:calc(var(--ap-left,0)/var(--ap-width)*100cqi);" +
+            "top:calc(var(--ap-top,0)/var(--ap-width)*100cqi);" +
+            "width:calc(var(--ap-w,0)/var(--ap-width)*100cqi);" +
+            "height:calc(var(--ap-h,0)/var(--ap-width)*100cqi);" +
+            "}"
+    )
     codeLines.push("")
 
-    // image: 인라인은 --ap-w로 크기, absolute는 wrapper 크기에 맞춤(중복 제거)
-    codeLines.push(".ap-image img {")
-    codeLines.push("  width:calc(var(--ap-w, 0) / var(--ap-width) * 100cqi);")
-    codeLines.push("  height:calc(var(--ap-h, 0) / var(--ap-width) * 100cqi);")
-    codeLines.push("  display:block;")
-    codeLines.push("}")
-    codeLines.push(".ap-image.ap-abs img { width:100%; height:100%; object-fit:cover; }")
+    // ----- 텍스트 -----
+    codeLines.push(
+        ".ap-text{" +
+            "margin:0;" +
+            "font-size:clamp(0px,calc(var(--ap-fs)/var(--ap-width)*100cqi),calc(var(--ap-fs)*1px));" +
+            "line-height:var(--ap-lh,1.2);" +
+            "letter-spacing:calc(var(--ap-ls,0)/var(--ap-width)*100cqi);" +
+            "font-weight:var(--ap-fw,400);" +
+            "text-align:var(--ap-ta,center);" +
+            "color:var(--ap-clr,#000);" +
+            "}"
+    )
+    codeLines.push(
+        ".ap-text__part{" +
+            "font-size:clamp(0px,calc(var(--ap-part-fs)/var(--ap-width)*100cqi),calc(var(--ap-part-fs)*1px));" +
+            "line-height:var(--ap-part-lh);" +
+            "letter-spacing:calc(var(--ap-part-ls)/var(--ap-width)*100cqi);" +
+            "font-weight:var(--ap-part-fw);" +
+            "color:var(--ap-part-clr);" +
+            "}"
+    )
     codeLines.push("")
-    codeLines.push(".ap-video {")
-    codeLines.push("  display:flex; align-items:center; justify-content:center;")
-    codeLines.push("  width:calc(var(--ap-w, 0) / var(--ap-width) * 100cqi);")
-    codeLines.push("  height:calc(var(--ap-h, 0) / var(--ap-width) * 100cqi);")
-    codeLines.push("  aspect-ratio: calc(var(--ap-w, 1) / var(--ap-h, 1));")
-    codeLines.push("}")
-    codeLines.push(".ap-video.ap-abs { width:100%; height:100%; min-height:0; aspect-ratio:auto; }")
-    codeLines.push(".ap-video video { width:100%; height:100%; object-fit:contain; display:block; }")
+    codeLines.push(".pc-only{display:block;}")
+    codeLines.push(".mo-only{display:none;}")
     codeLines.push("")
-    codeLines.push(".ap-line {")
-    codeLines.push("  display:block; flex-shrink:0; min-height:1px;")
-    codeLines.push("  width:calc(var(--ap-line-w, 100)/var(--ap-width)*100cqi);")
-    codeLines.push("  height:calc(var(--ap-line-h, 1)/var(--ap-width)*100cqi);")
-    codeLines.push("  background:var(--ap-line-color,#000);")
-    codeLines.push("  transform-origin:left center;")
-    codeLines.push("  transform:rotate(var(--ap-line-rot, 0)deg);")
-    codeLines.push("}")
-    codeLines.push(".ap-line.ap-abs { min-height:0; }")
+
+    // ----- 이미지(인라인 --ap-w / ap-abs 는 래퍼에 맞춤) -----
+    codeLines.push(
+        ".ap-image img{" +
+            "display:block;" +
+            "width:calc(var(--ap-w,0)/var(--ap-width)*100cqi);" +
+            "height:auto;" +
+            "}"
+    )
+    codeLines.push(".ap-image.ap-abs img{width:100%;height:100%;object-fit:cover;}")
     codeLines.push("")
-    codeLines.push(".ap-ellipse {")
-    codeLines.push("  display:block; flex-shrink:0;")
-    codeLines.push("  width:calc(var(--ap-ellipse-w, 100)/var(--ap-width)*100cqi);")
-    codeLines.push("  height:calc(var(--ap-ellipse-h, 100)/var(--ap-width)*100cqi);")
-    codeLines.push("  border-radius:50%;")
-    codeLines.push("  background:var(--ap-ellipse-bgc,transparent);")
-    codeLines.push("  border:calc(var(--ap-ellipse-bd, 0)/var(--ap-width)*100cqi) solid var(--ap-ellipse-bdc,transparent);")
-    codeLines.push("}")
-    codeLines.push(".ap-ellipse.ap-abs { width:100%; height:100%; box-sizing:border-box; }")
+
+    // ----- 비디오 -----
+    codeLines.push(
+        ".ap-video{" +
+            "display:flex;" +
+            "align-items:center;" +
+            "justify-content:center;" +
+            "width:calc(var(--ap-w,0)/var(--ap-width)*100cqi);" +
+            "height:calc(var(--ap-h,0)/var(--ap-width)*100cqi);" +
+            "aspect-ratio:calc(var(--ap-w,1)/var(--ap-h,1));" +
+            "}"
+    )
+    codeLines.push(".ap-video.ap-abs{width:100%;height:100%;min-height:0;aspect-ratio:auto;}")
+    codeLines.push(".ap-video video{width:100%;height:100%;object-fit:contain;display:block;}")
     codeLines.push("")
+
+    // ----- 라인·타원 -----
+    codeLines.push(
+        ".ap-line{" +
+            "display:block;" +
+            "flex-shrink:0;" +
+            "min-height:1px;" +
+            "width:calc(var(--ap-line-w,100)/var(--ap-width)*100cqi);" +
+            "height:calc(var(--ap-line-h,1)/var(--ap-width)*100cqi);" +
+            "background:var(--ap-line-color,#000);" +
+            "transform-origin:left center;" +
+            "transform:rotate(var(--ap-line-rot,0)deg);" +
+            "}"
+    )
+    codeLines.push(".ap-line.ap-abs{min-height:0;}")
+    codeLines.push("")
+    codeLines.push(
+        ".ap-ellipse{" +
+            "display:block;" +
+            "flex-shrink:0;" +
+            "width:calc(var(--ap-ellipse-w,100)/var(--ap-width)*100cqi);" +
+            "height:calc(var(--ap-ellipse-h,100)/var(--ap-width)*100cqi);" +
+            "border-radius:50%;" +
+            "background:var(--ap-ellipse-bgc,transparent);" +
+            "border:calc(var(--ap-ellipse-bd,0)/var(--ap-width)*100cqi) solid var(--ap-ellipse-bdc,transparent);" +
+            "}"
+    )
+    codeLines.push(".ap-ellipse.ap-abs{width:100%;height:100%;box-sizing:border-box;}")
+    codeLines.push("")
+
+    // ----- Swiper(셀 overflow·화살표 mask) -----
     codeLines.push("/* 슬라이드: 다음 장 피크·카드 폭이 슬라이드 셀보다 클 때 섹션/셀 overflow로 잘리지 않게 */")
     /** Swiper 기본 화살표 경로 · data URL은 수동 인코딩 대신 encodeURIComponent로만 생성(파서 호환) */
     var apSwiperNavArrowDataUrl =
@@ -7186,26 +7179,27 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         encodeURIComponent(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 27 44"><path d="M27,22L27,22L5,44l-2.1-2.1L22.8,22L2.9,2.1L5,0L27,22L27,22z" fill="#000"/></svg>'
         )
-    codeLines.push(".ap-section--swiper { overflow: visible; height: auto; min-height: auto; }")
-    codeLines.push(".ap-post .swiper {")
-    codeLines.push("  overflow: hidden; width:100%; ")
-    codeLines.push("  --swiper-navigation-color:#000;")
-    codeLines.push("  --swiper-pagination-bullet-size:10px;")
-    codeLines.push("}")
-    codeLines.push(".ap-post .swiper-pagination {position: relative;width:100%;margin-top: calc(80 / var(--ap-width) * 100cqi); }")
-    codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after { content:none; }")
-    codeLines.push(".ap-post .swiper-button-prev,")
-    codeLines.push(".ap-post .swiper-button-next {")
-    codeLines.push("  width: clamp(0px, calc(40 / var(--ap-width) * 100cqi), 40px);")
-    codeLines.push("  height: clamp(0px, calc(80 / var(--ap-width) * 100cqi), 80px);")
-    codeLines.push("  background-color: var(--swiper-navigation-color);")
-    codeLines.push('  -webkit-mask: url("' + apSwiperNavArrowDataUrl + '") no-repeat center / contain;')
-    codeLines.push('  mask: url("' + apSwiperNavArrowDataUrl + '") no-repeat center / contain;')
-    codeLines.push("  background-repeat: no-repeat;")
-    codeLines.push("  background-size: contain;")
-    codeLines.push("}")
-    codeLines.push(".ap-post .swiper-button-prev { transform: rotate(180deg); }")
-    codeLines.push(".ap-post .swiper-pagination-bullet{background-color: var(--swiper-navigation-color);}")
+    codeLines.push(".ap-section--swiper{overflow:visible;height:auto;min-height:auto;}")
+    codeLines.push(".ap-post .swiper{overflow:hidden;width:100%;--swiper-navigation-color:#000;--swiper-pagination-bullet-size:10px;}")
+    codeLines.push(".ap-post .swiper-pagination{position:relative;width:100%;margin-top:calc(80/var(--ap-width)*100cqi);}")
+    codeLines.push(".ap-post .swiper-button-prev:after,.ap-post .swiper-button-next:after{content:none;}")
+    codeLines.push(
+        ".ap-post .swiper-button-prev,.ap-post .swiper-button-next{" +
+            "width:clamp(0px,calc(40/var(--ap-width)*100cqi),40px);" +
+            "height:clamp(0px,calc(80/var(--ap-width)*100cqi),80px);" +
+            "background-color:var(--swiper-navigation-color);" +
+            "-webkit-mask:url(\"" +
+            apSwiperNavArrowDataUrl +
+            '\") no-repeat center/contain;' +
+            'mask:url("' +
+            apSwiperNavArrowDataUrl +
+            '") no-repeat center/contain;' +
+            "background-repeat:no-repeat;" +
+            "background-size:contain;" +
+            "}"
+    )
+    codeLines.push(".ap-post .swiper-button-prev{transform:rotate(180deg);}")
+    codeLines.push(".ap-post .swiper-pagination-bullet{background-color:var(--swiper-navigation-color);}")
     codeLines.push("")
     // </style>는 deferred 스타일 합친 뒤에 한 번만 닫음
 

@@ -740,12 +740,6 @@ function pipelineEnsureImageAsync(node, ctx) {
     })
 }
 
-function resolvePipelineImageAsync(node, ctx) {
-    return pipelineEnsureImageAsync(node, ctx).then(function (r) {
-        return r && r.dataUrl ? r.dataUrl : null
-    })
-}
-
 function sendImagesToUI(images, ingestId) {
     if (!images || !images.length) return
     for (var i = 0; i < images.length; i++) {

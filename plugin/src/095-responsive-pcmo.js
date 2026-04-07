@@ -10,7 +10,6 @@
  * mergeImagesWithMoBackgroundFallback — ZIP/미리보기 imageList에 누락된 _mo 배경 보강
  * apSlidePcImgAttr — 슬라이드 안 이미지는 picture 변환 생략 표시
  * combinePcMoAsBreakpoint — 위 요소 합쳐 최종 HTML 문자열
- * pushMoFlexChildOrderOverridesIfNeeded — 짝 맞은 flex 플로우 자식의 PC·MO 레이어 인덱스가 하나라도 다를 때만 order(MO 인덱스) 출력
  */
 // ----- 6. Section Utils (배경은 buildSectionBackgroundAsync) -----
 /**
@@ -111,55 +110,6 @@ function pcMoChildPairsOrIndex(dKids, mKids) {
     var out = []
     for (var i = 0; i < dKids.length && i < mKids.length; i++) out.push([dKids[i], mKids[i]])
     return out
-}
-
-/**
- * PC·MO flex 플로우 자식(absolute 제외) 짝이 pcMoChildPairsOrIndex로 1:1 맞고,
- * 각 짝에 대해 「PC 레이어 목록에서의 인덱스」와 「MO 레이어 목록에서의 인덱스」가
- * 전부 같으면 아무 것도 안 함(순서 동일).
- * 하나라도 다르면 “노드 구성은 같은데 순서만 다름”으로 보고, HTML(PC DOM) 순서는 유지한 채
- * @media에서 각 PC 자식에 order:<MO에서의 인덱스> 를 줘서 시각 순서만 MO와 같게 함.
- * (짝 자체는 pairVisibleSiblingsFlexible 규칙을 따름; 순서 비교는 dFlow/mFlow 내 인덱스.)
- */
-function flowChildIndex(flowArr, node) {
-    for (var fi = 0; fi < flowArr.length; fi++) {
-        if (flowArr[fi] === node) return fi
-    }
-    return -1
-}
-
-function pushMoFlexChildOrderOverridesIfNeeded(dNode, mNode, secClass, moOpts, pushMoMoRule, isExported) {
-    if (!dNode || !mNode || !isFlex(dNode) || !isFlex(mNode)) return
-    var dFlow = (dNode.children || []).filter(function (c) {
-        return c && isVisible(c) && !isAbsoluteLike(c, dNode)
-    })
-    var mFlow = (mNode.children || []).filter(function (c) {
-        return c && isVisible(c) && !isAbsoluteLike(c, mNode)
-    })
-    if (dFlow.length !== mFlow.length || dFlow.length < 2) return
-    var pairs = pcMoChildPairsOrIndex(dFlow, mFlow)
-    if (!pairs || pairs.length !== dFlow.length) return
-    var need = false
-    for (var pi = 0; pi < pairs.length; pi++) {
-        var dChk = pairs[pi][0]
-        var mChk = pairs[pi][1]
-        var pcIdx = flowChildIndex(dFlow, dChk)
-        var moIdx = flowChildIndex(mFlow, mChk)
-        if (pcIdx < 0 || moIdx < 0) return
-        if (pcIdx !== moIdx) need = true
-    }
-    if (!need) return
-    for (var j = 0; j < pairs.length; j++) {
-        var dCh = pairs[j][0]
-        if (dCh.id == null || !isExported(dCh.id)) continue
-        var mCh2 = pairs[j][1]
-        var moI = flowChildIndex(mFlow, mCh2)
-        if (moI < 0) continue
-        var leafSel = cssInnerSelForNode(String(dCh.id), moOpts, false)
-        if (!leafSel) continue
-        var fullSel = ".ap-section--" + secClass + " " + leafSel
-        pushMoMoRule(fullSel, "order:" + moI)
-    }
 }
 
 /** 구조 일치 섹션만: PC가 code-video인 슬롯의 MO 노드 id → true (MO 레이어명 불일치 허용) */
@@ -386,7 +336,6 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
 
     function walkPair(dNode, mNode, mParent, secClass, imageByName, textByName, textOverrideDone, semMap, videoByName, videoOverrideDone) {
         var moOpts = { sectionSemantics: semMap || {} }
-        pushMoFlexChildOrderOverridesIfNeeded(dNode, mNode, secClass, moOpts, pushMoMoRule, isExported)
         var dKids = (dNode.children || []).filter(function (c) {
             return c && isVisible(c)
         })
@@ -456,7 +405,9 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 }
                 var strokeDiff = buildStrokeDeclDiff(d, m)
                 if (strokeDiff) declParts.push(strokeDiff)
-                // PC 프레임과 동일 조건(bg|stroke|radius) + 높이가 다를 때만 MO min-height (Auto Layout+HUG 세로 제외)
+                // MO min-height: PC가 쓰는 경우(dWantsMin)만 높이 불일치·PC 박스 없음으로 보정.
+                // PC가 안 쓰는 경우(HUG 등)에는 PC/MO 바운딩 높이 차이만으로는 넣지 않음(1열·3열 전환 시 dh≠mh가 항상이라 빈 영역 발생).
+                // 그때는 MO만 flexColumnSpaceBetweenNeedsMinHeight 일 때만.
                 var mBoxH = getAbs(m)
                 var dBoxH = getAbs(d)
                 var mMinReason = frameHasMinHeightVisualReason(m)
@@ -468,7 +419,13 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                         var mh = layoutPxNum(mBoxH.h)
                         var dh = dBoxH && dBoxH.h != null ? layoutPxNum(dBoxH.h) : null
                         var dWantsMin = dMinReason || sbMinD
-                        if (!dWantsMin || dh === null || mh !== dh)
+                        var needMoMinH = false
+                        if (dWantsMin) {
+                            needMoMinH = dh === null || mh !== dh
+                        } else {
+                            needMoMinH = sbMinM && !sbMinD
+                        }
+                        if (needMoMinH)
                             declParts.push("min-height:calc(" + cssOutLayoutPx(mBoxH.h) + "/var(--ap-width)*100cqi)")
                     }
                 }
