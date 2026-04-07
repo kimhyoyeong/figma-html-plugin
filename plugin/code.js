@@ -7331,6 +7331,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
     /**
      * 동일 역할 클래스·단일 스타일 TEXT 중 --ap-lh/--ap-ls 만 다름 → 교집합 지연 CSS·클래스 통일, lh/ls 차이만 인라인.
+     * 절대 배치 TEXT 는 제외: 타이포만 같아도 --ap-left/--ap-top 이 한 셀렉터에 합쳐져 마지막 값만 남는다.
      */
     function collapseSectionTextSemanticsForPcInline(sectionNode, sectionSemantics, secClassStr) {
         if (!inlinePcTextTypography || !sectionNode || !sectionSemantics) return
@@ -7349,10 +7350,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     var ts0 = getTextSummarySync(n)
                     if (ts0 && (!ts0.parts || !ts0.parts.length)) {
                         var ta0 = isAbsoluteLike(n, par)
-                        var mp = parseDeclStringToMap(buildTextVarsDecl(ts0))
-                        var wf = getTextFullWidthDecl(n, ta0, par)
-                        if (wf) mp.width = "100%"
-                        items.push({ id: sid, cls: cls, map: mp })
+                        if (!ta0) {
+                            var mp = parseDeclStringToMap(buildTextVarsDecl(ts0))
+                            var wf = getTextFullWidthDecl(n, ta0, par)
+                            if (wf) mp.width = "100%"
+                            items.push({ id: sid, cls: cls, map: mp })
+                        }
                     }
                 }
             }
