@@ -12,6 +12,9 @@ function isVectorType(t) {
 function hasImageFillInSubtree(node) {
     if (!node) return false
     if (hasImageFill(node)) return true
+    try {
+        if (typeof hasVideoFill === "function" && hasVideoFill(node)) return true
+    } catch (e) {}
     if (!isContainer(node)) return false
     for (var i = 0; i < node.children.length; i++) {
         if (hasImageFillInSubtree(node.children[i])) return true

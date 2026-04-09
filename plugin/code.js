@@ -36,7 +36,7 @@ setTimeout(function () {
  * pad2, sectionClassPrefix — 섹션 번호 → "01" 형태 클래스 접두
  * stripApAiAuditBlock — AI 검수 HTML 주석 제거(ZIP용)
  * makeClassName, nodeUniqueClass, apSectionBem — 클래스 문자열 생성
- * isNodeName, isBtnNode, isVideoNode, isVideoNodeEffective, isSlideNode, isCodeRasterNode, isCodeRasterNodeEffective — 레이어명 기반 특수 처리 판별
+ * isNodeName, isBtnNode, isVideoNode, isVideoSlotByNameOrFill, isVideoNodeEffective, isSlideNode, isCodeRasterNode, isCodeRasterNodeEffective — 레이어명·Video fill 기반 특수 처리 판별
  */
 // ----- 공통·포맷 (r2, 클래스, BEM) + Core 일부(레이어명 판별은 아래 isNodeName~) -----
 /** 숫자를 소수 둘째 자리까지 반올림 */
@@ -147,11 +147,22 @@ function isVideoNode(node) {
     return isNodeName(node, "code-video")
 }
 /**
- * PC/MO 짝 매칭 시 PC가 code-video이면 MO는 레이어명과 관계없이 비디오로 본다.
+ * 레이어명 code-video 또는 Figma Video 채우기(VideoPaint) — 둘 다 비디오 슬롯으로 동일 처리.
+ * hasVideoFill은 060-layout에서 정의(번들에서 런타임에 존재).
+ */
+function isVideoSlotByNameOrFill(node) {
+    if (isVideoNode(node)) return true
+    try {
+        if (typeof hasVideoFill === "function" && hasVideoFill(node)) return true
+    } catch (e) {}
+    return false
+}
+/**
+ * PC/MO 짝 매칭 시 PC가 code-video(또는 PC에 Video fill)이면 MO는 레이어명과 관계없이 비디오로 본다.
  * cache.moVideoInheritIds: { [moNodeId]: true }
  */
 function isVideoNodeEffective(node, cache) {
-    if (isVideoNode(node)) return true
+    if (isVideoSlotByNameOrFill(node)) return true
     if (!node || node.id == null || !cache || !cache.moVideoInheritIds) return false
     return cache.moVideoInheritIds[String(node.id)] === true
 }
@@ -1029,7 +1040,7 @@ function containerAllVisibleChildrenAreAbsolute(node) {
  * buildAbsDecl, buildAbsDeclTextRaster, *Diff — 절대 위치·TEXT 래스터·PC/MO 차이
  * getImageSizeDeclDiff, getVideoSizeDeclDiff — figure/비디오 크기 MO 오버라이드
  * toHex2, rgbToHex, hexToRgba, getFirstSolidColorFromPaints — 색 문자열
- * getFirstSolidFill, hasImageFill — fill 조회
+ * getFirstSolidFill, hasImageFill, hasVideoFill — fill 조회
  * needsMinHeight, getPcSectionCanvasHeightDecls, getMediaSectionCanvasHeightDecl — 캔버스형 섹션 min-height
  * frameHasMinHeightVisualReason — 프레임에 시각적 이유로 min-height 줄지
  * getFirstSolidStroke, buildCornerRadiusDecl, buildStrokeDecl, buildStrokeDeclDiff — 테두리·모서리
@@ -1507,6 +1518,18 @@ function hasImageFill(node) {
     } catch (e) {}
     return false
 }
+/** 노드에 VIDEO 타입 fill(VideoPaint)이 있는지 — Figma는 비디오를 별도 노드가 아니라 채우기로 둠 */
+function hasVideoFill(node) {
+    try {
+        var fillsV = node.fills
+        if (!fillsV || fillsV === figma.mixed) return false
+        for (var iv = 0; iv < fillsV.length; iv++) {
+            var fv = fillsV[iv]
+            if (fv && fv.visible !== false && fv.type === "VIDEO") return true
+        }
+    } catch (e) {}
+    return false
+}
 
 /** 최상단(스택 맨 위) 보이는 IMAGE fill의 imageHash — UI·getTopmostVisibleFill과 동일 순서 (fills[0]=아래, 끝=위) */
 function getPrimaryImageFillHash(node) {
@@ -1679,6 +1702,9 @@ function isVectorType(t) {
 function hasImageFillInSubtree(node) {
     if (!node) return false
     if (hasImageFill(node)) return true
+    try {
+        if (typeof hasVideoFill === "function" && hasVideoFill(node)) return true
+    } catch (e) {}
     if (!isContainer(node)) return false
     for (var i = 0; i < node.children.length; i++) {
         if (hasImageFillInSubtree(node.children[i])) return true
@@ -2770,13 +2796,13 @@ function collectImageNodesByName(root) {
     return map
 }
 
-/** 섹션 서브트리에서 code-video 레이어를 name 기준으로 수집 (MO 비디오 이름 매칭용) */
+/** 섹션 서브트리에서 code-video·Video fill 레이어를 name 기준으로 수집 (MO 비디오 이름 매칭용) */
 function collectVideoNodesByName(root) {
     var map = {}
     if (!root) return map
     function walk(n) {
         if (!n || !isVisible(n)) return
-        if (n.id && isVideoNode(n)) {
+        if (n.id && isVideoSlotByNameOrFill(n)) {
             var key = String(n.name || "").trim()
             if (key !== "" && !map[key]) map[key] = n
         }
@@ -6148,7 +6174,7 @@ function buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
                 if (d.type === "FRAME" && isContainer(d)) walkInherit(d, m)
                 continue
             }
-            if (isVideoNode(d) && m.id) out[String(m.id)] = true
+            if (isVideoSlotByNameOrFill(d) && m.id) out[String(m.id)] = true
             if (d.type === "FRAME" && isContainer(d)) walkInherit(d, m)
         }
     }
@@ -6221,7 +6247,7 @@ function collectMoVideoNodesByPcLayerName(dSec, mSec) {
                 if (d.type === "FRAME" && isContainer(d)) walk(d, m)
                 continue
             }
-            if (isVideoNode(d) && m.id) {
+            if (isVideoSlotByNameOrFill(d) && m.id) {
                 var key = String(d.name || "").trim()
                 if (key) map[key] = m
             }
@@ -6503,7 +6529,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 if (strokeDiff2) declParts.push(strokeDiff2)
             }
             /** 래스터 이미지 --ap-w/h 는 렌더 순서·슬롯 매칭(pass pushImageMoSizeOverridesForSection). 비디오·라인·타원만 인덱스 m */
-            var sizePairVideo = isVideoNode(d) || isVideoNode(m)
+            var sizePairVideo = isVideoSlotByNameOrFill(d) || isVideoSlotByNameOrFill(m)
             if (d.id && isExported(d.id) && (sizePairVideo || isLineLikeNode(d) || d.type === "ELLIPSE")) {
                 var sizeDeclM = ""
                 if (isLineLikeNode(d)) sizeDeclM = buildLineVarsDeclDiff(d, m)
@@ -6582,7 +6608,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             if (
                 dNode.id &&
                 isExported(dNode.id) &&
-                isVideoNode(dNode) &&
+                isVideoSlotByNameOrFill(dNode) &&
                 !overrideDone[String(dNode.id)]
             ) {
                 var key = String(dNode.name || "").trim()
@@ -6667,13 +6693,13 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
 
     /**
      * PC·MO 트리를 각각 해시(nodeSig)하면 MO에 code-video/code-raster 명이 없을 때만 하위 구조가 전부 시그니처에 남아 불일치가 난다.
-     * 형제는 pcMoChildPairsOrIndex(img·txt 이름·나머지 정렬). 한쪽이라도 code-video·code-raster면 그 서브트리는 일치로 본다.
+     * 형제는 pcMoChildPairsOrIndex(img·txt 이름·나머지 정렬). 한쪽이라도 code-video·Video fill·code-raster면 그 서브트리는 일치로 본다.
      */
     function pairedStructureMatch(dNode, mNode, depth) {
         depth = depth || 0
         if (!dNode || !mNode) return !dNode && !mNode
         if (!isVisible(dNode) || !isVisible(mNode)) return false
-        if (isVideoNode(dNode) || isVideoNode(mNode)) return true
+        if (isVideoSlotByNameOrFill(dNode) || isVideoSlotByNameOrFill(mNode)) return true
         if (isCodeRasterNode(dNode) || isCodeRasterNode(mNode)) return true
         var dt = dNode.type || "UNKNOWN"
         var mt = mNode.type || "UNKNOWN"

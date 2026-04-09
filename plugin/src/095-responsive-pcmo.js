@@ -138,7 +138,7 @@ function buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
                 if (d.type === "FRAME" && isContainer(d)) walkInherit(d, m)
                 continue
             }
-            if (isVideoNode(d) && m.id) out[String(m.id)] = true
+            if (isVideoSlotByNameOrFill(d) && m.id) out[String(m.id)] = true
             if (d.type === "FRAME" && isContainer(d)) walkInherit(d, m)
         }
     }
@@ -211,7 +211,7 @@ function collectMoVideoNodesByPcLayerName(dSec, mSec) {
                 if (d.type === "FRAME" && isContainer(d)) walk(d, m)
                 continue
             }
-            if (isVideoNode(d) && m.id) {
+            if (isVideoSlotByNameOrFill(d) && m.id) {
                 var key = String(d.name || "").trim()
                 if (key) map[key] = m
             }
@@ -493,7 +493,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
                 if (strokeDiff2) declParts.push(strokeDiff2)
             }
             /** 래스터 이미지 --ap-w/h 는 렌더 순서·슬롯 매칭(pass pushImageMoSizeOverridesForSection). 비디오·라인·타원만 인덱스 m */
-            var sizePairVideo = isVideoNode(d) || isVideoNode(m)
+            var sizePairVideo = isVideoSlotByNameOrFill(d) || isVideoSlotByNameOrFill(m)
             if (d.id && isExported(d.id) && (sizePairVideo || isLineLikeNode(d) || d.type === "ELLIPSE")) {
                 var sizeDeclM = ""
                 if (isLineLikeNode(d)) sizeDeclM = buildLineVarsDeclDiff(d, m)
@@ -572,7 +572,7 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
             if (
                 dNode.id &&
                 isExported(dNode.id) &&
-                isVideoNode(dNode) &&
+                isVideoSlotByNameOrFill(dNode) &&
                 !overrideDone[String(dNode.id)]
             ) {
                 var key = String(dNode.name || "").trim()
@@ -657,13 +657,13 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
 
     /**
      * PC·MO 트리를 각각 해시(nodeSig)하면 MO에 code-video/code-raster 명이 없을 때만 하위 구조가 전부 시그니처에 남아 불일치가 난다.
-     * 형제는 pcMoChildPairsOrIndex(img·txt 이름·나머지 정렬). 한쪽이라도 code-video·code-raster면 그 서브트리는 일치로 본다.
+     * 형제는 pcMoChildPairsOrIndex(img·txt 이름·나머지 정렬). 한쪽이라도 code-video·Video fill·code-raster면 그 서브트리는 일치로 본다.
      */
     function pairedStructureMatch(dNode, mNode, depth) {
         depth = depth || 0
         if (!dNode || !mNode) return !dNode && !mNode
         if (!isVisible(dNode) || !isVisible(mNode)) return false
-        if (isVideoNode(dNode) || isVideoNode(mNode)) return true
+        if (isVideoSlotByNameOrFill(dNode) || isVideoSlotByNameOrFill(mNode)) return true
         if (isCodeRasterNode(dNode) || isCodeRasterNode(mNode)) return true
         var dt = dNode.type || "UNKNOWN"
         var mt = mNode.type || "UNKNOWN"

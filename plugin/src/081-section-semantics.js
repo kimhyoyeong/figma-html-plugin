@@ -75,13 +75,13 @@ function collectImageNodesByName(root) {
     return map
 }
 
-/** 섹션 서브트리에서 code-video 레이어를 name 기준으로 수집 (MO 비디오 이름 매칭용) */
+/** 섹션 서브트리에서 code-video·Video fill 레이어를 name 기준으로 수집 (MO 비디오 이름 매칭용) */
 function collectVideoNodesByName(root) {
     var map = {}
     if (!root) return map
     function walk(n) {
         if (!n || !isVisible(n)) return
-        if (n.id && isVideoNode(n)) {
+        if (n.id && isVideoSlotByNameOrFill(n)) {
             var key = String(n.name || "").trim()
             if (key !== "" && !map[key]) map[key] = n
         }

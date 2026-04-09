@@ -7,7 +7,7 @@
  * buildAbsDecl, buildAbsDeclTextRaster, *Diff — 절대 위치·TEXT 래스터·PC/MO 차이
  * getImageSizeDeclDiff, getVideoSizeDeclDiff — figure/비디오 크기 MO 오버라이드
  * toHex2, rgbToHex, hexToRgba, getFirstSolidColorFromPaints — 색 문자열
- * getFirstSolidFill, hasImageFill — fill 조회
+ * getFirstSolidFill, hasImageFill, hasVideoFill — fill 조회
  * needsMinHeight, getPcSectionCanvasHeightDecls, getMediaSectionCanvasHeightDecl — 캔버스형 섹션 min-height
  * frameHasMinHeightVisualReason — 프레임에 시각적 이유로 min-height 줄지
  * getFirstSolidStroke, buildCornerRadiusDecl, buildStrokeDecl, buildStrokeDeclDiff — 테두리·모서리
@@ -481,6 +481,18 @@ function hasImageFill(node) {
         for (var i = 0; i < fills.length; i++) {
             var f = fills[i]
             if (f && f.visible !== false && f.type === "IMAGE") return true
+        }
+    } catch (e) {}
+    return false
+}
+/** 노드에 VIDEO 타입 fill(VideoPaint)이 있는지 — Figma는 비디오를 별도 노드가 아니라 채우기로 둠 */
+function hasVideoFill(node) {
+    try {
+        var fillsV = node.fills
+        if (!fillsV || fillsV === figma.mixed) return false
+        for (var iv = 0; iv < fillsV.length; iv++) {
+            var fv = fillsV[iv]
+            if (fv && fv.visible !== false && fv.type === "VIDEO") return true
         }
     } catch (e) {}
     return false

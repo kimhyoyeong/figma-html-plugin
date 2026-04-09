@@ -6,7 +6,7 @@
  * pad2, sectionClassPrefix — 섹션 번호 → "01" 형태 클래스 접두
  * stripApAiAuditBlock — AI 검수 HTML 주석 제거(ZIP용)
  * makeClassName, nodeUniqueClass, apSectionBem — 클래스 문자열 생성
- * isNodeName, isBtnNode, isVideoNode, isVideoNodeEffective, isSlideNode, isCodeRasterNode, isCodeRasterNodeEffective — 레이어명 기반 특수 처리 판별
+ * isNodeName, isBtnNode, isVideoNode, isVideoSlotByNameOrFill, isVideoNodeEffective, isSlideNode, isCodeRasterNode, isCodeRasterNodeEffective — 레이어명·Video fill 기반 특수 처리 판별
  */
 // ----- 공통·포맷 (r2, 클래스, BEM) + Core 일부(레이어명 판별은 아래 isNodeName~) -----
 /** 숫자를 소수 둘째 자리까지 반올림 */
@@ -117,11 +117,22 @@ function isVideoNode(node) {
     return isNodeName(node, "code-video")
 }
 /**
- * PC/MO 짝 매칭 시 PC가 code-video이면 MO는 레이어명과 관계없이 비디오로 본다.
+ * 레이어명 code-video 또는 Figma Video 채우기(VideoPaint) — 둘 다 비디오 슬롯으로 동일 처리.
+ * hasVideoFill은 060-layout에서 정의(번들에서 런타임에 존재).
+ */
+function isVideoSlotByNameOrFill(node) {
+    if (isVideoNode(node)) return true
+    try {
+        if (typeof hasVideoFill === "function" && hasVideoFill(node)) return true
+    } catch (e) {}
+    return false
+}
+/**
+ * PC/MO 짝 매칭 시 PC가 code-video(또는 PC에 Video fill)이면 MO는 레이어명과 관계없이 비디오로 본다.
  * cache.moVideoInheritIds: { [moNodeId]: true }
  */
 function isVideoNodeEffective(node, cache) {
-    if (isVideoNode(node)) return true
+    if (isVideoSlotByNameOrFill(node)) return true
     if (!node || node.id == null || !cache || !cache.moVideoInheritIds) return false
     return cache.moVideoInheritIds[String(node.id)] === true
 }
