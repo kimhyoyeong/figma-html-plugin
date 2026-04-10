@@ -78,14 +78,44 @@ function setCachedAsset(cache, assetKey, data) {
 
 function structuralSourceHash(node) {
     if (!node) return "nil"
+
     var box = getAbs(node)
     var w = box && box.w != null ? Math.round(box.w * 100) : 0
     var h = box && box.h != null ? Math.round(box.h * 100) : 0
+
     var cc = 0
     try {
-        cc = node.clipsContent ? 1 : 0
+        cc = node.children && node.children.length ? node.children.length : 0
     } catch (e) {}
-    return "st:" + (node.type || "?") + ":" + w + "x" + h + ":" + cc
+
+    var clip = 0
+    try {
+        clip = node.clipsContent ? 1 : 0
+    } catch (e) {}
+
+    var fillSig = "nofill"
+    try {
+        var fill = getFirstSolidFill(node)
+        if (fill && fill.color) fillSig = String(fill.color)
+    } catch (e) {}
+
+    var strokeSig = "nostroke"
+    try {
+        var stroke = getFirstSolidStroke(node)
+        if (stroke && stroke.color) {
+            strokeSig = String(stroke.color) + ":" + String(Math.round(Number(stroke.weight) || 0))
+        }
+    } catch (e) {}
+
+    return [
+        "st",
+        node.type || "?",
+        w + "x" + h,
+        "c" + cc,
+        "clip" + clip,
+        "f" + fillSig,
+        "s" + strokeSig
+    ].join(":")
 }
 
 function sourceHashForAssetKey(node, kind, ctx) {
@@ -101,8 +131,12 @@ function sourceHashForAssetKey(node, kind, ctx) {
             ? ":pclip:" + String(exportSrc.id).replace(/[^a-zA-Z0-9_-]/g, "_")
             : ""
     var ih = getPrimaryImageFillHash(keyNode)
+
     if (ih) return "ih:" + ih + ":n:" + nid + pclip
-    if (kind === "svg") return "svg:" + structuralSourceHash(keyNode) + ":n:" + nid
+
+    // SVG는 node id를 키에 섞지 않음
+    if (kind === "svg") return "svg:" + structuralSourceHash(keyNode)
+
     return structuralSourceHash(structBase) + ":n:" + nid + pclip
 }
 
@@ -111,9 +145,16 @@ function makeAssetKey(node, kind, format, ctx) {
     var mode = ctx.cache.imagePipeline.mode
     var variant = ctx.cache.imagePipeline.variant
     if (ctx.cache.imageSuffix === "_mo") variant = "mo"
+
     var fmt = format === "PNG" ? "png" : format === "JPG" ? "jpg" : "-"
     var sh = sourceHashForAssetKey(node, kind, ctx)
-    // 같은 Figma 이미지 해시(ih)라도 섹션마다 별도 파일·export 캐시(083 imageName[key]가 섹션 간 공유되지 않게)
+
+    // SVG는 같은 구조면 섹션이 달라도 같은 asset 사용
+    if (kind === "svg") {
+        return mode + ":" + variant + ":" + kind + ":" + fmt + ":" + sh
+    }
+
+    // 같은 Figma 이미지 해시(ih)라도 섹션마다 별도 파일·export 캐시 유지
     var secN = ctx && ctx.secNo != null && ctx.secNo !== "" ? Number(ctx.secNo) || 1 : 1
     return mode + ":" + variant + ":" + kind + ":" + fmt + ":s" + secN + ":" + sh
 }
