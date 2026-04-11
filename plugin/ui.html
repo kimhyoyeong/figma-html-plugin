@@ -1482,6 +1482,7 @@
       "- alts",
       "- headingAudit",
       "- altProposals",
+      "- linkBtnAudit",
       "",
       "summary 형식:",
       "{ overall: 'pass'|'warn'|'fail', score: number, oneLine: string }",
@@ -1506,6 +1507,14 @@
       "headingAudit 형식:",
       "{ outline: [{ level: string, text: string }], issues: Issue[], candidates: [{ text: string, decision: 'title'|'subtitle'|'not-heading'|'ambiguous', recommendedLevel: 'h1'|'h2'|'h3'|'', reason: string, selectorHint: string }] }",
       "  * candidates.decision 의미: title = 대표 제목, subtitle = 짧은 부제, not-heading = 버튼·캡션·긴 설명·본문 등. recommendedLevel은 h1|h2|h3|''만 허용한다.",
+      "",
+      "linkBtnAudit 형식:",
+      "{ candidates: [{ text: string, wrapperTag: string, decision: 'btn'|'not-btn', reason: string }] }",
+      "  * text: CTA 텍스트 내용 (버튼 프레임 안에 보이는 텍스트)",
+      "  * wrapperTag: CTA 텍스트를 포함하면서 시각적 버튼 배경/영역을 이루는 가장 바깥 래퍼 <div>의 여는 태그 전체 (class·style 포함, HTML에서 유일하게 1회만 매칭되어야 함)",
+      "  * 가장 가까운 부모만 선택하지 말고, 배경/패딩/정렬/고정 크기로 버튼 박스를 형성하는 상위 래퍼까지 확인한다.",
+      "  * decision: btn이면 <a> 변환 대상, not-btn이면 건너뜀",
+      "  * CTA 키워드가 본문에 1개 이상 존재하면 candidates에 최소 1개 이상 항목이 있어야 한다.",
       "",
       "altProposals 형식:",
       "- string[] 정확히 {{N_IMG}}개 (img 순서 기준)",
@@ -1574,6 +1583,57 @@
       "  * ambiguous는 핵심 대상을 식별할 수 없을 때만 사용한다.",
       "  * currentAlt를 keep 하려면 핵심 시각 정보를 충분히 설명해야 한다.",
       "",
+      "[중요: CTA 버튼 탐지 우선 규칙]",
+      "이 작업에서 CTA 버튼 탐지는 핵심 과업이다. 다른 항목보다 우선적으로 판단한다.",
+      "",
+      "[CTA 후보 기본 원칙]",
+      "- 버튼 여부는 텍스트 노드 자체가 아니라, 실제 클릭 영역처럼 보이는 시각적 버튼 프레임 기준으로 판단한다.",
+      "- 짧은 CTA 문구가 있으면, 그 문구를 감싸는 가장 가까운 부모만 보지 말고,",
+      "  배경색, 테두리, 패딩, 고정 너비/높이, 정렬 속성으로 버튼 박스를 이루는 가장 바깥 래퍼 div를 우선 후보로 잡는다.",
+      "- 즉, 텍스트를 감싼 내부 div/p/span이 아니라, 시각적으로 배경/버튼 역할을 하는 바깥 프레임이 실제 버튼 대상이다.",
+      "",
+      "[CTA 텍스트 조건]",
+      "- 다음 키워드 중 하나라도 포함하면 CTA 후보 텍스트로 본다:",
+      "  한글: 자세히보기, 자세히 보기, 구매하기, 구매하러가기, 바로가기, 더보기, 알아보기, 신청하기, 보러가기, 예약하기, 확인하기, 장바구니",
+      "  영문: Shop Now, Buy Now, Learn More, View More, See More, Apply, Subscribe, Order Now, Get Started, Sign Up",
+      "- 텍스트 길이: 1~2줄 이내 (짧은 문구).",
+      "",
+      "[버튼 프레임 판정 규칙]",
+      "- CTA 텍스트를 포함한 노드에서 바깥쪽 부모로 올라가며 검사한다.",
+      "- 다음 중 2개 이상에 해당하면 버튼 프레임 후보로 본다:",
+      "  1) background / background-color 존재",
+      "  2) border 또는 border-radius 존재",
+      "  3) padding 존재",
+      "  4) width/height가 지정되어 있음",
+      "  5) display:flex 또는 inline-flex 또는 block",
+      "  6) justify-content / align-items 로 내부 정렬",
+      "  7) 텍스트 외에 아이콘/화살표를 함께 감쌈",
+      "- 여러 후보가 있으면, '텍스트만 감싸는 가장 안쪽 요소'가 아니라 '시각적 버튼 박스를 완성하는 가장 바깥 div'를 선택한다.",
+      "",
+      "[예시]",
+      "입력 구조:",
+      "  <div class=\"ap-section__group\" style=\"background:#000;padding:12px 24px;display:flex;align-items:center\">",
+      "    <div class=\"ap-flex\" style=\"--ap-w:120\">",
+      "      <p class=\"ap-text\">자세히보기</p>",
+      "    </div>",
+      "  </div>",
+      "올바른 wrapperTag: <div class=\"ap-section__group\" style=\"background:#000;padding:12px 24px;display:flex;align-items:center\"> (배경+패딩+정렬 = 버튼 프레임)",
+      "잘못된 선택: 안쪽 <div class=\"ap-flex\"> (스타일 없는 내부 래퍼) 또는 <p class=\"ap-text\"> (텍스트 노드)",
+      "",
+      "[제외 규칙]",
+      "- 이미 <a> 태그이면 제외.",
+      "- class에 ap-btn이 있으면 제외.",
+      "- 긴 설명 문단(2문장 이상), 가격, 제목, 단순 라벨은 제외.",
+      "- CTA 텍스트가 있어도 배경 박스 없이 일반 본문 흐름이면 not-btn 가능.",
+      "",
+      "[출력 규칙]",
+      "- CTA처럼 보이는 요소는 반드시 linkBtnAudit.candidates에 포함한다.",
+      "- 애매하더라도 candidates에서 누락하지 말고 decision:'not-btn'으로 넣는다.",
+      "- CTA 키워드가 본문에 1개 이상 존재하면, linkBtnAudit.candidates에는 최소 1개 이상 항목이 있어야 한다.",
+      "- candidates 배열을 비우는 것을 최소화한다. CTA 텍스트가 존재하면 빈 배열로 두지 않는다.",
+      "- wrapperTag는 반드시 '실제 버튼 프레임 역할을 하는 가장 바깥 div의 여는 태그 전체'를 넣는다.",
+      "- reason에는 왜 그 래퍼를 버튼 프레임으로 판단했는지 짧게 적는다.",
+      "",
       "셀렉터 규칙:",
       "- selectorHint는 'img[2]' 또는 '.ap-section--02 .ap-image__text--01'처럼 간결하게 작성한다.",
       "- target은 사람이 이해하기 쉽게 작성한다.",
@@ -1591,7 +1651,7 @@
     // 반영(AP_AI_APPLY) system 머리 — expandApPlaceholders로 {{N_IMG}}, {{LANG}}
     var AP_AI_APPLY_SYSTEM_BASE_LINES = [
       "출력은 JSON 객체 하나만. HTML/CSS/마크다운 금지.",
-      "필수 키: altProposals (string[] 길이={{N_IMG}}), headingPatches ([{before,after}] 배열).",
+      "필수 키: altProposals (string[] 길이={{N_IMG}}), headingPatches ([{before,after}] 배열), linkBtnPatches ([{before,after}] 배열).",
       "선택: applyNotes (string[], 한국어 짧은 요약). applyNotes는 명사형·구절만 — '텍스트/로고/이미지' 접두어와 '~입니다·보입니다' 종결 금지.",
       "applyNotes는 한국어로 작성하고, altProposals는 페이지 실제 언어({{LANG}})로 작성한다.",
       "입력 HTML에 없던 마크업을 **새로 생성하지 않는다**. 특히 `<img>`·`.ap-image` 직후에 `position:absolute`·`clip`·`width:1px` 등으로 숨긴 `<h1>`/`h2`/`h3>`를 덧붙이지 않는다(스크린리더 전용 중복 헤딩 금지).",
@@ -1600,7 +1660,7 @@
 
     // 반영: user에 직전 headingAudit 붙을 때 system에 추가
     var AP_AI_APPLY_SYSTEM_AUDIT_HEADING_LINES = [
-      "user 메시지 하단에 직전 검수 headingAudit JSON이 첨부되어 있다.",
+      "user 메시지 하단에 직전 검수 headingAudit·linkBtnAudit JSON이 첨부되어 있다.",
       "headingPatches는 그 판정(candidates.decision, recommendedLevel)·issues와 모순 없이 작성한다.",
       "분석에서 heading이 아니라고 본 문구를 억지로 승격하지 않는다.",
       "altProposals 배열은 클라이언트가 직전 검수 값으로 덮어쓸 수 있으나, 키는 반드시 포함하고 길이는 {{N_IMG}}개로 맞춘다(직전 검수 alt와 동일한 문자열을 그대로 넣어도 된다)."
@@ -1641,15 +1701,48 @@
           "형제 노드 추가, img 뒤 숨김 `<h*>` 삽입 금지.",
           "구조 변경이 큰 경우 패치를 생략할 수 있다."
         ]
+      },
+      {
+        id: "linkBtn",
+        lines: [
+          "[규칙: 링크 버튼]",
+          "직전 분석 linkBtnAudit.candidates에서 decision:'btn'인 항목만 변환한다.",
+          "분석에서 not-btn으로 판단된 요소는 변환하지 않는다.",
+          "",
+          "[중요: CTA 버튼 변환 규칙]",
+          "- 변환 대상은 CTA 텍스트 노드가 아니라, linkBtnAudit에서 선택된 '시각적 버튼 프레임 래퍼'이다.",
+          "- 내부의 p/span/div 한 겹만 바꾸지 말고, 실제 배경/패딩/정렬을 가진 바깥 버튼 프레임 요소를 `<a href=\"#\">`로 변환한다.",
+          "- 내부 구조는 절대 바꾸지 않는다. class, style, 자식 노드 순서, 내부 텍스트는 그대로 유지한다.",
+          "",
+          "linkBtnPatches는 {before, after} 형식이다.",
+          "- before: 버튼 프레임 전체 요소 — 여는 `<div ...>` + 내부 콘텐츠 + `</div>`. HTML에서 유일하게 1회만 매칭되어야 한다.",
+          "- after: 여는 `<div ...>`를 `<a href=\"#\" ...>`로, 닫는 `</div>`를 `</a>`로만 바꾼다. 나머지 전부 동일.",
+          "- 이미 <a> 태그이면 건드리지 않는다.",
+          "",
+          "[예시]",
+          "before:",
+          "  <div class=\"ap-section__group\"><p class=\"ap-text\">자세히보기</p></div>",
+          "after:",
+          "  <a href=\"#\" class=\"ap-section__group\"><p class=\"ap-text\">자세히보기</p></a>",
+          "→ 바깥 프레임의 <div>→<a>, </div>→</a>만 변경. 내부 그대로.",
+          "",
+          "[재탐색 보완]",
+          "- linkBtnAudit이 비어 있어도, CTA 텍스트 + 버튼형 박스 스타일이 함께 보이면 재탐색 후 linkBtnPatches를 생성할 수 있다.",
+          "- 재탐색 기준: 짧은 CTA 텍스트 + <div> 래퍼 + 배경/패딩/정렬 스타일 + 이미 <a> 아님 + ap-btn 없음.",
+          "",
+          "[중요]",
+          "- CTA로 보이는 요소가 존재하면 최소 1개 이상 변환 시도한다.",
+          "- linkBtnPatches를 빈 배열로 반환하는 경우는 CTA가 진짜 없는 경우만 허용한다."
+        ]
       }
     ];
 
     var AP_AI_APPLY_USER_PROMPT_PREFIX =
       "아래 HTML/CSS에 대해 시스템 지시를 수행하고 JSON만 출력.\n\n---\n";
 
-    // 반영 API: 직전 headingAudit user 접두 안내
+    // 반영 API: 직전 headingAudit + linkBtnAudit user 접두 안내
     var AP_AI_APPLY_USER_HEADING_AUDIT_SUFFIX_PREFIX =
-      "\n\n---\n직전 분석(동일 본문) headingAudit JSON. 위 HTML에 headingPatches를 만들 때 반드시 이 판정과 일관되게.\n";
+      "\n\n---\n직전 분석(동일 본문) headingAudit·linkBtnAudit JSON. 위 HTML에 headingPatches·linkBtnPatches를 만들 때 반드시 이 판정과 일관되게.\n";
 
     // 분석: 비전 첨부 시 system 덧붙임
     var AP_AI_ANALYSIS_VISION_SYSTEM_APPEND =
@@ -1797,9 +1890,28 @@
           },
           required: ["outline", "issues", "candidates"]
         },
-        altProposals: { type: "array", items: { type: "string" } }
+        altProposals: { type: "array", items: { type: "string" } },
+        linkBtnAudit: {
+          type: "object",
+          properties: {
+            candidates: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  text: { type: "string" },
+                  wrapperTag: { type: "string" },
+                  decision: { type: "string", enum: ["btn", "not-btn"] },
+                  reason: { type: "string" }
+                },
+                required: ["text", "wrapperTag", "decision", "reason"]
+              }
+            }
+          },
+          required: ["candidates"]
+        }
       },
-      required: ["summary", "seo", "a11y", "semantics", "alts", "headingAudit", "altProposals"]
+      required: ["summary", "seo", "a11y", "semantics", "alts", "headingAudit", "altProposals", "linkBtnAudit"]
     };
 
     var AP_GEMINI_APPLY_RESPONSE_JSON_SCHEMA = {
@@ -1817,9 +1929,20 @@
             required: ["before", "after"]
           }
         },
+        linkBtnPatches: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              before: { type: "string" },
+              after: { type: "string" }
+            },
+            required: ["before", "after"]
+          }
+        },
         applyNotes: { type: "array", items: { type: "string" } }
       },
-      required: ["altProposals", "headingPatches"]
+      required: ["altProposals", "headingPatches", "linkBtnPatches"]
     };
 
     // 멀티모달 user: {{MAX_EDGE}}, {{API_DETAIL}}, {{VISION_MAX}}, {{TRUNCATED}}
@@ -3587,16 +3710,24 @@
     function buildApplyAuditHeadingPayload(auditObj) {
       if (!auditObj || typeof auditObj !== "object") return "";
       var ha = auditObj.headingAudit;
-      if (!ha || typeof ha !== "object") return "";
+      var lb = auditObj.linkBtnAudit;
+      if ((!ha || typeof ha !== "object") && (!lb || typeof lb !== "object")) return "";
       try {
-        return JSON.stringify({
-          headingAudit: {
+        var payload = {};
+        if (ha && typeof ha === "object") {
+          payload.headingAudit = {
             outline: ha.outline,
             issues: ha.issues,
             candidates: ha.candidates
-          },
-          summaryOneLine: auditObj.summary && auditObj.summary.oneLine ? auditObj.summary.oneLine : undefined
-        });
+          };
+        }
+        if (lb && typeof lb === "object" && Array.isArray(lb.candidates) && lb.candidates.length) {
+          payload.linkBtnAudit = { candidates: lb.candidates };
+        }
+        if (auditObj.summary && auditObj.summary.oneLine) {
+          payload.summaryOneLine = auditObj.summary.oneLine;
+        }
+        return JSON.stringify(payload);
       } catch (e) {
         return "";
       }
@@ -4419,17 +4550,98 @@
       }
       var out = String(html || "");
 
+      /** AI가 한 줄로 준 before를 줄바꿈·들여쓰기가 있는 실제 HTML에서도 찾을 수 있게 공백 유연 정규식 생성 */
+      function buildFlexWsRegex(str) {
+        var norm = String(str || "").replace(/>\s*</g, "> <").replace(/\s+/g, " ").trim();
+        var parts = norm.split(" ").filter(Boolean);
+        var reStr = parts.map(function (p) { return p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }).join("\\s+");
+        return new RegExp(reStr, "g");
+      }
+
       for (var k = 0; k < list.length; k++) {
         var before = list[k].before;
         var after = sanitizeAiHeadingPatchAfterMarkup(list[k].after);
+
+        // 1) 정확히 일치 시도
         var occ = countOccurrences(out, before);
-        if (occ !== 1) continue;
-        var pos = out.indexOf(before);
-        if (pos === -1) continue;
-        out = out.slice(0, pos) + after + out.slice(pos + before.length);
+        if (occ === 1) {
+          var pos = out.indexOf(before);
+          out = out.slice(0, pos) + after + out.slice(pos + before.length);
+          stats.applied++;
+          continue;
+        }
+
+        // 2) 공백 유연 매칭 fallback
+        var re = buildFlexWsRegex(before);
+        var matches = [];
+        var m;
+        while ((m = re.exec(out)) !== null) { matches.push(m); }
+        if (matches.length !== 1) continue;
+
+        // 원본 매칭 구간을 after로 교체
+        out = out.slice(0, matches[0].index) + after + out.slice(matches[0].index + matches[0][0].length);
         stats.applied++;
       }
       return { html: stripRepeatedAngleBracketsBeforeHeadingOpens(out), stats: stats };
+    }
+
+    /**
+     * linkBtnPatches 적용: headingPatches와 동일한 before/after 문자열 치환.
+     * before가 HTML에서 유일하게 1회만 존재해야 적용.
+     */
+    function applyLinkBtnPatchesToCode(html, patches) {
+      var list = (Array.isArray(patches) ? patches : []).filter(function (p) {
+        return (
+          p &&
+          typeof p.before === "string" &&
+          p.before.length &&
+          p.after != null &&
+          String(p.before) !== String(p.after)
+        );
+      });
+      var stats = { wanted: list.length, applied: 0 };
+      console.log("[linkBtn-apply] patches:", list.length, list);
+      if (!list.length) return { html: String(html || ""), stats: stats };
+      var out = String(html || "");
+
+      /** AI가 한 줄로 준 before를 줄바꿈·들여쓰기가 있는 실제 HTML에서도 찾을 수 있게 공백 유연 정규식 생성 */
+      function buildFlexWsRegex(str) {
+        var norm = String(str || "").replace(/>\s*</g, "> <").replace(/\s+/g, " ").trim();
+        var parts = norm.split(" ").filter(Boolean);
+        var reStr = parts.map(function (p) { return p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }).join("\\s+");
+        return new RegExp(reStr, "g");
+      }
+
+      for (var k = 0; k < list.length; k++) {
+        var before = list[k].before;
+        var after = String(list[k].after);
+
+        // 1) 정확히 일치 시도
+        var occ = countOccurrences(out, before);
+        if (occ === 1) {
+          var pos = out.indexOf(before);
+          out = out.slice(0, pos) + after + out.slice(pos + before.length);
+          stats.applied++;
+          console.log("[linkBtn-apply] patch " + k, "exact match applied");
+          continue;
+        }
+
+        // 2) 공백 유연 매칭 fallback (AI는 한 줄, 실제 HTML은 줄바꿈+들여쓰기)
+        var re = buildFlexWsRegex(before);
+        var matches = [];
+        var m;
+        while ((m = re.exec(out)) !== null) { matches.push(m); }
+        console.log("[linkBtn-apply] patch " + k, { exactOcc: occ, flexMatches: matches.length });
+        if (matches.length !== 1) continue;
+
+        // 원본 텍스트에서 <div→<a href="#", </div>→</a> 태그만 변환 (줄바꿈·들여쓰기 보존)
+        var orig = matches[0][0];
+        var patched = orig.replace(/^(<)div\b/i, '$1a href="#"').replace(/<\/div>(\s*)$/i, '</a>$1');
+        out = out.slice(0, matches[0].index) + patched + out.slice(matches[0].index + orig.length);
+        stats.applied++;
+        console.log("[linkBtn-apply] patch " + k, "flex-ws match applied");
+      }
+      return { html: out, stats: stats };
     }
 
     /**
@@ -4821,6 +5033,34 @@
         return out;
       }
 
+      function linkBtnAuditBlock(linkBtnAudit) {
+        linkBtnAudit = linkBtnAudit || {};
+        var candidates = Array.isArray(linkBtnAudit.candidates) ? linkBtnAudit.candidates : [];
+        if (!candidates.length) return "";
+        var cg = "ap-audit-result-grid" + auditResultGridClass(candidates.length);
+        return (
+          '<div style="margin:0 0 14px 0;">' +
+          '<strong style="display:block;margin-bottom:8px;color:#c4b5fd;">CTA 버튼 후보 판정</strong>' +
+          '<div class="' + cg + '">' +
+          candidates.map(function (it) {
+            var decisionStyle = "background:#20252f;color:#9aa3b5;border:1px solid #343a48;";
+            if (it.decision === "btn") decisionStyle = "background:rgba(52,211,153,0.12);color:#6ee7b7;border:1px solid rgba(52,211,153,0.35);";
+            else if (it.decision === "not-btn") decisionStyle = "background:#2a2d3a;color:#94a3b8;border:1px solid #3d4454;";
+            return (
+              '<div style="padding:10px;border:1px solid rgba(255,255,255,0.11);border-radius:8px;background:#171a22;color:#e2e8f0;">' +
+              '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">' +
+              '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;' + decisionStyle + '">' + esc(it.decision || "") + "</span>" +
+              "</div>" +
+              '<div style="margin-bottom:4px;"><b>텍스트</b> · ' + esc(it.text || "") + "</div>" +
+              (it.wrapperTag ? '<div style="margin-bottom:4px;font-size:10px;"><b>래퍼</b> · <code style="color:#cbd5e1;word-break:break-all;">' + esc(it.wrapperTag) + "</code></div>" : "") +
+              (it.reason ? '<div><b>판정 이유</b> · ' + esc(it.reason) + "</div>" : "") +
+              "</div>"
+            );
+          }).join("") +
+          "</div></div>"
+        );
+      }
+
       function diffBlock(title, rows) {
         rows = Array.isArray(rows) ? rows : [];
         if (!rows.length) return "";
@@ -4867,6 +5107,7 @@
       var headingAudit = obj.headingAudit || {};
       var applyDiff =
         diffBlock("헤딩 반영", obj._apHeadingChangeRows) +
+        diffBlock("CTA 버튼 반영", obj._apLinkBtnChangeRows) +
         diffBlock("Alt 반영", obj._apAltChangeRows);
 
       var cliWarns = Array.isArray(obj._apClientWarnings) ? obj._apClientWarnings.filter(Boolean) : [];
@@ -4963,6 +5204,7 @@
         seoExtractabilityBlock(seoExtractabilityVal) +
         seoContentRolesTable(seoContentRolesRows) +
         headingAuditBlock(headingAudit) +
+        linkBtnAuditBlock(obj.linkBtnAudit) +
         altAuditBlock(obj.alts) +
         detailSections
       );
@@ -5076,6 +5318,7 @@
             var code0 = code;
             if (!Array.isArray(obj.altProposals)) obj.altProposals = [];
             if (!Array.isArray(obj.headingPatches)) obj.headingPatches = [];
+            if (!Array.isArray(obj.linkBtnPatches)) obj.linkBtnPatches = [];
             var auditSnap = window.__apLastAnalysisReport;
             if (
               auditSnap &&
@@ -5091,8 +5334,13 @@
             code = headApply.html;
             code = normalizeApHeadingSpanWrappers(code);
 
+            var btnPatches = Array.isArray(obj.linkBtnPatches) ? obj.linkBtnPatches : [];
+            var btnApply = applyLinkBtnPatchesToCode(code, btnPatches);
+            code = btnApply.html;
+
             var pApply = obj.altProposals.slice();
             var didHeading = headApply.stats.applied > 0;
+            var didBtn = btnApply.stats.applied > 0;
             var didAlt = false;
 
             if (pApply.length > 0 && n > 0) {
@@ -5117,7 +5365,8 @@
 
             var reportObj = buildApplyAuditReportForPanel(auditSnap, obj, {
               _apAltChangeRows: didAlt ? buildAltChangeRowsForPanel(code0, pApply) : [],
-              _apHeadingChangeRows: buildHeadingChangeRowsForPanel(patches)
+              _apHeadingChangeRows: buildHeadingChangeRowsForPanel(patches),
+              _apLinkBtnChangeRows: buildHeadingChangeRowsForPanel(btnPatches)
             });
             var ar = reportObj._apAltChangeRows || [];
             var hr = reportObj._apHeadingChangeRows || [];
@@ -5140,6 +5389,7 @@
 
             var parts = [];
             if (didHeading && reportObj._apHeadingChangeRows.length) parts.push("헤딩 " + reportObj._apHeadingChangeRows.length + "건");
+            if (didBtn && reportObj._apLinkBtnChangeRows.length) parts.push("CTA 버튼 " + reportObj._apLinkBtnChangeRows.length + "건");
             if (didAlt) parts.push("alt " + reportObj._apAltChangeRows.length + "건");
 
             var oneLine =
@@ -5156,6 +5406,11 @@
                 "/" +
                 headApply.stats.wanted +
                 "건만 적용(나머지는 일치 위치 없음)";
+            }
+            if (btnApply.stats.wanted > 0 && btnApply.stats.applied === 0) {
+              oneLine += " · CTA 버튼 패치 미적용(before 불일치 또는 2회 이상 매칭)";
+            } else if (btnApply.stats.applied > 0 && btnApply.stats.applied < btnApply.stats.wanted) {
+              oneLine += " · CTA 버튼 " + btnApply.stats.applied + "/" + btnApply.stats.wanted + "건만 적용";
             }
             setAiStatus("반영 완료 · " + oneLine);
           })
