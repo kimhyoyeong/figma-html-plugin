@@ -1119,7 +1119,11 @@ function getLayoutVars(node) {
 
         var primary = String(node.primaryAxisAlignItems || "").toUpperCase()
         var gap = Number(node.itemSpacing) || 0
-        out.gap = primary === "SPACE_BETWEEN" ? "0" : cssOutLayoutPx(gap)
+        // 보이는 자식 1개 이하면 gap 불필요
+        var visCount = 0
+        var ck = node.children || []
+        for (var ci = 0; ci < ck.length; ci++) { if (ck[ci] && isVisible(ck[ci]) && !isAbsolutePositioned(ck[ci])) visCount++ }
+        out.gap = (primary === "SPACE_BETWEEN" || visCount <= 1) ? "0" : cssOutLayoutPx(gap)
 
         out.pt = cssOutLayoutPx(Number(node.paddingTop) || 0)
         out.pr = cssOutLayoutPx(Number(node.paddingRight) || 0)
@@ -2277,30 +2281,41 @@ function figTextCaseToDeclFragment(tc) {
     return ""
 }
 
-/** 인접 동일 스타일 parts 병합 — Figma가 특수문자(™ 등) 경계에서 불필요하게 분할한 세그먼트 통합 */
+/** 인접 동일 스타일 parts 병합 + 공백만 있는 part를 인접 part에 흡수 */
 function mergeAdjacentSameStyleParts(parts) {
     if (!parts || parts.length <= 1) return parts
-    var out = [parts[0]]
+    function sameStyle(a, b) {
+        return a.fw === b.fw && a.fs === b.fs && a.clr === b.clr &&
+            Math.abs((a.ls || 0) - (b.ls || 0)) < 0.001 &&
+            (a.textCase || "") === (b.textCase || "")
+    }
+    function isWhitespaceOnly(p) {
+        return /^\s*$/.test(p.characters || "")
+    }
+    function mergeParts(a, b) {
+        return { start: a.start, end: b.end, characters: (a.characters || "") + (b.characters || ""), clr: a.clr, fs: a.fs, fw: a.fw, ls: a.ls, textCase: a.textCase }
+    }
+    // 1차: 동일 스타일 병합
+    var pass1 = [parts[0]]
     for (var i = 1; i < parts.length; i++) {
-        var prev = out[out.length - 1]
+        var prev = pass1[pass1.length - 1]
         var cur = parts[i]
-        if (prev.fw === cur.fw &&
-            prev.fs === cur.fs &&
-            prev.clr === cur.clr &&
-            Math.abs((prev.ls || 0) - (cur.ls || 0)) < 0.001 &&
-            (prev.textCase || "") === (cur.textCase || "")) {
-            out[out.length - 1] = {
-                start: prev.start,
-                end: cur.end,
-                characters: (prev.characters || "") + (cur.characters || ""),
-                clr: prev.clr,
-                fs: prev.fs,
-                fw: prev.fw,
-                ls: prev.ls,
-                textCase: prev.textCase
-            }
+        if (sameStyle(prev, cur)) {
+            pass1[pass1.length - 1] = mergeParts(prev, cur)
         } else {
-            out.push(cur)
+            pass1.push(cur)
+        }
+    }
+    // 2차: 공백만 있는 part → 인접 part에 흡수
+    if (pass1.length <= 1) return pass1.length === 1 ? null : pass1
+    var out = []
+    for (var j = 0; j < pass1.length; j++) {
+        if (isWhitespaceOnly(pass1[j]) && out.length > 0) {
+            out[out.length - 1] = mergeParts(out[out.length - 1], pass1[j])
+        } else if (isWhitespaceOnly(pass1[j]) && j + 1 < pass1.length) {
+            pass1[j + 1] = mergeParts(pass1[j], pass1[j + 1])
+        } else {
+            out.push(pass1[j])
         }
     }
     return out.length === 1 ? null : out
@@ -7730,6 +7745,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         if (includeAbs === undefined) includeAbs = true
         var inner = cssInnerSelForNode(id, ropts || {}, false)
         var vw = visWrapFromOpts(ropts)
+        // flex-grow가 이미 있으면 width:100% 불필요 (프레임 자식 렌더에서 추가됨)
+        var textHasFlexGrow = false
+        try {
+            var _tGrow = getFlexChildMainAxisGrowDecl(node, parent)
+            if (_tGrow && _tGrow.indexOf("flex-grow") !== -1) textHasFlexGrow = true
+        } catch (e) {}
         /** 텍스트 공통 추가 선언: align-self, textAutoResize 기반 크기 제어 */
         function textExtraDecls() {
             var extra = []
@@ -7737,11 +7758,10 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 var asDecl = getAlignSelfDecl(node, parent)
                 if (asDecl) extra.push(asDecl)
             }
-            // textAutoResize: WIDTH_AND_HEIGHT → 텍스트 자체 크기(white-space:nowrap), NONE → 고정 박스(width 설정)
+            // textAutoResize: NONE → 고정 크기 박스(width 설정)
             try {
                 var tar = node.textAutoResize
-                if (tar === "WIDTH_AND_HEIGHT") extra.push("white-space:nowrap")
-                else if (tar === "NONE" && !textAbs) {
+                if (tar === "NONE" && !textAbs) {
                     var tBox = getAbs(node)
                     if (tBox && tBox.w != null) {
                         extra.push("--ap-w:" + cssOutLayoutPx(tBox.w))
@@ -7766,7 +7786,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 var textDeclPartsPc = []
                 var declPc = buildTextVarsDecl(ts)
                 if (declPc) textDeclPartsPc.push(declPc)
-                var textFullWPc = getTextFullWidthDecl(node, textAbs, parent)
+                var textFullWPc = textHasFlexGrow ? "" : getTextFullWidthDecl(node, textAbs, parent)
                 if (textFullWPc) textDeclPartsPc.push(textFullWPc)
                 textDeclPartsPc = textDeclPartsPc.concat(textExtraDecls())
                 if (textDeclPartsPc.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textDeclPartsPc.join(";"))
@@ -7775,7 +7795,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var textDeclParts = []
             var decl = buildTextVarsDecl(ts)
             if (decl) textDeclParts.push(decl)
-            var textFullW = getTextFullWidthDecl(node, textAbs, parent)
+            var textFullW = textHasFlexGrow ? "" : getTextFullWidthDecl(node, textAbs, parent)
             if (textFullW) textDeclParts.push(textFullW)
             textDeclParts = textDeclParts.concat(textExtraDecls())
             if (textDeclParts.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textDeclParts.join(";"))

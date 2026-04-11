@@ -150,30 +150,41 @@ function figTextCaseToDeclFragment(tc) {
     return ""
 }
 
-/** 인접 동일 스타일 parts 병합 — Figma가 특수문자(™ 등) 경계에서 불필요하게 분할한 세그먼트 통합 */
+/** 인접 동일 스타일 parts 병합 + 공백만 있는 part를 인접 part에 흡수 */
 function mergeAdjacentSameStyleParts(parts) {
     if (!parts || parts.length <= 1) return parts
-    var out = [parts[0]]
+    function sameStyle(a, b) {
+        return a.fw === b.fw && a.fs === b.fs && a.clr === b.clr &&
+            Math.abs((a.ls || 0) - (b.ls || 0)) < 0.001 &&
+            (a.textCase || "") === (b.textCase || "")
+    }
+    function isWhitespaceOnly(p) {
+        return /^\s*$/.test(p.characters || "")
+    }
+    function mergeParts(a, b) {
+        return { start: a.start, end: b.end, characters: (a.characters || "") + (b.characters || ""), clr: a.clr, fs: a.fs, fw: a.fw, ls: a.ls, textCase: a.textCase }
+    }
+    // 1차: 동일 스타일 병합
+    var pass1 = [parts[0]]
     for (var i = 1; i < parts.length; i++) {
-        var prev = out[out.length - 1]
+        var prev = pass1[pass1.length - 1]
         var cur = parts[i]
-        if (prev.fw === cur.fw &&
-            prev.fs === cur.fs &&
-            prev.clr === cur.clr &&
-            Math.abs((prev.ls || 0) - (cur.ls || 0)) < 0.001 &&
-            (prev.textCase || "") === (cur.textCase || "")) {
-            out[out.length - 1] = {
-                start: prev.start,
-                end: cur.end,
-                characters: (prev.characters || "") + (cur.characters || ""),
-                clr: prev.clr,
-                fs: prev.fs,
-                fw: prev.fw,
-                ls: prev.ls,
-                textCase: prev.textCase
-            }
+        if (sameStyle(prev, cur)) {
+            pass1[pass1.length - 1] = mergeParts(prev, cur)
         } else {
-            out.push(cur)
+            pass1.push(cur)
+        }
+    }
+    // 2차: 공백만 있는 part → 인접 part에 흡수
+    if (pass1.length <= 1) return pass1.length === 1 ? null : pass1
+    var out = []
+    for (var j = 0; j < pass1.length; j++) {
+        if (isWhitespaceOnly(pass1[j]) && out.length > 0) {
+            out[out.length - 1] = mergeParts(out[out.length - 1], pass1[j])
+        } else if (isWhitespaceOnly(pass1[j]) && j + 1 < pass1.length) {
+            pass1[j + 1] = mergeParts(pass1[j], pass1[j + 1])
+        } else {
+            out.push(pass1[j])
         }
     }
     return out.length === 1 ? null : out

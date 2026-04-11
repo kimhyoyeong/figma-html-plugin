@@ -415,6 +415,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         if (includeAbs === undefined) includeAbs = true
         var inner = cssInnerSelForNode(id, ropts || {}, false)
         var vw = visWrapFromOpts(ropts)
+        // flex-grow가 이미 있으면 width:100% 불필요 (프레임 자식 렌더에서 추가됨)
+        var textHasFlexGrow = false
+        try {
+            var _tGrow = getFlexChildMainAxisGrowDecl(node, parent)
+            if (_tGrow && _tGrow.indexOf("flex-grow") !== -1) textHasFlexGrow = true
+        } catch (e) {}
         /** 텍스트 공통 추가 선언: align-self, textAutoResize 기반 크기 제어 */
         function textExtraDecls() {
             var extra = []
@@ -422,11 +428,10 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 var asDecl = getAlignSelfDecl(node, parent)
                 if (asDecl) extra.push(asDecl)
             }
-            // textAutoResize: WIDTH_AND_HEIGHT → 텍스트 자체 크기(white-space:nowrap), NONE → 고정 박스(width 설정)
+            // textAutoResize: NONE → 고정 크기 박스(width 설정)
             try {
                 var tar = node.textAutoResize
-                if (tar === "WIDTH_AND_HEIGHT") extra.push("white-space:nowrap")
-                else if (tar === "NONE" && !textAbs) {
+                if (tar === "NONE" && !textAbs) {
                     var tBox = getAbs(node)
                     if (tBox && tBox.w != null) {
                         extra.push("--ap-w:" + cssOutLayoutPx(tBox.w))
@@ -451,7 +456,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                 var textDeclPartsPc = []
                 var declPc = buildTextVarsDecl(ts)
                 if (declPc) textDeclPartsPc.push(declPc)
-                var textFullWPc = getTextFullWidthDecl(node, textAbs, parent)
+                var textFullWPc = textHasFlexGrow ? "" : getTextFullWidthDecl(node, textAbs, parent)
                 if (textFullWPc) textDeclPartsPc.push(textFullWPc)
                 textDeclPartsPc = textDeclPartsPc.concat(textExtraDecls())
                 if (textDeclPartsPc.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textDeclPartsPc.join(";"))
@@ -460,7 +465,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             var textDeclParts = []
             var decl = buildTextVarsDecl(ts)
             if (decl) textDeclParts.push(decl)
-            var textFullW = getTextFullWidthDecl(node, textAbs, parent)
+            var textFullW = textHasFlexGrow ? "" : getTextFullWidthDecl(node, textAbs, parent)
             if (textFullW) textDeclParts.push(textFullW)
             textDeclParts = textDeclParts.concat(textExtraDecls())
             if (textDeclParts.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textDeclParts.join(";"))

@@ -100,7 +100,11 @@ function getLayoutVars(node) {
 
         var primary = String(node.primaryAxisAlignItems || "").toUpperCase()
         var gap = Number(node.itemSpacing) || 0
-        out.gap = primary === "SPACE_BETWEEN" ? "0" : cssOutLayoutPx(gap)
+        // 보이는 자식 1개 이하면 gap 불필요
+        var visCount = 0
+        var ck = node.children || []
+        for (var ci = 0; ci < ck.length; ci++) { if (ck[ci] && isVisible(ck[ci]) && !isAbsolutePositioned(ck[ci])) visCount++ }
+        out.gap = (primary === "SPACE_BETWEEN" || visCount <= 1) ? "0" : cssOutLayoutPx(gap)
 
         out.pt = cssOutLayoutPx(Number(node.paddingTop) || 0)
         out.pr = cssOutLayoutPx(Number(node.paddingRight) || 0)
