@@ -11,19 +11,14 @@
 // 소스 파트는 build-paths.js 의 MAIN_SOURCE_DIR · 합쳐서 plugin/code.js (npm run build).
 figma.showUI(__html__, {width: 1200, height: 900})
 
-// ui 검수: 비전 기본 ON. 이미지 바이너리는 PC/MO 분석 후 RESULT_IMAGES_* 로만 UI 전달(ZIP만으로 코드만 붙은 경우 미전달).
-var AP_AI_DEFAULT_ALT_VISION = true
-/** AI 제공자 기본값 (ui.html 셀렉트·AI_UI_DEFAULTS와 동기) */
-var AP_AI_DEFAULT_PROVIDER = "gemini"
-/** Gemini 기본 모델 (Flash) */
-var AP_AI_DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+// ui 검수: 비전 기본 ON. AI 제공자·모델 기본값을 UI에 전달.
 setTimeout(function () {
     try {
         figma.ui.postMessage({
             type: "AI_UI_DEFAULTS",
-            aiVisionAlt: AP_AI_DEFAULT_ALT_VISION,
-            aiProvider: AP_AI_DEFAULT_PROVIDER,
-            aiGeminiModel: AP_AI_DEFAULT_GEMINI_MODEL
+            aiVisionAlt: true,
+            aiProvider: "gemini",
+            aiGeminiModel: "gemini-2.5-flash"
         })
     } catch (e) {}
 }, 0)
@@ -97,8 +92,7 @@ function pad2(n) {
 }
 /** 섹션 인덱스 → CSS 클래스 접두어 (1 → "01") */
 function sectionClassPrefix(oneBasedIndex) {
-    var n = Math.max(1, Math.floor(oneBasedIndex))
-    return (n < 10 ? "0" : "") + n
+    return pad2(Math.max(1, Math.floor(oneBasedIndex)))
 }
 /** ap-ai-audit 주석 블록 — ZIP 등 산출물에 포함하지 않음 */
 function stripApAiAuditBlock(html) {
@@ -334,6 +328,13 @@ function collectMoSlideItemNodes(dSec, mSec, bgChildId) {
     return moItemNodes
 }
 
+/** raw slidesPerView → 정수 근사 또는 소수 2자리, 범위 제한 */
+function roundSlidesPerView(raw, maxSlides) {
+    raw = clamp(raw, 1, maxSlides)
+    var rounded = Math.round(raw)
+    return Math.abs(raw - rounded) < 0.15 ? rounded : r2(raw)
+}
+
 /** slidesPerView 계산 */
 function computeSlidesPerView(sectionNode, bgChildId, fallbackValue) {
     var items = collectSwiperSlideItemNodes(sectionNode, bgChildId)
@@ -343,16 +344,7 @@ function computeSlidesPerView(sectionNode, bgChildId, fallbackValue) {
     var pitch = getSlideItemPitch(items)
     if (!(viewportW > 0) || !(pitch > 0)) return fallbackValue != null ? fallbackValue : 1
 
-    var raw = viewportW / pitch
-
-    // 너무 이상한 값 방지
-    raw = clamp(raw, 1, items.length)
-
-    // 정수에 가까우면 정수로, 아니면 소수 2자리
-    var rounded = Math.round(raw)
-    if (Math.abs(raw - rounded) < 0.15) return rounded
-
-    return r2(raw)
+    return roundSlidesPerView(viewportW / pitch, items.length)
 }
 
 /** PC 섹션 기준으로 MO 섹션 매칭 후 slidesPerView 계산 */
@@ -405,14 +397,8 @@ function computeSlidesPerViewMo(dSec, mSec, bgChildId, fallbackValue) {
         return fallbackValue != null ? fallbackValue : 1
     }
 
-    var raw = viewportW / pitch
     // 상한은 PC 슬라이드 아이템 개수 기준. mSec 직계 자식 수(예: slide 그룹 1개)를 쓰면 항상 1로 죽는 버그 방지
-    raw = clamp(raw, 1, dItems.length)
-
-    var rounded = Math.round(raw)
-    if (Math.abs(raw - rounded) < 0.15) return rounded
-
-    return r2(raw)
+    return roundSlidesPerView(viewportW / pitch, dItems.length)
 }
 
 /**
@@ -860,7 +846,7 @@ function wrapChunksAsUlOrDiv(depth, cls, frameTag, frameTagOpen, isFrameBtn, chu
  * isFigmaDirectParent / findDirectFigmaParentUnderRoot — 트리·클립 export용
  * isContainer, isVisible, hasVisibleChildren — 트리 순회·export 필터
  * isFlex — layoutMode !== NONE
- * isAbsoluteInParent, isAbsolutePositioned, isAbsoluteByParentNotFlex, isAbsoluteLike — CSS ap-abs 판별
+ * isAbsolutePositioned, isAbsoluteLike — CSS ap-abs 판별
  * containerNeedsRelativeForAbsoluteChildren — 비-flex 부모에 position:relative 필요 여부
  * containerAllVisibleChildrenAreAbsolute — 보이는 직계 자식이 1개 이상이며 전부 ap-abs 계열이면 true (플로우 높이 0 방지용)
  */
@@ -984,16 +970,6 @@ function isFlex(node) {
         return false
     }
 }
-/** Flex 부모 안에서 자식이 Absolute로 배치된 경우인지 */
-function isAbsoluteInParent(child, parent) {
-    try {
-        if (!parent || !child) return false
-        if (!isFlex(parent)) return false
-        if (isAbsolutePositioned(child)) return true
-    } catch (e) {}
-    return false
-}
-
 /** Figma Auto Layout 자식의 Absolute 배치 여부 (명시적으로 ABSOLUTE일 때만 true; undefined/null → AUTO와 동일) */
 function isAbsolutePositioned(node) {
     try {
@@ -1006,18 +982,11 @@ function isAbsolutePositioned(node) {
     }
 }
 
-/** 부모가 flex가 아니면 자식은 모두 x,y 기준 배치 → absolute로 처리 */
-function isAbsoluteByParentNotFlex(node, parent) {
-    try {
-        return !!(parent && !isFlex(parent) && node)
-    } catch (e) {
-        return false
-    }
-}
-
-/** 절대 위치 계열 판별 (in-parent / self absolute / parent not flex) 통합 */
+/** 절대 위치 계열 통합: non-flex 부모면 항상 abs, flex 부모·부모 없으면 layoutPositioning 기준 */
 function isAbsoluteLike(node, parent) {
-    return isAbsoluteInParent(node, parent) || isAbsolutePositioned(node) || isAbsoluteByParentNotFlex(node, parent)
+    if (!node) return false
+    if (parent && !isFlex(parent)) return true
+    return isAbsolutePositioned(node)
 }
 
 /** 비 flex 컨테이너는 .ap-flex의 position:relative가 없음 → 직계 abs 자식이 있을 때만 명시 */
@@ -1297,10 +1266,8 @@ function getBoundsForAbsDeclChild(childNode, parentNode) {
     return getRasterExportBounds(childNode)
 }
 
-/** 절대 위치: 설계 좌표는 --ap-left/--ap-top/--ap-w/--ap-h (디자인 px). 실제 calc는 .ap-abs 공통 규칙. */
-function buildAbsDecl(childNode, parentNode) {
-    var box = getBoundsForAbsDeclChild(childNode, parentNode)
-    var parentBox = getAbs(parentNode)
+/** box·parentBox → --ap-left/top/w/h 선언 공통 */
+function formatAbsVarsDecl(box, parentBox) {
     if (!box || !parentBox) return ""
     var relX = cssOutLayoutPx(box.x - parentBox.x)
     var relY = cssOutLayoutPx(box.y - parentBox.y)
@@ -1308,36 +1275,28 @@ function buildAbsDecl(childNode, parentNode) {
     var h = box.h != null ? cssOutLayoutPx(box.h) : "0"
     return "--ap-left:" + relX + ";--ap-top:" + relY + ";--ap-w:" + w + ";--ap-h:" + h
 }
+/** PC/MO bounds 4변 비교 — 동일(또는 데이터 부족)이면 true */
+function absVarsSame(dB, dPB, mB, mPB) {
+    if (!dB || !dPB || !mB || !mPB) return true
+    return layoutPxNum(r2(dB.x - dPB.x)) === layoutPxNum(r2(mB.x - mPB.x))
+        && layoutPxNum(r2(dB.y - dPB.y)) === layoutPxNum(r2(mB.y - mPB.y))
+        && layoutPxNum(r2(dB.w != null ? dB.w : 0)) === layoutPxNum(r2(mB.w != null ? mB.w : 0))
+        && layoutPxNum(r2(dB.h != null ? dB.h : 0)) === layoutPxNum(r2(mB.h != null ? mB.h : 0))
+}
 
+/** 절대 위치: 설계 좌표는 --ap-left/--ap-top/--ap-w/--ap-h (디자인 px). 실제 calc는 .ap-abs 공통 규칙. */
+function buildAbsDecl(childNode, parentNode) {
+    return formatAbsVarsDecl(getBoundsForAbsDeclChild(childNode, parentNode), getAbs(parentNode))
+}
 /** TEXT 래스터(.ap-image) 절대 배치: 시각적 bounds 기준 */
 function buildAbsDeclTextRaster(childNode, parentNode) {
-    var box = getTextRasterBounds(childNode) || getAbs(childNode)
-    var parentBox = getAbs(parentNode)
-    if (!box || !parentBox) return ""
-    var relX = cssOutLayoutPx(box.x - parentBox.x)
-    var relY = cssOutLayoutPx(box.y - parentBox.y)
-    var w = box.w != null ? cssOutLayoutPx(box.w) : "0"
-    var h = box.h != null ? cssOutLayoutPx(box.h) : "0"
-    return "--ap-left:" + relX + ";--ap-top:" + relY + ";--ap-w:" + w + ";--ap-h:" + h
+    return formatAbsVarsDecl(getTextRasterBounds(childNode) || getAbs(childNode), getAbs(parentNode))
 }
 
 /** PC/MO TEXT 래스터 절대 위치 비교 후 MO 기준 선언 */
 function buildAbsDeclTextRasterDiff(dChild, dParent, mChild, mParent) {
-    var dB = getTextRasterBounds(dChild) || getAbs(dChild)
-    var dPB = getAbs(dParent)
-    var mB = getTextRasterBounds(mChild) || getAbs(mChild)
-    var mPB = getAbs(mParent)
-    if (!dB || !dPB || !mB || !mPB) return ""
-    var dRelX = r2(dB.x - dPB.x),
-        dRelY = r2(dB.y - dPB.y),
-        dW = r2(dB.w != null ? dB.w : 0),
-        dH = r2(dB.h != null ? dB.h : 0)
-    var mRelX = r2(mB.x - mPB.x),
-        mRelY = r2(mB.y - mPB.y),
-        mW = r2(mB.w != null ? mB.w : 0),
-        mH = r2(mB.h != null ? mB.h : 0)
-    if (layoutPxNum(dRelX) === layoutPxNum(mRelX) && layoutPxNum(dRelY) === layoutPxNum(mRelY) && layoutPxNum(dW) === layoutPxNum(mW) && layoutPxNum(dH) === layoutPxNum(mH))
-        return ""
+    var getBounds = function (n) { return getTextRasterBounds(n) || getAbs(n) }
+    if (absVarsSame(getBounds(dChild), getAbs(dParent), getBounds(mChild), getAbs(mParent))) return ""
     return buildAbsDeclTextRaster(mChild, mParent)
 }
 
@@ -1411,21 +1370,7 @@ function buildFlexDeclDiff(dLv, mLv, node, moAbsSelf) {
 }
 /** PC(d)와 MO(m) 절대 위치 비교 후 달라질 때만 MO 기준 선언 */
 function buildAbsDeclDiff(dChild, dParent, mChild, mParent) {
-    var dB = getBoundsForAbsDeclChild(dChild, dParent)
-    var dPB = getAbs(dParent)
-    var mB = getBoundsForAbsDeclChild(mChild, mParent)
-    var mPB = getAbs(mParent)
-    if (!dB || !dPB || !mB || !mPB) return ""
-    var dRelX = r2(dB.x - dPB.x),
-        dRelY = r2(dB.y - dPB.y),
-        dW = r2(dB.w != null ? dB.w : 0),
-        dH = r2(dB.h != null ? dB.h : 0)
-    var mRelX = r2(mB.x - mPB.x),
-        mRelY = r2(mB.y - mPB.y),
-        mW = r2(mB.w != null ? mB.w : 0),
-        mH = r2(mB.h != null ? mB.h : 0)
-    if (layoutPxNum(dRelX) === layoutPxNum(mRelX) && layoutPxNum(dRelY) === layoutPxNum(mRelY) && layoutPxNum(dW) === layoutPxNum(mW) && layoutPxNum(dH) === layoutPxNum(mH))
-        return ""
+    if (absVarsSame(getBoundsForAbsDeclChild(dChild, dParent), getAbs(dParent), getBoundsForAbsDeclChild(mChild, mParent), getAbs(mParent))) return ""
     return buildAbsDecl(mChild, mParent)
 }
 
@@ -2581,7 +2526,8 @@ function normalizeApTextColorHex(clr) {
 }
 
 function isDefaultApTextColor(clr) {
-    return normalizeApTextColorHex(clr) === "" || normalizeApTextColorHex(clr) === "#000"
+    var n = normalizeApTextColorHex(clr)
+    return n === "" || n === "#000"
 }
 
 function isDefaultApTextLhRatio(ratio) {
@@ -4518,23 +4464,18 @@ function decideImageKind(node, ctx) {
         if (!rkSlide && sk && cache.slideAssetKeyBySlot) rkSlide = cache.slideAssetKeyBySlot[sk]
         if (rkSlide) return Promise.resolve("pc-shared-slide")
     }
-    if (node.type === "TEXT") {
+    function resolveRasterKindAsync() {
         return resolveRasterFormatOnceAsync(node, ctx).then(function (fmt) {
             return fmt === "PNG" ? "raster-png" : "raster-jpg"
         })
     }
+    if (node.type === "TEXT") return resolveRasterKindAsync()
     if (isCodeRasterNodeEffective(node, cache)) return Promise.resolve("composite-raster")
-    if (ctx.sectionBackgroundImageFillOnly && hasImageFill(node)) {
-        return resolveRasterFormatOnceAsync(node, ctx).then(function (fmt) {
-            return fmt === "PNG" ? "raster-png" : "raster-jpg"
-        })
-    }
+    if (ctx.sectionBackgroundImageFillOnly && hasImageFill(node)) return resolveRasterKindAsync()
     if (isVectorOnlyTree(node)) return Promise.resolve("svg")
     if (isContainer(node) && shouldCompositeRasterGroup(node)) return Promise.resolve("composite-raster")
     if (!shouldExportAsSingleRasterImage(node, cache)) return Promise.resolve("skip")
-    return resolveRasterFormatOnceAsync(node, ctx).then(function (fmt) {
-        return fmt === "PNG" ? "raster-png" : "raster-jpg"
-    })
+    return resolveRasterKindAsync()
 }
 
 function rasterFormatFromKind(kind) {
@@ -4848,28 +4789,17 @@ function pipelineEnsureImageAsync(node, ctx) {
         if (kind === "svg") {
             return finishExport(node, kind, null, ctx)
         }
-        if (kind === "composite-raster") {
+        function resolveAndFinish() {
             return resolveRasterFormatOnceAsync(node, ctx).then(function (f) {
                 var effCtx =
-                    ctx &&
-                    !ctx.sectionBackgroundImageFillOnly &&
-                    ctx.clipExportParent &&
+                    ctx && !ctx.sectionBackgroundImageFillOnly && ctx.clipExportParent &&
                     shouldRasterExportViaParentClip(node, ctx.clipExportParent)
                         ? Object.assign({}, ctx, { rasterExportSourceNode: ctx.clipExportParent })
                         : ctx
                 return finishExport(node, kind, f, effCtx)
             })
         }
-        return resolveRasterFormatOnceAsync(node, ctx).then(function (f) {
-            var effCtx2 =
-                ctx &&
-                !ctx.sectionBackgroundImageFillOnly &&
-                ctx.clipExportParent &&
-                shouldRasterExportViaParentClip(node, ctx.clipExportParent)
-                    ? Object.assign({}, ctx, { rasterExportSourceNode: ctx.clipExportParent })
-                    : ctx
-            return finishExport(node, kind, f, effCtx2)
-        })
+        return resolveAndFinish()
     })
 }
 
@@ -6205,8 +6135,8 @@ function pcMoChildPairsOrIndex(dKids, mKids) {
     return out
 }
 
-/** 구조 일치 섹션만: PC가 code-video인 슬롯의 MO 노드 id → true (MO 레이어명 불일치 허용) */
-function buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
+/** PC→MO 슬롯 상속 맵 공통: 구조 일치 섹션만, predicate(pcNode)가 true인 슬롯의 MO 노드 id → true */
+function buildMoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs, predicate) {
     var out = Object.create(null)
     if (!desktopRoot || !mobileRoot || !isContainer(desktopRoot) || !isContainer(mobileRoot)) return out
     var skip = Object.create(null)
@@ -6222,16 +6152,16 @@ function buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
         var mKids = (mNode.children || []).filter(function (c) {
             return c && isVisible(c)
         })
-        var pairVi = pcMoChildPairsOrIndex(dKids, mKids)
-        for (var i = 0; i < pairVi.length; i++) {
-            var d = pairVi[i][0]
-            var m = pairVi[i][1]
+        var pairs = pcMoChildPairsOrIndex(dKids, mKids)
+        for (var i = 0; i < pairs.length; i++) {
+            var d = pairs[i][0]
+            var m = pairs[i][1]
             if (d.type !== m.type) continue
             if (!d.id) {
                 if (d.type === "FRAME" && isContainer(d)) walkInherit(d, m)
                 continue
             }
-            if (isVideoSlotByNameOrFill(d) && m.id) out[String(m.id)] = true
+            if (predicate(d) && m.id) out[String(m.id)] = true
             if (d.type === "FRAME" && isContainer(d)) walkInherit(d, m)
         }
     }
@@ -6245,45 +6175,13 @@ function buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
     }
     return out
 }
+/** 구조 일치 섹션만: PC가 code-video인 슬롯의 MO 노드 id → true (MO 레이어명 불일치 허용) */
+function buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
+    return buildMoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs, isVideoSlotByNameOrFill)
+}
 /** 구조 일치 섹션만: PC가 code-raster인 슬롯의 MO 노드 id → true */
 function buildMoRasterInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
-    var out = Object.create(null)
-    if (!desktopRoot || !mobileRoot || !isContainer(desktopRoot) || !isContainer(mobileRoot)) return out
-    var skip = Object.create(null)
-    if (Array.isArray(mismatchSecs)) {
-        for (var srx = 0; srx < mismatchSecs.length; srx++) skip[String(mismatchSecs[srx])] = true
-    }
-    var dSecsR = getSectionNodes(desktopRoot)
-    var mSecsR = getSectionNodes(mobileRoot)
-    function walkRasterInherit(dNode, mNode) {
-        var dKids = (dNode.children || []).filter(function (c) {
-            return c && isVisible(c)
-        })
-        var mKids = (mNode.children || []).filter(function (c) {
-            return c && isVisible(c)
-        })
-        var pairR = pcMoChildPairsOrIndex(dKids, mKids)
-        for (var ri = 0; ri < pairR.length; ri++) {
-            var d = pairR[ri][0]
-            var m = pairR[ri][1]
-            if (d.type !== m.type) continue
-            if (!d.id) {
-                if (d.type === "FRAME" && isContainer(d)) walkRasterInherit(d, m)
-                continue
-            }
-            if (isCodeRasterNode(d) && m.id) out[String(m.id)] = true
-            if (d.type === "FRAME" && isContainer(d)) walkRasterInherit(d, m)
-        }
-    }
-    for (var sr = 0; sr < dSecsR.length && sr < mSecsR.length; sr++) {
-        var secCl = sectionClassPrefix(sr + 1)
-        if (skip[secCl]) continue
-        var dS = dSecsR[sr]
-        var mS = mSecsR[sr]
-        if (!dS || !mS || dS.type !== mS.type) continue
-        walkRasterInherit(dS, mS)
-    }
-    return out
+    return buildMoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs, isCodeRasterNode)
 }
 /** MO 트리에서 PC 레이어 이름(예: code-video)으로 비디오 짝 조회 — 이름 매칭 fallback이 MO 전용 이름이어도 동작 */
 function collectMoVideoNodesByPcLayerName(dSec, mSec) {

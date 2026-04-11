@@ -112,8 +112,8 @@ function pcMoChildPairsOrIndex(dKids, mKids) {
     return out
 }
 
-/** 구조 일치 섹션만: PC가 code-video인 슬롯의 MO 노드 id → true (MO 레이어명 불일치 허용) */
-function buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
+/** PC→MO 슬롯 상속 맵 공통: 구조 일치 섹션만, predicate(pcNode)가 true인 슬롯의 MO 노드 id → true */
+function buildMoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs, predicate) {
     var out = Object.create(null)
     if (!desktopRoot || !mobileRoot || !isContainer(desktopRoot) || !isContainer(mobileRoot)) return out
     var skip = Object.create(null)
@@ -129,16 +129,16 @@ function buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
         var mKids = (mNode.children || []).filter(function (c) {
             return c && isVisible(c)
         })
-        var pairVi = pcMoChildPairsOrIndex(dKids, mKids)
-        for (var i = 0; i < pairVi.length; i++) {
-            var d = pairVi[i][0]
-            var m = pairVi[i][1]
+        var pairs = pcMoChildPairsOrIndex(dKids, mKids)
+        for (var i = 0; i < pairs.length; i++) {
+            var d = pairs[i][0]
+            var m = pairs[i][1]
             if (d.type !== m.type) continue
             if (!d.id) {
                 if (d.type === "FRAME" && isContainer(d)) walkInherit(d, m)
                 continue
             }
-            if (isVideoSlotByNameOrFill(d) && m.id) out[String(m.id)] = true
+            if (predicate(d) && m.id) out[String(m.id)] = true
             if (d.type === "FRAME" && isContainer(d)) walkInherit(d, m)
         }
     }
@@ -152,45 +152,13 @@ function buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
     }
     return out
 }
+/** 구조 일치 섹션만: PC가 code-video인 슬롯의 MO 노드 id → true (MO 레이어명 불일치 허용) */
+function buildMoVideoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
+    return buildMoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs, isVideoSlotByNameOrFill)
+}
 /** 구조 일치 섹션만: PC가 code-raster인 슬롯의 MO 노드 id → true */
 function buildMoRasterInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs) {
-    var out = Object.create(null)
-    if (!desktopRoot || !mobileRoot || !isContainer(desktopRoot) || !isContainer(mobileRoot)) return out
-    var skip = Object.create(null)
-    if (Array.isArray(mismatchSecs)) {
-        for (var srx = 0; srx < mismatchSecs.length; srx++) skip[String(mismatchSecs[srx])] = true
-    }
-    var dSecsR = getSectionNodes(desktopRoot)
-    var mSecsR = getSectionNodes(mobileRoot)
-    function walkRasterInherit(dNode, mNode) {
-        var dKids = (dNode.children || []).filter(function (c) {
-            return c && isVisible(c)
-        })
-        var mKids = (mNode.children || []).filter(function (c) {
-            return c && isVisible(c)
-        })
-        var pairR = pcMoChildPairsOrIndex(dKids, mKids)
-        for (var ri = 0; ri < pairR.length; ri++) {
-            var d = pairR[ri][0]
-            var m = pairR[ri][1]
-            if (d.type !== m.type) continue
-            if (!d.id) {
-                if (d.type === "FRAME" && isContainer(d)) walkRasterInherit(d, m)
-                continue
-            }
-            if (isCodeRasterNode(d) && m.id) out[String(m.id)] = true
-            if (d.type === "FRAME" && isContainer(d)) walkRasterInherit(d, m)
-        }
-    }
-    for (var sr = 0; sr < dSecsR.length && sr < mSecsR.length; sr++) {
-        var secCl = sectionClassPrefix(sr + 1)
-        if (skip[secCl]) continue
-        var dS = dSecsR[sr]
-        var mS = mSecsR[sr]
-        if (!dS || !mS || dS.type !== mS.type) continue
-        walkRasterInherit(dS, mS)
-    }
-    return out
+    return buildMoInheritIdsMap(desktopRoot, mobileRoot, mismatchSecs, isCodeRasterNode)
 }
 /** MO 트리에서 PC 레이어 이름(예: code-video)으로 비디오 짝 조회 — 이름 매칭 fallback이 MO 전용 이름이어도 동작 */
 function collectMoVideoNodesByPcLayerName(dSec, mSec) {

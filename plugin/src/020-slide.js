@@ -147,6 +147,13 @@ function collectMoSlideItemNodes(dSec, mSec, bgChildId) {
     return moItemNodes
 }
 
+/** raw slidesPerView → 정수 근사 또는 소수 2자리, 범위 제한 */
+function roundSlidesPerView(raw, maxSlides) {
+    raw = clamp(raw, 1, maxSlides)
+    var rounded = Math.round(raw)
+    return Math.abs(raw - rounded) < 0.15 ? rounded : r2(raw)
+}
+
 /** slidesPerView 계산 */
 function computeSlidesPerView(sectionNode, bgChildId, fallbackValue) {
     var items = collectSwiperSlideItemNodes(sectionNode, bgChildId)
@@ -156,16 +163,7 @@ function computeSlidesPerView(sectionNode, bgChildId, fallbackValue) {
     var pitch = getSlideItemPitch(items)
     if (!(viewportW > 0) || !(pitch > 0)) return fallbackValue != null ? fallbackValue : 1
 
-    var raw = viewportW / pitch
-
-    // 너무 이상한 값 방지
-    raw = clamp(raw, 1, items.length)
-
-    // 정수에 가까우면 정수로, 아니면 소수 2자리
-    var rounded = Math.round(raw)
-    if (Math.abs(raw - rounded) < 0.15) return rounded
-
-    return r2(raw)
+    return roundSlidesPerView(viewportW / pitch, items.length)
 }
 
 /** PC 섹션 기준으로 MO 섹션 매칭 후 slidesPerView 계산 */
@@ -218,14 +216,8 @@ function computeSlidesPerViewMo(dSec, mSec, bgChildId, fallbackValue) {
         return fallbackValue != null ? fallbackValue : 1
     }
 
-    var raw = viewportW / pitch
     // 상한은 PC 슬라이드 아이템 개수 기준. mSec 직계 자식 수(예: slide 그룹 1개)를 쓰면 항상 1로 죽는 버그 방지
-    raw = clamp(raw, 1, dItems.length)
-
-    var rounded = Math.round(raw)
-    if (Math.abs(raw - rounded) < 0.15) return rounded
-
-    return r2(raw)
+    return roundSlidesPerView(viewportW / pitch, dItems.length)
 }
 
 /**

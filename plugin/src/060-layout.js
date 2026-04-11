@@ -248,10 +248,8 @@ function getBoundsForAbsDeclChild(childNode, parentNode) {
     return getRasterExportBounds(childNode)
 }
 
-/** 절대 위치: 설계 좌표는 --ap-left/--ap-top/--ap-w/--ap-h (디자인 px). 실제 calc는 .ap-abs 공통 규칙. */
-function buildAbsDecl(childNode, parentNode) {
-    var box = getBoundsForAbsDeclChild(childNode, parentNode)
-    var parentBox = getAbs(parentNode)
+/** box·parentBox → --ap-left/top/w/h 선언 공통 */
+function formatAbsVarsDecl(box, parentBox) {
     if (!box || !parentBox) return ""
     var relX = cssOutLayoutPx(box.x - parentBox.x)
     var relY = cssOutLayoutPx(box.y - parentBox.y)
@@ -259,36 +257,28 @@ function buildAbsDecl(childNode, parentNode) {
     var h = box.h != null ? cssOutLayoutPx(box.h) : "0"
     return "--ap-left:" + relX + ";--ap-top:" + relY + ";--ap-w:" + w + ";--ap-h:" + h
 }
+/** PC/MO bounds 4변 비교 — 동일(또는 데이터 부족)이면 true */
+function absVarsSame(dB, dPB, mB, mPB) {
+    if (!dB || !dPB || !mB || !mPB) return true
+    return layoutPxNum(r2(dB.x - dPB.x)) === layoutPxNum(r2(mB.x - mPB.x))
+        && layoutPxNum(r2(dB.y - dPB.y)) === layoutPxNum(r2(mB.y - mPB.y))
+        && layoutPxNum(r2(dB.w != null ? dB.w : 0)) === layoutPxNum(r2(mB.w != null ? mB.w : 0))
+        && layoutPxNum(r2(dB.h != null ? dB.h : 0)) === layoutPxNum(r2(mB.h != null ? mB.h : 0))
+}
 
+/** 절대 위치: 설계 좌표는 --ap-left/--ap-top/--ap-w/--ap-h (디자인 px). 실제 calc는 .ap-abs 공통 규칙. */
+function buildAbsDecl(childNode, parentNode) {
+    return formatAbsVarsDecl(getBoundsForAbsDeclChild(childNode, parentNode), getAbs(parentNode))
+}
 /** TEXT 래스터(.ap-image) 절대 배치: 시각적 bounds 기준 */
 function buildAbsDeclTextRaster(childNode, parentNode) {
-    var box = getTextRasterBounds(childNode) || getAbs(childNode)
-    var parentBox = getAbs(parentNode)
-    if (!box || !parentBox) return ""
-    var relX = cssOutLayoutPx(box.x - parentBox.x)
-    var relY = cssOutLayoutPx(box.y - parentBox.y)
-    var w = box.w != null ? cssOutLayoutPx(box.w) : "0"
-    var h = box.h != null ? cssOutLayoutPx(box.h) : "0"
-    return "--ap-left:" + relX + ";--ap-top:" + relY + ";--ap-w:" + w + ";--ap-h:" + h
+    return formatAbsVarsDecl(getTextRasterBounds(childNode) || getAbs(childNode), getAbs(parentNode))
 }
 
 /** PC/MO TEXT 래스터 절대 위치 비교 후 MO 기준 선언 */
 function buildAbsDeclTextRasterDiff(dChild, dParent, mChild, mParent) {
-    var dB = getTextRasterBounds(dChild) || getAbs(dChild)
-    var dPB = getAbs(dParent)
-    var mB = getTextRasterBounds(mChild) || getAbs(mChild)
-    var mPB = getAbs(mParent)
-    if (!dB || !dPB || !mB || !mPB) return ""
-    var dRelX = r2(dB.x - dPB.x),
-        dRelY = r2(dB.y - dPB.y),
-        dW = r2(dB.w != null ? dB.w : 0),
-        dH = r2(dB.h != null ? dB.h : 0)
-    var mRelX = r2(mB.x - mPB.x),
-        mRelY = r2(mB.y - mPB.y),
-        mW = r2(mB.w != null ? mB.w : 0),
-        mH = r2(mB.h != null ? mB.h : 0)
-    if (layoutPxNum(dRelX) === layoutPxNum(mRelX) && layoutPxNum(dRelY) === layoutPxNum(mRelY) && layoutPxNum(dW) === layoutPxNum(mW) && layoutPxNum(dH) === layoutPxNum(mH))
-        return ""
+    var getBounds = function (n) { return getTextRasterBounds(n) || getAbs(n) }
+    if (absVarsSame(getBounds(dChild), getAbs(dParent), getBounds(mChild), getAbs(mParent))) return ""
     return buildAbsDeclTextRaster(mChild, mParent)
 }
 
@@ -362,21 +352,7 @@ function buildFlexDeclDiff(dLv, mLv, node, moAbsSelf) {
 }
 /** PC(d)와 MO(m) 절대 위치 비교 후 달라질 때만 MO 기준 선언 */
 function buildAbsDeclDiff(dChild, dParent, mChild, mParent) {
-    var dB = getBoundsForAbsDeclChild(dChild, dParent)
-    var dPB = getAbs(dParent)
-    var mB = getBoundsForAbsDeclChild(mChild, mParent)
-    var mPB = getAbs(mParent)
-    if (!dB || !dPB || !mB || !mPB) return ""
-    var dRelX = r2(dB.x - dPB.x),
-        dRelY = r2(dB.y - dPB.y),
-        dW = r2(dB.w != null ? dB.w : 0),
-        dH = r2(dB.h != null ? dB.h : 0)
-    var mRelX = r2(mB.x - mPB.x),
-        mRelY = r2(mB.y - mPB.y),
-        mW = r2(mB.w != null ? mB.w : 0),
-        mH = r2(mB.h != null ? mB.h : 0)
-    if (layoutPxNum(dRelX) === layoutPxNum(mRelX) && layoutPxNum(dRelY) === layoutPxNum(mRelY) && layoutPxNum(dW) === layoutPxNum(mW) && layoutPxNum(dH) === layoutPxNum(mH))
-        return ""
+    if (absVarsSame(getBoundsForAbsDeclChild(dChild, dParent), getAbs(dParent), getBoundsForAbsDeclChild(mChild, mParent), getAbs(mParent))) return ""
     return buildAbsDecl(mChild, mParent)
 }
 

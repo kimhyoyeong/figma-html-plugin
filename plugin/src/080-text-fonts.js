@@ -511,7 +511,8 @@ function normalizeApTextColorHex(clr) {
 }
 
 function isDefaultApTextColor(clr) {
-    return normalizeApTextColorHex(clr) === "" || normalizeApTextColorHex(clr) === "#000"
+    var n = normalizeApTextColorHex(clr)
+    return n === "" || n === "#000"
 }
 
 function isDefaultApTextLhRatio(ratio) {

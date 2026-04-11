@@ -432,23 +432,18 @@ function decideImageKind(node, ctx) {
         if (!rkSlide && sk && cache.slideAssetKeyBySlot) rkSlide = cache.slideAssetKeyBySlot[sk]
         if (rkSlide) return Promise.resolve("pc-shared-slide")
     }
-    if (node.type === "TEXT") {
+    function resolveRasterKindAsync() {
         return resolveRasterFormatOnceAsync(node, ctx).then(function (fmt) {
             return fmt === "PNG" ? "raster-png" : "raster-jpg"
         })
     }
+    if (node.type === "TEXT") return resolveRasterKindAsync()
     if (isCodeRasterNodeEffective(node, cache)) return Promise.resolve("composite-raster")
-    if (ctx.sectionBackgroundImageFillOnly && hasImageFill(node)) {
-        return resolveRasterFormatOnceAsync(node, ctx).then(function (fmt) {
-            return fmt === "PNG" ? "raster-png" : "raster-jpg"
-        })
-    }
+    if (ctx.sectionBackgroundImageFillOnly && hasImageFill(node)) return resolveRasterKindAsync()
     if (isVectorOnlyTree(node)) return Promise.resolve("svg")
     if (isContainer(node) && shouldCompositeRasterGroup(node)) return Promise.resolve("composite-raster")
     if (!shouldExportAsSingleRasterImage(node, cache)) return Promise.resolve("skip")
-    return resolveRasterFormatOnceAsync(node, ctx).then(function (fmt) {
-        return fmt === "PNG" ? "raster-png" : "raster-jpg"
-    })
+    return resolveRasterKindAsync()
 }
 
 function rasterFormatFromKind(kind) {
@@ -762,28 +757,17 @@ function pipelineEnsureImageAsync(node, ctx) {
         if (kind === "svg") {
             return finishExport(node, kind, null, ctx)
         }
-        if (kind === "composite-raster") {
+        function resolveAndFinish() {
             return resolveRasterFormatOnceAsync(node, ctx).then(function (f) {
                 var effCtx =
-                    ctx &&
-                    !ctx.sectionBackgroundImageFillOnly &&
-                    ctx.clipExportParent &&
+                    ctx && !ctx.sectionBackgroundImageFillOnly && ctx.clipExportParent &&
                     shouldRasterExportViaParentClip(node, ctx.clipExportParent)
                         ? Object.assign({}, ctx, { rasterExportSourceNode: ctx.clipExportParent })
                         : ctx
                 return finishExport(node, kind, f, effCtx)
             })
         }
-        return resolveRasterFormatOnceAsync(node, ctx).then(function (f) {
-            var effCtx2 =
-                ctx &&
-                !ctx.sectionBackgroundImageFillOnly &&
-                ctx.clipExportParent &&
-                shouldRasterExportViaParentClip(node, ctx.clipExportParent)
-                    ? Object.assign({}, ctx, { rasterExportSourceNode: ctx.clipExportParent })
-                    : ctx
-            return finishExport(node, kind, f, effCtx2)
-        })
+        return resolveAndFinish()
     })
 }
 

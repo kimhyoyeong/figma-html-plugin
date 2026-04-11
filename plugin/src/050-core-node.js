@@ -10,7 +10,7 @@
  * isFigmaDirectParent / findDirectFigmaParentUnderRoot — 트리·클립 export용
  * isContainer, isVisible, hasVisibleChildren — 트리 순회·export 필터
  * isFlex — layoutMode !== NONE
- * isAbsoluteInParent, isAbsolutePositioned, isAbsoluteByParentNotFlex, isAbsoluteLike — CSS ap-abs 판별
+ * isAbsolutePositioned, isAbsoluteLike — CSS ap-abs 판별
  * containerNeedsRelativeForAbsoluteChildren — 비-flex 부모에 position:relative 필요 여부
  * containerAllVisibleChildrenAreAbsolute — 보이는 직계 자식이 1개 이상이며 전부 ap-abs 계열이면 true (플로우 높이 0 방지용)
  */
@@ -134,16 +134,6 @@ function isFlex(node) {
         return false
     }
 }
-/** Flex 부모 안에서 자식이 Absolute로 배치된 경우인지 */
-function isAbsoluteInParent(child, parent) {
-    try {
-        if (!parent || !child) return false
-        if (!isFlex(parent)) return false
-        if (isAbsolutePositioned(child)) return true
-    } catch (e) {}
-    return false
-}
-
 /** Figma Auto Layout 자식의 Absolute 배치 여부 (명시적으로 ABSOLUTE일 때만 true; undefined/null → AUTO와 동일) */
 function isAbsolutePositioned(node) {
     try {
@@ -156,18 +146,11 @@ function isAbsolutePositioned(node) {
     }
 }
 
-/** 부모가 flex가 아니면 자식은 모두 x,y 기준 배치 → absolute로 처리 */
-function isAbsoluteByParentNotFlex(node, parent) {
-    try {
-        return !!(parent && !isFlex(parent) && node)
-    } catch (e) {
-        return false
-    }
-}
-
-/** 절대 위치 계열 판별 (in-parent / self absolute / parent not flex) 통합 */
+/** 절대 위치 계열 통합: non-flex 부모면 항상 abs, flex 부모·부모 없으면 layoutPositioning 기준 */
 function isAbsoluteLike(node, parent) {
-    return isAbsoluteInParent(node, parent) || isAbsolutePositioned(node) || isAbsoluteByParentNotFlex(node, parent)
+    if (!node) return false
+    if (parent && !isFlex(parent)) return true
+    return isAbsolutePositioned(node)
 }
 
 /** 비 flex 컨테이너는 .ap-flex의 position:relative가 없음 → 직계 abs 자식이 있을 때만 명시 */

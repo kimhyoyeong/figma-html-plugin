@@ -67,8 +67,7 @@ function pad2(n) {
 }
 /** 섹션 인덱스 → CSS 클래스 접두어 (1 → "01") */
 function sectionClassPrefix(oneBasedIndex) {
-    var n = Math.max(1, Math.floor(oneBasedIndex))
-    return (n < 10 ? "0" : "") + n
+    return pad2(Math.max(1, Math.floor(oneBasedIndex)))
 }
 /** ap-ai-audit 주석 블록 — ZIP 등 산출물에 포함하지 않음 */
 function stripApAiAuditBlock(html) {
