@@ -1192,23 +1192,17 @@ function paddingSideToCqi(px) {
     if (n === 0) return "0"
     return "calc(" + n + "/var(--ap-width)*100cqi)"
 }
-/** ap-flex: padding 을 top right bottom left 네 값 한 줄로 (전부 0이면 생략) */
+/** ap-flex: padding 단축 표기 (전부 0이면 생략, 동일 값이면 축약) */
 function buildFlexPaddingDecl(pt, pr, pb, pl) {
     pt = Number(pt) || 0
     pr = Number(pr) || 0
     pb = Number(pb) || 0
     pl = Number(pl) || 0
     if (pt === 0 && pr === 0 && pb === 0 && pl === 0) return ""
-    return (
-        "padding:" +
-        paddingSideToCqi(pt) +
-        " " +
-        paddingSideToCqi(pr) +
-        " " +
-        paddingSideToCqi(pb) +
-        " " +
-        paddingSideToCqi(pl)
-    )
+    if (pt === pr && pr === pb && pb === pl) return "padding:" + paddingSideToCqi(pt)
+    if (pt === pb && pr === pl) return "padding:" + paddingSideToCqi(pt) + " " + paddingSideToCqi(pr)
+    if (pr === pl) return "padding:" + paddingSideToCqi(pt) + " " + paddingSideToCqi(pr) + " " + paddingSideToCqi(pb)
+    return "padding:" + paddingSideToCqi(pt) + " " + paddingSideToCqi(pr) + " " + paddingSideToCqi(pb) + " " + paddingSideToCqi(pl)
 }
 
 /** ap-flex 노드용 flex CSS. absSelf: 이 노드가 ap-abs이면 자식 absolute용 position:relative 를 넣지 않음(지연 CSS가 absolute 덮어쓰기 방지) */
@@ -1632,7 +1626,10 @@ function buildStrokeDecl(node) {
     }
     var parts = []
     if (stroke.top > 0 || stroke.bottom > 0 || stroke.left > 0 || stroke.right > 0) {
-        parts.push("border-width:" + calcW(stroke.top) + " " + calcW(stroke.right) + " " + calcW(stroke.bottom) + " " + calcW(stroke.left))
+        var t = stroke.top, r = stroke.right, b = stroke.bottom, l = stroke.left
+        if (t === r && r === b && b === l) parts.push("border-width:" + calcW(t))
+        else if (t === b && r === l) parts.push("border-width:" + calcW(t) + " " + calcW(r))
+        else parts.push("border-width:" + calcW(t) + " " + calcW(r) + " " + calcW(b) + " " + calcW(l))
         parts.push("border-style:" + style)
         parts.push("border-color:" + stroke.color)
     }
@@ -1646,6 +1643,115 @@ function buildStrokeDeclDiff(dNode, mNode) {
     if (dDecl === mDecl) return ""
     if (mDecl) return mDecl
     return "border:none"
+}
+
+/** node.effects → box-shadow CSS (DROP_SHADOW, INNER_SHADOW) */
+function buildBoxShadowDecl(node) {
+    if (!node) return ""
+    try {
+        var eff = node.effects
+        if (!eff || !eff.length) return ""
+        var shadows = []
+        for (var i = 0; i < eff.length; i++) {
+            var e = eff[i]
+            if (!e || e.visible === false) continue
+            var inset = ""
+            if (e.type === "DROP_SHADOW") inset = ""
+            else if (e.type === "INNER_SHADOW") inset = "inset "
+            else continue
+            var c = e.color || {}
+            var r = Math.round((c.r || 0) * 255)
+            var g = Math.round((c.g || 0) * 255)
+            var b = Math.round((c.b || 0) * 255)
+            var a = typeof c.a === "number" ? c.a : (typeof e.opacity === "number" ? e.opacity : 1)
+            var ox = "calc(" + cssOutLayoutPx(Math.round(e.offset ? e.offset.x : 0)) + "/var(--ap-width)*100cqi)"
+            var oy = "calc(" + cssOutLayoutPx(Math.round(e.offset ? e.offset.y : 0)) + "/var(--ap-width)*100cqi)"
+            var bl = "calc(" + cssOutLayoutPx(Math.round(e.radius || 0)) + "/var(--ap-width)*100cqi)"
+            var sp = e.spread != null ? "calc(" + cssOutLayoutPx(Math.round(e.spread)) + "/var(--ap-width)*100cqi)" : "0"
+            shadows.push(inset + ox + " " + oy + " " + bl + " " + sp + " rgba(" + r + "," + g + "," + b + "," + r2(a) + ")")
+        }
+        if (!shadows.length) return ""
+        return "box-shadow:" + shadows.join(",")
+    } catch (e) {
+        return ""
+    }
+}
+
+/** node.effects → filter: blur() CSS (LAYER_BLUR) */
+function buildBlurDecl(node) {
+    if (!node) return ""
+    try {
+        var eff = node.effects
+        if (!eff || !eff.length) return ""
+        for (var i = 0; i < eff.length; i++) {
+            var e = eff[i]
+            if (!e || e.visible === false) continue
+            if (e.type === "LAYER_BLUR" && e.radius > 0) {
+                return "filter:blur(calc(" + cssOutLayoutPx(Math.round(e.radius)) + "/var(--ap-width)*100cqi))"
+            }
+        }
+    } catch (e) {}
+    return ""
+}
+
+/** node.opacity → opacity CSS (1 미만일 때만) */
+function buildOpacityDecl(node) {
+    if (!node) return ""
+    try {
+        if (typeof node.opacity === "number" && node.opacity < 1 && node.opacity >= 0) {
+            return "opacity:" + r2(node.opacity)
+        }
+    } catch (e) {}
+    return ""
+}
+
+/** node.clipsContent → overflow:hidden CSS */
+function buildOverflowDecl(node) {
+    if (!node) return ""
+    try {
+        if (node.clipsContent === true) return "overflow:hidden"
+    } catch (e) {}
+    return ""
+}
+
+/** GRADIENT fill → CSS linear/radial-gradient. 첫 번째 보이는 그래디언트만 */
+function buildGradientDecl(node) {
+    if (!node) return ""
+    try {
+        var fills = node.fills
+        if (!fills || fills === figma.mixed) return ""
+        for (var i = fills.length - 1; i >= 0; i--) {
+            var f = fills[i]
+            if (!f || f.visible === false) continue
+            if (f.type !== "GRADIENT_LINEAR" && f.type !== "GRADIENT_RADIAL") continue
+            var stops = f.gradientStops
+            if (!stops || stops.length < 2) continue
+            var cssStops = []
+            for (var si = 0; si < stops.length; si++) {
+                var sc = stops[si].color || {}
+                var sr = Math.round((sc.r || 0) * 255)
+                var sg = Math.round((sc.g || 0) * 255)
+                var sb = Math.round((sc.b || 0) * 255)
+                var sa = typeof sc.a === "number" ? sc.a : 1
+                var pos = r2((stops[si].position || 0) * 100)
+                cssStops.push("rgba(" + sr + "," + sg + "," + sb + "," + r2(sa) + ") " + pos + "%")
+            }
+            if (f.type === "GRADIENT_LINEAR") {
+                var handles = f.gradientHandlePositions
+                var angle = 180
+                if (handles && handles.length >= 2) {
+                    var dx = (handles[1].x || 0) - (handles[0].x || 0)
+                    var dy = (handles[1].y || 0) - (handles[0].y || 0)
+                    angle = Math.round(Math.atan2(dx, -dy) * 180 / Math.PI)
+                }
+                return "background:linear-gradient(" + angle + "deg," + cssStops.join(",") + ")"
+            }
+            if (f.type === "GRADIENT_RADIAL") {
+                return "background:radial-gradient(ellipse at center," + cssStops.join(",") + ")"
+            }
+        }
+    } catch (e) {}
+    return ""
 }
 
 
@@ -2160,6 +2266,44 @@ function figTextCaseToDeclFragment(tc) {
     return ""
 }
 
+/** 인접 동일 스타일 parts 병합 — Figma가 특수문자(™ 등) 경계에서 불필요하게 분할한 세그먼트 통합 */
+function mergeAdjacentSameStyleParts(parts) {
+    if (!parts || parts.length <= 1) return parts
+    var out = [parts[0]]
+    for (var i = 1; i < parts.length; i++) {
+        var prev = out[out.length - 1]
+        var cur = parts[i]
+        if (prev.fw === cur.fw &&
+            prev.fs === cur.fs &&
+            prev.clr === cur.clr &&
+            Math.abs((prev.ls || 0) - (cur.ls || 0)) < 0.001 &&
+            (prev.textCase || "") === (cur.textCase || "")) {
+            out[out.length - 1] = {
+                start: prev.start,
+                end: cur.end,
+                characters: (prev.characters || "") + (cur.characters || ""),
+                clr: prev.clr,
+                fs: prev.fs,
+                fw: prev.fw,
+                ls: prev.ls,
+                textCase: prev.textCase
+            }
+        } else {
+            out.push(cur)
+        }
+    }
+    return out.length === 1 ? null : out
+}
+
+/** Figma textDecoration → CSS text-decoration 선언. NONE/없으면 빈 문자열 */
+function figTextDecorationToDecl(td) {
+    if (!td || td === "NONE") return ""
+    var v = String(td).toUpperCase()
+    if (v === "UNDERLINE") return "text-decoration:underline"
+    if (v === "STRIKETHROUGH") return "text-decoration:line-through"
+    return ""
+}
+
 /** TEXT 노드 → {text, fs, lh, ls, fw, ta, clr, parts(구간별 스타일)} (폰트 로드 후) */
 function getTextSummaryAsync(tn) {
     return loadFontsForTextNodeAsync(tn).then(function () {
@@ -2187,6 +2331,12 @@ function getTextSummaryAsync(tn) {
             }
         } catch (eTc) {}
         out.textCase = nodeTextCaseStr
+
+        out.textDecoration = ""
+        try {
+            var td = tn.textDecoration
+            if (td && td !== figma.mixed && td !== "NONE") out.textDecoration = String(td)
+        } catch (eTd) {}
 
         try {
             var s = tn.characters
@@ -2360,6 +2510,7 @@ function getTextSummaryAsync(tn) {
                                 }
                             })
                         }
+                        if (out.parts) out.parts = mergeAdjacentSameStyleParts(out.parts)
                         if (out.fs === "" && out.parts && out.parts.length > 0) {
                             var firstFs = out.parts[0].fs
                             if (firstFs != null && firstFs > 0) out.fs = String(Math.round(firstFs))
@@ -2378,6 +2529,7 @@ function getTextSummaryAsync(tn) {
                     }
                 } else {
                     var runs = extractTextStyleRunsFromRangeApi(tn, len)
+                    runs = mergeAdjacentSameStyleParts(runs) || runs
                     if (runs && runs.length > 1) {
                         out.parts = runs
                         if (out.fs === "" && runs[0] && runs[0].fs > 0) out.fs = String(Math.round(runs[0].fs))
@@ -2557,6 +2709,8 @@ function buildTextVarsDecl(ts) {
         var tcf = figTextCaseToDeclFragment(ts.textCase)
         if (tcf) parts.push(tcf)
     }
+    var tdDecl = figTextDecorationToDecl(ts.textDecoration)
+    if (tdDecl) parts.push(tdDecl)
 
     return parts.join(";")
 }
@@ -2605,6 +2759,9 @@ function buildTextVarsDeclDiff(tsD, tsM) {
         if (moCaseFrag) parts.push(moCaseFrag)
         else if (m.tc === "ORIGINAL") parts.push("text-transform:none;font-variant:normal")
     }
+    var dTd = figTextDecorationToDecl(tsD && tsD.textDecoration)
+    var mTd = figTextDecorationToDecl(tsM && tsM.textDecoration)
+    if (dTd !== mTd) parts.push(mTd || "text-decoration:none")
     return parts.join(";")
 }
 
@@ -2612,7 +2769,7 @@ function buildTextVarsDeclDiff(tsD, tsM) {
 function getTextSummarySync(tn) {
     if (!tn || tn.type !== "TEXT") return null
     try {
-        var out = {fs: "", lh: "", ls: "", fw: "", ta: "", clr: ""}
+        var out = {fs: "", lh: "", ls: "", fw: "", ta: "", clr: "", textDecoration: ""}
         if (tn.fontSize !== figma.mixed) {
             out.fs = String(Number(tn.fontSize) || 0)
         } else {
@@ -2645,6 +2802,10 @@ function getTextSummarySync(tn) {
         out.ta = String(tn.textAlignHorizontal || "")
         var fill = getFirstSolidFill(tn)
         if (fill && fill.color) out.clr = fill.color
+        try {
+            var tdSync = tn.textDecoration
+            if (tdSync && tdSync !== figma.mixed && tdSync !== "NONE") out.textDecoration = String(tdSync)
+        } catch (eTdS) {}
         return out
     } catch (e) {
         return null
@@ -3217,14 +3378,26 @@ function disambiguateSectionSemantics(sectionNode, map) {
         var baseNm = clsStr.replace(/--\d{2}$/, "")
         if (baseNm === "ap-section__content" || baseNm === "ap-section__image") continue
         for (var k = 0; k < ids.length; k++) {
-            var newCls = k === 0 ? clsStr : baseNm + "--" + pad2(k + 1)
+            var newCls = baseNm + "--" + pad2(k + 1)
             var arrM = map[ids[k]]
             var idx = arrM.indexOf(clsStr)
             if (idx >= 0) arrM[idx] = newCls
         }
     }
-    renumberApSectionElemGlobally(sectionNode, map, "image")
-    renumberApSectionElemGlobally(sectionNode, map, "content")
+    // 모든 요소 타입에 대해 문서 순서 기준 연번 재정렬
+    var allBases = {}
+    for (var rid in map) {
+        if (!Object.prototype.hasOwnProperty.call(map, rid)) continue
+        var ra = map[rid] || []
+        for (var ri = 0; ri < ra.length; ri++) {
+            var rb = String(ra[ri] || "").replace(/--\d{2}$/, "")
+            if (rb && rb.indexOf("ap-section__") === 0) allBases[rb] = true
+        }
+    }
+    var elemParts = Object.keys(allBases).map(function (b) { return b.replace("ap-section__", "") })
+    for (var ei = 0; ei < elemParts.length; ei++) {
+        renumberApSectionElemGlobally(sectionNode, map, elemParts[ei])
+    }
 }
 
 /** 지연 CSS용: 섹션 스코프 안 시맨틱 클래스만 (ap-n 없음) */
@@ -3783,6 +3956,38 @@ function moOverrideSelectorIsLive(sel, usedBySection) {
 }
 
 /** 래퍼(.ap-image .ap-section__image--XX)에 --ap-w/--ap-h만 넣음. 기존 .ap-image img 규칙이 var()로 활용 (ap-abs 래퍼는 생략) */
+/**
+ * CSS 후처리(병합·제거) 후 남은 ap-section__*--NN 을 섹션별로 연번 재정렬.
+ * desc--01,desc--03 → desc--01,desc--02 식으로 갭을 메움.
+ * 리턴: [{secId, from, to}] — applySectionScopedClassRenames 형식.
+ */
+function buildSequentialBemRenames(rules) {
+    var secBases = {}
+    for (var i = 0; i < rules.length; i++) {
+        var sel = rules[i] && rules[i].sel ? String(rules[i].sel) : ""
+        var sm = sel.match(/\.ap-section--(\d+)\s+\.(ap-section__[\w]+)(?:--([\d]{2}))/)
+        if (!sm) continue
+        var sec = sm[1], base = sm[2], num = sm[3] ? parseInt(sm[3], 10) : 0
+        if (!num) continue
+        var key = sec + "\x00" + base
+        if (!secBases[key]) secBases[key] = []
+        if (secBases[key].indexOf(num) < 0) secBases[key].push(num)
+    }
+    var renames = []
+    for (var k in secBases) {
+        var parts = k.split("\x00")
+        var sec = parts[0], base = parts[1]
+        var nums = secBases[k].sort(function (a, b) { return a - b })
+        for (var ni = 0; ni < nums.length; ni++) {
+            var expected = ni + 1
+            if (nums[ni] !== expected) {
+                renames.push({ secId: sec, from: base + "--" + pad2(nums[ni]), to: base + "--" + pad2(expected) })
+            }
+        }
+    }
+    return renames
+}
+
 function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapperIsApAbs, visibilityWrapper, clipParent) {
     if (!nodeId || wrapperIsApAbs) return
     var decl = getImageSizeDecl(node, clipParent)
@@ -5859,20 +6064,21 @@ function layoutChildDetails(node) {
     return parts.length ? parts.join("; ") : ""
 }
 
-/** width:fill + 부모 flex-start일 때만 width:100% 반환 (코드 생성용) */
+/** width:fill → Figma FILL은 부모 정렬과 무관하게 교차축 전폭. row 주축 FILL은 flex-grow로 처리 */
 function getFillFlexStartWidthDecl(node, parent) {
     if (!node || !parent || !isFlex(parent)) return ""
     if (node.layoutSizingHorizontal !== "FILL") return ""
     var pv = getLayoutVars(parent)
     var isColumn = pv.direction === "column"
-    if (isColumn && (pv.align === "" || pv.align === "flex-start")) return "width:100%"
-    if (!isColumn && (pv.justify === "" || pv.justify === "flex-start")) return "width:100%"
-    return ""
+    // column 교차축(가로) FILL → 항상 width:100%
+    if (isColumn) return "width:100%"
+    // row 주축 FILL → flex-grow로 공간 분배 (getFlexChildMainAxisGrowDecl에서 처리)
+    return "flex-grow:1;min-width:0"
 }
 
 /**
  * 부모 오토레이아웃 주축 방향으로 늘리는 자식: layoutGrow>0 또는 세로 FILL(column 부모).
- * row 부모에서 세로 FILL + 교차축 flex-start → height:100%.
+ * row 부모에서 세로 FILL → 부모 정렬과 무관하게 height:100% (stretch 제외 — 이미 기본).
  */
 function getFlexChildMainAxisGrowDecl(node, parent) {
     if (!node || !parent || !isFlex(parent)) return ""
@@ -5891,13 +6097,43 @@ function getFlexChildMainAxisGrowDecl(node, parent) {
     try {
         vFill = node.layoutSizingVertical === "FILL"
     } catch (e) {}
+    var hFill = false
+    try {
+        hFill = node.layoutSizingHorizontal === "FILL"
+    } catch (e) {}
     if (isColumn) {
         if (growN > 0) return "flex-grow:" + growN + ";min-height:0"
         if (vFill) return "flex-grow:1;min-height:0"
         return ""
     }
+    // row: 주축 grow
     if (growN > 0) return "flex-grow:" + growN + ";min-width:0"
-    if (vFill && pv.align === "flex-start") return "height:100%"
+    // row: 가로 FILL은 getFillFlexStartWidthDecl에서 flex-grow:1 처리 → 여기선 생략
+    // row: 세로 FILL → 부모 교차축 stretch(기본)이면 CSS 기본으로 충분, 그 외면 height:100%
+    if (vFill && pv.align !== "" && pv.align !== "stretch") return "height:100%"
+    return ""
+}
+
+/**
+ * Figma layoutAlign → CSS align-self (부모 교차축 기본값과 다를 때만).
+ * STRETCH는 생략 — width:100%/getTextFullWidthDecl/getFillFlexStartWidthDecl 등이 이미 처리.
+ * align-self:stretch 를 명시하면 명시적 width와 충돌할 수 있으므로 width 쪽에 위임.
+ */
+function getAlignSelfDecl(node, parent) {
+    if (!node || !parent || !isFlex(parent)) return ""
+    try {
+        if (isAbsoluteLike(node, parent)) return ""
+        if (!("layoutAlign" in node) || !node.layoutAlign || node.layoutAlign === "INHERIT") return ""
+        var a = String(node.layoutAlign).toUpperCase()
+        if (a === "STRETCH") return ""
+        var pv = getLayoutVars(parent)
+        if (a === "MIN" && pv.align === "flex-start") return ""
+        if (a === "CENTER" && pv.align === "center") return ""
+        if (a === "MAX" && pv.align === "flex-end") return ""
+        if (a === "MIN") return "align-self:flex-start"
+        if (a === "CENTER") return "align-self:center"
+        if (a === "MAX") return "align-self:flex-end"
+    } catch (e) {}
     return ""
 }
 
@@ -5955,9 +6191,11 @@ function sectionContainerNeedsFullWidthInColumnParent(frameNode, parent, section
 }
 
 /**
- * Hug 텍스트는 absoluteBoundingBox 가로가 글자 폭만 잡혀 부모 프레임과 숫자가 다름.
- * column flex 안에서 CENTER/RIGHT/JUSTIFIED면 부모 전폭 기준 정렬이 되려면 width:100% 필요.
- * 단, 부모 교차축이 CENTER(align-items:center)면 자식은 flex로 가로 중앙 배치되므로 width:100% 생략(전폭+text-align로 이중·깨짐 방지).
+ * column flex에서 텍스트가 부모 전폭 기준으로 줄바꿈·정렬되려면 width:100% 필요.
+ * 1) align-items:flex-start → content 폭이 되어 줄바꿈·정렬 기준이 달라짐 → 항상 필요
+ * 2) align-items:center/flex-end + text-align center/right/justified → 부모 전폭 기준 정렬 필요
+ *    (PC는 left인데 MO에서 center로 바뀌는 경우 MO 오버라이드에서 반영됨)
+ * 3) align-items:stretch → CSS 기본 전폭 → 불필요
  */
 function textNeedsFullWidthForAlignInColumnFlex(textNode, parent) {
     if (!textNode || textNode.type !== "TEXT" || !parent) return false
@@ -5965,20 +6203,19 @@ function textNeedsFullWidthForAlignInColumnFlex(textNode, parent) {
         if (!isFlex(parent)) return false
         var pv = getLayoutVars(parent)
         if (pv.direction !== "column") return false
-        var counterAxis = String(parent.counterAxisAlignItems || "").toUpperCase()
-        if (counterAxis === "CENTER") return false
-        var ta = String(textNode.textAlignHorizontal || "").toUpperCase()
-        if (ta !== "CENTER" && ta !== "RIGHT" && ta !== "JUSTIFIED") return false
         var isFill = false
         try {
             isFill = textNode.layoutSizingHorizontal === "FILL"
         } catch (e2) {}
         if (isFill) return false
-        var pBox = getAbs(parent)
-        var tBox = getAbs(textNode)
-        if (!pBox || !tBox || pBox.w == null || tBox.w == null) return false
-        if (r2(pBox.w) <= r2(tBox.w)) return false
-        return true
+        // stretch(기본)면 CSS 기본이 전폭 → 불필요
+        if (pv.align === "" || pv.align === "stretch") return false
+        // flex-start: 모든 텍스트에 width:100% (줄바꿈 기준 + 정렬 기준)
+        if (pv.align === "flex-start") return true
+        // center/flex-end: text-align이 center/right/justified면 부모 전폭 기준 정렬 필요
+        var ta = String(textNode.textAlignHorizontal || "").toUpperCase()
+        if (ta === "CENTER" || ta === "RIGHT" || ta === "JUSTIFIED") return true
+        return false
     } catch (e) {
         return false
     }
@@ -5997,6 +6234,12 @@ function getTextFullWidthDecl(node, textAbs, parent) {
     try {
         if (node.layoutSizingHorizontal === "FILL") byFill = true
     } catch (e) {}
+    // layoutAlign STRETCH → 부모 교차축 전폭 (align-self:stretch 대신 width:100%로 처리)
+    if (!byFill && parent && isFlex(parent)) {
+        try {
+            if (node.layoutAlign === "STRETCH") byFill = true
+        } catch (e) {}
+    }
     if (!byFill && parent && getSameWidthAsParentDecl(node, parent)) byFill = true
     if (!byFill && parent && textNeedsFullWidthForAlignInColumnFlex(node, parent)) byFill = true
     return byFill ? "width:100%" : ""
@@ -6529,7 +6772,8 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         var secTextByName = collectTextNodesByName(mSec)
         var sectionVideoOverrideDone = {}
         var sectionTextOverrideDone = {}
-        var deskSem = buildSectionSemanticClasses(dSec, (options && options.geoStructure) || null)
+        var pcBgChildId = options.pcSectionBgChildIds && options.pcSectionBgChildIds[s] != null ? options.pcSectionBgChildIds[s] : null
+        var deskSem = buildSectionSemanticClasses(dSec, (options && options.geoStructure) || null, pcBgChildId)
         var allowedMo = Array.isArray(options.allowedFonts)
             ? options.allowedFonts
                   .map(function (f) {
@@ -6970,8 +7214,39 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     var mergedCss = [base, sectionStyles, overrides].filter(function (x) {
         return x && String(x).trim()
     }).join("\n")
-    var styleBlock = "<style>" + compressCssForStyleTag(mergedCss) + "</style>\n\n"
+    // 최종 연번 리네임: PC+MO CSS 합친 뒤 갭(desc--01,desc--03 → desc--01,desc--02) 제거
     var articleHtml = pc.articleHtml || ""
+    var seqAllRules = []
+    mergedCss.replace(/\.ap-section--(\d+)\s+\.(ap-section__[\w]+)--([\d]{2})/g, function (_, sec, base, num) {
+        seqAllRules.push({ sel: ".ap-section--" + sec + " ." + base + "--" + num, secId: sec, base: base, num: parseInt(num, 10) })
+    })
+    var seqBases = {}
+    for (var sqi = 0; sqi < seqAllRules.length; sqi++) {
+        var sqk = seqAllRules[sqi].secId + "\x00" + seqAllRules[sqi].base
+        if (!seqBases[sqk]) seqBases[sqk] = []
+        if (seqBases[sqk].indexOf(seqAllRules[sqi].num) < 0) seqBases[sqk].push(seqAllRules[sqi].num)
+    }
+    var seqPairs = []
+    for (var sqb in seqBases) {
+        var sqParts = sqb.split("\x00")
+        var sqNums = seqBases[sqb].sort(function (a, b) { return a - b })
+        for (var sni = 0; sni < sqNums.length; sni++) {
+            if (sqNums[sni] !== sni + 1) {
+                var oldCls = sqParts[1] + "--" + pad2(sqNums[sni])
+                var newCls = sqParts[1] + "--" + pad2(sni + 1)
+                seqPairs.push({ from: oldCls, to: newCls })
+            }
+        }
+    }
+    if (seqPairs.length) {
+        for (var spi = 0; spi < seqPairs.length; spi++) {
+            var fromRe = new RegExp("\\." + seqPairs[spi].from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?=[\\s{>,]|$)", "g")
+            mergedCss = mergedCss.replace(fromRe, "." + seqPairs[spi].to)
+            var htmlFromRe = new RegExp("\\b" + seqPairs[spi].from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "g")
+            articleHtml = articleHtml.replace(htmlFromRe, seqPairs[spi].to)
+        }
+    }
+    var styleBlock = "<style>" + compressCssForStyleTag(mergedCss) + "</style>\n\n"
     var bp = Number(breakpoint) || 750
     var reApRasterImgSrc =
         /<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(?:(?:_pc|_mo)(?:_[a-z]{2})?|_[a-z]{2})?(?:_\d{6})?)\.(png|jpg|jpeg)"([^>]*)>/gi
@@ -7025,6 +7300,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     var deferredStyles = []
     var exportedNodeIds = {}
     var ownImageNodeIds = {}
+    var sectionBgChildIds = []
     var ctx = {deferredStyles: deferredStyles, exportedNodeIds: exportedNodeIds, ownImageNodeIds: ownImageNodeIds}
 
     var mismatchSet = Object.create(null)
@@ -7401,6 +7677,27 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         if (includeAbs === undefined) includeAbs = true
         var inner = cssInnerSelForNode(id, ropts || {}, false)
         var vw = visWrapFromOpts(ropts)
+        /** 텍스트 공통 추가 선언: align-self, textAutoResize 기반 크기 제어 */
+        function textExtraDecls() {
+            var extra = []
+            if (!textAbs) {
+                var asDecl = getAlignSelfDecl(node, parent)
+                if (asDecl) extra.push(asDecl)
+            }
+            // textAutoResize: WIDTH_AND_HEIGHT → 텍스트 자체 크기(white-space:nowrap), NONE → 고정 박스(width 설정)
+            try {
+                var tar = node.textAutoResize
+                if (tar === "WIDTH_AND_HEIGHT") extra.push("white-space:nowrap")
+                else if (tar === "NONE" && !textAbs) {
+                    var tBox = getAbs(node)
+                    if (tBox && tBox.w != null) {
+                        extra.push("--ap-w:" + cssOutLayoutPx(tBox.w))
+                        extra.push("width:calc(var(--ap-w)/var(--ap-width)*100cqi)")
+                    }
+                }
+            } catch (eTar) {}
+            return extra
+        }
         if (inlinePcTextTypography) {
             var rep = inner.replace(/^\./, "")
             var pk = secClass + "\x00" + rep
@@ -7410,12 +7707,15 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     cache.pcTypoClusterDeferredPushed[pk] = true
                     pushDeferredStyle(ctx, selInSection(secClass, inner, vw), dedupeCssDecl(baseDecl))
                 }
+                var extraPc2 = textExtraDecls()
+                if (extraPc2.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), extraPc2.join(";"))
             } else {
                 var textDeclPartsPc = []
                 var declPc = buildTextVarsDecl(ts)
                 if (declPc) textDeclPartsPc.push(declPc)
                 var textFullWPc = getTextFullWidthDecl(node, textAbs, parent)
                 if (textFullWPc) textDeclPartsPc.push(textFullWPc)
+                textDeclPartsPc = textDeclPartsPc.concat(textExtraDecls())
                 if (textDeclPartsPc.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textDeclPartsPc.join(";"))
             }
         } else {
@@ -7424,6 +7724,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (decl) textDeclParts.push(decl)
             var textFullW = getTextFullWidthDecl(node, textAbs, parent)
             if (textFullW) textDeclParts.push(textFullW)
+            textDeclParts = textDeclParts.concat(textExtraDecls())
             if (textDeclParts.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textDeclParts.join(";"))
         }
         if (includeAbs && textAbs && id) {
@@ -7713,9 +8014,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
         var axisGrowSelf = getFlexChildMainAxisGrowDecl(node, parent)
         if (axisGrowSelf && !abs && !nodeHasApSectionImageSemantic(node.id, opts)) declParts.push(axisGrowSelf)
+        var alignSelfDecl = getAlignSelfDecl(node, parent)
+        if (alignSelfDecl && !abs) declParts.push(alignSelfDecl)
 
-        /** 전폭: ap-abs 는 .ap-abs + --ap-w 가 width 담당 — 지연 규칙에 width:100% 넣으면 특이도로 absolute 박스가 깨짐 */
-        if (effFullWidth && !abs && !nodeHasApSectionImageSemantic(node.id, opts)) {
+        /** 전폭: flex-grow가 이미 있으면 width:100% 불필요 (flex가 전폭 담당). ap-abs는 --ap-w가 width 담당 */
+        var hasFlexGrow = axisGrowSelf && axisGrowSelf.indexOf("flex-grow") !== -1
+        if (effFullWidth && !abs && !nodeHasApSectionImageSemantic(node.id, opts) && !hasFlexGrow) {
             declParts.push("width:100%")
         }
 
@@ -7755,6 +8059,18 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (strokeDecl) declParts.push(strokeDecl)
             var radiusDecl = buildCornerRadiusDecl(node)
             if (radiusDecl) declParts.push(radiusDecl)
+            var shadowDecl = buildBoxShadowDecl(node)
+            if (shadowDecl) declParts.push(shadowDecl)
+            var blurDecl = buildBlurDecl(node)
+            if (blurDecl) declParts.push(blurDecl)
+            var opacityDecl = buildOpacityDecl(node)
+            if (opacityDecl) declParts.push(opacityDecl)
+            var overflowDecl = buildOverflowDecl(node)
+            if (overflowDecl) declParts.push(overflowDecl)
+            if (!bgDecl) {
+                var gradDecl = buildGradientDecl(node)
+                if (gradDecl) declParts.push(gradDecl)
+            }
             // min-height: Auto Layout+HUG 세로면 콘텐츠 높이 우선 → 프레임 고정 높이 min-height 생략
             // ・배경(fill/이미지): bgDecl · 테두리: strokeDecl · radius (박스 느낌)
             // ・직계 자식이 전부 absolute면 플로우 높이 없음 → Figma 프레임 높이로 잘림 방지
@@ -7846,6 +8162,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     if (res[1] && !isImageCandidate(ch, cache)) itemDeclParts.push(res[1])
                     var strokeDeclCh = buildStrokeDecl(ch)
                     if (strokeDeclCh) itemDeclParts.push(strokeDeclCh)
+                    var shadowDeclCh = buildBoxShadowDecl(ch)
+                    if (shadowDeclCh) itemDeclParts.push(shadowDeclCh)
+                    var blurDeclCh = buildBlurDecl(ch)
+                    if (blurDeclCh) itemDeclParts.push(blurDeclCh)
+                    var opacityDeclCh = buildOpacityDecl(ch)
+                    if (opacityDeclCh) itemDeclParts.push(opacityDeclCh)
                     var fillWidthCh = getFillFlexStartWidthDecl(ch, node)
                     var fillChPushed = !!(fillWidthCh && !chAbs && !nodeHasApSectionImageSemantic(ch.id, opts))
                     if (fillChPushed) itemDeclParts.push(fillWidthCh)
@@ -7855,6 +8177,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     }
                     var axisGrowCh = getFlexChildMainAxisGrowDecl(ch, node)
                     if (axisGrowCh && !chAbs && !nodeHasApSectionImageSemantic(ch.id, opts)) itemDeclParts.push(axisGrowCh)
+                    var alignSelfCh = getAlignSelfDecl(ch, node)
+                    if (alignSelfCh && !chAbs) itemDeclParts.push(alignSelfCh)
                     var itemDecl = itemDeclParts.join(";")
 
                     if (itemDecl && leafSel) {
@@ -8078,6 +8402,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
      */
     function runSectionPipeline(sectionNode, bg, visWrap, secNo, secClass, slideData, pairedDesktopSection) {
         var slideSectionMeta = null
+        if (visWrap !== "mo-only") sectionBgChildIds[secNo - 1] = bg.bgChildId || null
         var sectionSemantics = buildSectionSemanticClasses(
             sectionNode,
             geoStructure,
@@ -8465,6 +8790,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             exportedNodeIds: exportedNodeIds,
             ownImageNodeIds: ownImageNodeIds,
             sectionImageRenderOrderIds: sectionImageRenderOrderIds,
+            sectionBgChildIds: sectionBgChildIds,
         }
     })
 }
@@ -8769,6 +9095,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                     exportedNodeIds: exportedNodeIds,
                     ownImageNodeIds: ownImageNodeIds,
                     sectionImageRenderOrderIds: result && result.sectionImageRenderOrderIds ? result.sectionImageRenderOrderIds : [],
+                    sectionBgChildIds: result && result.sectionBgChildIds ? result.sectionBgChildIds : [],
                     images: cache.imageList || [],
                     imageNameByAssetKey: Object.assign(Object.create(null), cache.imageName || {}),
                     vectorTypes: VECTOR_TYPES,
@@ -8908,6 +9235,7 @@ figma.ui.onmessage = function (msg) {
                             fontHtmlFilterActive: fontHtmlFilterActiveMo,
                             pcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds,
                             moSectionImageRenderOrderIds: moPayload.sectionImageRenderOrderIds,
+                            pcSectionBgChildIds: payload.sectionBgChildIds || [],
                             moImages: moPayload.images || [],
                         })
                         var images = mergeImagesWithMoBackgroundFallback(code, payload.images || [], moPayload.images || [])
@@ -9020,6 +9348,7 @@ figma.ui.onmessage = function (msg) {
                                 fontHtmlFilterActive: fontHtmlFilterActiveZip,
                                 pcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds,
                                 moSectionImageRenderOrderIds: moPayload.sectionImageRenderOrderIds,
+                                pcSectionBgChildIds: payload.sectionBgChildIds || [],
                                 moImages: moPayload.images || [],
                             })
 

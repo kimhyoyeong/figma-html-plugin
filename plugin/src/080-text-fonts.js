@@ -145,6 +145,44 @@ function figTextCaseToDeclFragment(tc) {
     return ""
 }
 
+/** 인접 동일 스타일 parts 병합 — Figma가 특수문자(™ 등) 경계에서 불필요하게 분할한 세그먼트 통합 */
+function mergeAdjacentSameStyleParts(parts) {
+    if (!parts || parts.length <= 1) return parts
+    var out = [parts[0]]
+    for (var i = 1; i < parts.length; i++) {
+        var prev = out[out.length - 1]
+        var cur = parts[i]
+        if (prev.fw === cur.fw &&
+            prev.fs === cur.fs &&
+            prev.clr === cur.clr &&
+            Math.abs((prev.ls || 0) - (cur.ls || 0)) < 0.001 &&
+            (prev.textCase || "") === (cur.textCase || "")) {
+            out[out.length - 1] = {
+                start: prev.start,
+                end: cur.end,
+                characters: (prev.characters || "") + (cur.characters || ""),
+                clr: prev.clr,
+                fs: prev.fs,
+                fw: prev.fw,
+                ls: prev.ls,
+                textCase: prev.textCase
+            }
+        } else {
+            out.push(cur)
+        }
+    }
+    return out.length === 1 ? null : out
+}
+
+/** Figma textDecoration → CSS text-decoration 선언. NONE/없으면 빈 문자열 */
+function figTextDecorationToDecl(td) {
+    if (!td || td === "NONE") return ""
+    var v = String(td).toUpperCase()
+    if (v === "UNDERLINE") return "text-decoration:underline"
+    if (v === "STRIKETHROUGH") return "text-decoration:line-through"
+    return ""
+}
+
 /** TEXT 노드 → {text, fs, lh, ls, fw, ta, clr, parts(구간별 스타일)} (폰트 로드 후) */
 function getTextSummaryAsync(tn) {
     return loadFontsForTextNodeAsync(tn).then(function () {
@@ -172,6 +210,12 @@ function getTextSummaryAsync(tn) {
             }
         } catch (eTc) {}
         out.textCase = nodeTextCaseStr
+
+        out.textDecoration = ""
+        try {
+            var td = tn.textDecoration
+            if (td && td !== figma.mixed && td !== "NONE") out.textDecoration = String(td)
+        } catch (eTd) {}
 
         try {
             var s = tn.characters
@@ -345,6 +389,7 @@ function getTextSummaryAsync(tn) {
                                 }
                             })
                         }
+                        if (out.parts) out.parts = mergeAdjacentSameStyleParts(out.parts)
                         if (out.fs === "" && out.parts && out.parts.length > 0) {
                             var firstFs = out.parts[0].fs
                             if (firstFs != null && firstFs > 0) out.fs = String(Math.round(firstFs))
@@ -363,6 +408,7 @@ function getTextSummaryAsync(tn) {
                     }
                 } else {
                     var runs = extractTextStyleRunsFromRangeApi(tn, len)
+                    runs = mergeAdjacentSameStyleParts(runs) || runs
                     if (runs && runs.length > 1) {
                         out.parts = runs
                         if (out.fs === "" && runs[0] && runs[0].fs > 0) out.fs = String(Math.round(runs[0].fs))
@@ -542,6 +588,8 @@ function buildTextVarsDecl(ts) {
         var tcf = figTextCaseToDeclFragment(ts.textCase)
         if (tcf) parts.push(tcf)
     }
+    var tdDecl = figTextDecorationToDecl(ts.textDecoration)
+    if (tdDecl) parts.push(tdDecl)
 
     return parts.join(";")
 }
@@ -590,6 +638,9 @@ function buildTextVarsDeclDiff(tsD, tsM) {
         if (moCaseFrag) parts.push(moCaseFrag)
         else if (m.tc === "ORIGINAL") parts.push("text-transform:none;font-variant:normal")
     }
+    var dTd = figTextDecorationToDecl(tsD && tsD.textDecoration)
+    var mTd = figTextDecorationToDecl(tsM && tsM.textDecoration)
+    if (dTd !== mTd) parts.push(mTd || "text-decoration:none")
     return parts.join(";")
 }
 
@@ -597,7 +648,7 @@ function buildTextVarsDeclDiff(tsD, tsM) {
 function getTextSummarySync(tn) {
     if (!tn || tn.type !== "TEXT") return null
     try {
-        var out = {fs: "", lh: "", ls: "", fw: "", ta: "", clr: ""}
+        var out = {fs: "", lh: "", ls: "", fw: "", ta: "", clr: "", textDecoration: ""}
         if (tn.fontSize !== figma.mixed) {
             out.fs = String(Number(tn.fontSize) || 0)
         } else {
@@ -630,6 +681,10 @@ function getTextSummarySync(tn) {
         out.ta = String(tn.textAlignHorizontal || "")
         var fill = getFirstSolidFill(tn)
         if (fill && fill.color) out.clr = fill.color
+        try {
+            var tdSync = tn.textDecoration
+            if (tdSync && tdSync !== figma.mixed && tdSync !== "NONE") out.textDecoration = String(tdSync)
+        } catch (eTdS) {}
         return out
     } catch (e) {
         return null

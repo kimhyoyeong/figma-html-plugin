@@ -174,23 +174,17 @@ function paddingSideToCqi(px) {
     if (n === 0) return "0"
     return "calc(" + n + "/var(--ap-width)*100cqi)"
 }
-/** ap-flex: padding 을 top right bottom left 네 값 한 줄로 (전부 0이면 생략) */
+/** ap-flex: padding 단축 표기 (전부 0이면 생략, 동일 값이면 축약) */
 function buildFlexPaddingDecl(pt, pr, pb, pl) {
     pt = Number(pt) || 0
     pr = Number(pr) || 0
     pb = Number(pb) || 0
     pl = Number(pl) || 0
     if (pt === 0 && pr === 0 && pb === 0 && pl === 0) return ""
-    return (
-        "padding:" +
-        paddingSideToCqi(pt) +
-        " " +
-        paddingSideToCqi(pr) +
-        " " +
-        paddingSideToCqi(pb) +
-        " " +
-        paddingSideToCqi(pl)
-    )
+    if (pt === pr && pr === pb && pb === pl) return "padding:" + paddingSideToCqi(pt)
+    if (pt === pb && pr === pl) return "padding:" + paddingSideToCqi(pt) + " " + paddingSideToCqi(pr)
+    if (pr === pl) return "padding:" + paddingSideToCqi(pt) + " " + paddingSideToCqi(pr) + " " + paddingSideToCqi(pb)
+    return "padding:" + paddingSideToCqi(pt) + " " + paddingSideToCqi(pr) + " " + paddingSideToCqi(pb) + " " + paddingSideToCqi(pl)
 }
 
 /** ap-flex 노드용 flex CSS. absSelf: 이 노드가 ap-abs이면 자식 absolute용 position:relative 를 넣지 않음(지연 CSS가 absolute 덮어쓰기 방지) */
@@ -614,7 +608,10 @@ function buildStrokeDecl(node) {
     }
     var parts = []
     if (stroke.top > 0 || stroke.bottom > 0 || stroke.left > 0 || stroke.right > 0) {
-        parts.push("border-width:" + calcW(stroke.top) + " " + calcW(stroke.right) + " " + calcW(stroke.bottom) + " " + calcW(stroke.left))
+        var t = stroke.top, r = stroke.right, b = stroke.bottom, l = stroke.left
+        if (t === r && r === b && b === l) parts.push("border-width:" + calcW(t))
+        else if (t === b && r === l) parts.push("border-width:" + calcW(t) + " " + calcW(r))
+        else parts.push("border-width:" + calcW(t) + " " + calcW(r) + " " + calcW(b) + " " + calcW(l))
         parts.push("border-style:" + style)
         parts.push("border-color:" + stroke.color)
     }
@@ -628,5 +625,114 @@ function buildStrokeDeclDiff(dNode, mNode) {
     if (dDecl === mDecl) return ""
     if (mDecl) return mDecl
     return "border:none"
+}
+
+/** node.effects → box-shadow CSS (DROP_SHADOW, INNER_SHADOW) */
+function buildBoxShadowDecl(node) {
+    if (!node) return ""
+    try {
+        var eff = node.effects
+        if (!eff || !eff.length) return ""
+        var shadows = []
+        for (var i = 0; i < eff.length; i++) {
+            var e = eff[i]
+            if (!e || e.visible === false) continue
+            var inset = ""
+            if (e.type === "DROP_SHADOW") inset = ""
+            else if (e.type === "INNER_SHADOW") inset = "inset "
+            else continue
+            var c = e.color || {}
+            var r = Math.round((c.r || 0) * 255)
+            var g = Math.round((c.g || 0) * 255)
+            var b = Math.round((c.b || 0) * 255)
+            var a = typeof c.a === "number" ? c.a : (typeof e.opacity === "number" ? e.opacity : 1)
+            var ox = "calc(" + cssOutLayoutPx(Math.round(e.offset ? e.offset.x : 0)) + "/var(--ap-width)*100cqi)"
+            var oy = "calc(" + cssOutLayoutPx(Math.round(e.offset ? e.offset.y : 0)) + "/var(--ap-width)*100cqi)"
+            var bl = "calc(" + cssOutLayoutPx(Math.round(e.radius || 0)) + "/var(--ap-width)*100cqi)"
+            var sp = e.spread != null ? "calc(" + cssOutLayoutPx(Math.round(e.spread)) + "/var(--ap-width)*100cqi)" : "0"
+            shadows.push(inset + ox + " " + oy + " " + bl + " " + sp + " rgba(" + r + "," + g + "," + b + "," + r2(a) + ")")
+        }
+        if (!shadows.length) return ""
+        return "box-shadow:" + shadows.join(",")
+    } catch (e) {
+        return ""
+    }
+}
+
+/** node.effects → filter: blur() CSS (LAYER_BLUR) */
+function buildBlurDecl(node) {
+    if (!node) return ""
+    try {
+        var eff = node.effects
+        if (!eff || !eff.length) return ""
+        for (var i = 0; i < eff.length; i++) {
+            var e = eff[i]
+            if (!e || e.visible === false) continue
+            if (e.type === "LAYER_BLUR" && e.radius > 0) {
+                return "filter:blur(calc(" + cssOutLayoutPx(Math.round(e.radius)) + "/var(--ap-width)*100cqi))"
+            }
+        }
+    } catch (e) {}
+    return ""
+}
+
+/** node.opacity → opacity CSS (1 미만일 때만) */
+function buildOpacityDecl(node) {
+    if (!node) return ""
+    try {
+        if (typeof node.opacity === "number" && node.opacity < 1 && node.opacity >= 0) {
+            return "opacity:" + r2(node.opacity)
+        }
+    } catch (e) {}
+    return ""
+}
+
+/** node.clipsContent → overflow:hidden CSS */
+function buildOverflowDecl(node) {
+    if (!node) return ""
+    try {
+        if (node.clipsContent === true) return "overflow:hidden"
+    } catch (e) {}
+    return ""
+}
+
+/** GRADIENT fill → CSS linear/radial-gradient. 첫 번째 보이는 그래디언트만 */
+function buildGradientDecl(node) {
+    if (!node) return ""
+    try {
+        var fills = node.fills
+        if (!fills || fills === figma.mixed) return ""
+        for (var i = fills.length - 1; i >= 0; i--) {
+            var f = fills[i]
+            if (!f || f.visible === false) continue
+            if (f.type !== "GRADIENT_LINEAR" && f.type !== "GRADIENT_RADIAL") continue
+            var stops = f.gradientStops
+            if (!stops || stops.length < 2) continue
+            var cssStops = []
+            for (var si = 0; si < stops.length; si++) {
+                var sc = stops[si].color || {}
+                var sr = Math.round((sc.r || 0) * 255)
+                var sg = Math.round((sc.g || 0) * 255)
+                var sb = Math.round((sc.b || 0) * 255)
+                var sa = typeof sc.a === "number" ? sc.a : 1
+                var pos = r2((stops[si].position || 0) * 100)
+                cssStops.push("rgba(" + sr + "," + sg + "," + sb + "," + r2(sa) + ") " + pos + "%")
+            }
+            if (f.type === "GRADIENT_LINEAR") {
+                var handles = f.gradientHandlePositions
+                var angle = 180
+                if (handles && handles.length >= 2) {
+                    var dx = (handles[1].x || 0) - (handles[0].x || 0)
+                    var dy = (handles[1].y || 0) - (handles[0].y || 0)
+                    angle = Math.round(Math.atan2(dx, -dy) * 180 / Math.PI)
+                }
+                return "background:linear-gradient(" + angle + "deg," + cssStops.join(",") + ")"
+            }
+            if (f.type === "GRADIENT_RADIAL") {
+                return "background:radial-gradient(ellipse at center," + cssStops.join(",") + ")"
+            }
+        }
+    } catch (e) {}
+    return ""
 }
 

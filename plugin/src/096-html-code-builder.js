@@ -38,6 +38,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     var deferredStyles = []
     var exportedNodeIds = {}
     var ownImageNodeIds = {}
+    var sectionBgChildIds = []
     var ctx = {deferredStyles: deferredStyles, exportedNodeIds: exportedNodeIds, ownImageNodeIds: ownImageNodeIds}
 
     var mismatchSet = Object.create(null)
@@ -414,6 +415,27 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
         if (includeAbs === undefined) includeAbs = true
         var inner = cssInnerSelForNode(id, ropts || {}, false)
         var vw = visWrapFromOpts(ropts)
+        /** 텍스트 공통 추가 선언: align-self, textAutoResize 기반 크기 제어 */
+        function textExtraDecls() {
+            var extra = []
+            if (!textAbs) {
+                var asDecl = getAlignSelfDecl(node, parent)
+                if (asDecl) extra.push(asDecl)
+            }
+            // textAutoResize: WIDTH_AND_HEIGHT → 텍스트 자체 크기(white-space:nowrap), NONE → 고정 박스(width 설정)
+            try {
+                var tar = node.textAutoResize
+                if (tar === "WIDTH_AND_HEIGHT") extra.push("white-space:nowrap")
+                else if (tar === "NONE" && !textAbs) {
+                    var tBox = getAbs(node)
+                    if (tBox && tBox.w != null) {
+                        extra.push("--ap-w:" + cssOutLayoutPx(tBox.w))
+                        extra.push("width:calc(var(--ap-w)/var(--ap-width)*100cqi)")
+                    }
+                }
+            } catch (eTar) {}
+            return extra
+        }
         if (inlinePcTextTypography) {
             var rep = inner.replace(/^\./, "")
             var pk = secClass + "\x00" + rep
@@ -423,12 +445,15 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     cache.pcTypoClusterDeferredPushed[pk] = true
                     pushDeferredStyle(ctx, selInSection(secClass, inner, vw), dedupeCssDecl(baseDecl))
                 }
+                var extraPc2 = textExtraDecls()
+                if (extraPc2.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), extraPc2.join(";"))
             } else {
                 var textDeclPartsPc = []
                 var declPc = buildTextVarsDecl(ts)
                 if (declPc) textDeclPartsPc.push(declPc)
                 var textFullWPc = getTextFullWidthDecl(node, textAbs, parent)
                 if (textFullWPc) textDeclPartsPc.push(textFullWPc)
+                textDeclPartsPc = textDeclPartsPc.concat(textExtraDecls())
                 if (textDeclPartsPc.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textDeclPartsPc.join(";"))
             }
         } else {
@@ -437,6 +462,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (decl) textDeclParts.push(decl)
             var textFullW = getTextFullWidthDecl(node, textAbs, parent)
             if (textFullW) textDeclParts.push(textFullW)
+            textDeclParts = textDeclParts.concat(textExtraDecls())
             if (textDeclParts.length) pushDeferredStyle(ctx, selInSection(secClass, inner, vw), textDeclParts.join(";"))
         }
         if (includeAbs && textAbs && id) {
@@ -726,9 +752,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
 
         var axisGrowSelf = getFlexChildMainAxisGrowDecl(node, parent)
         if (axisGrowSelf && !abs && !nodeHasApSectionImageSemantic(node.id, opts)) declParts.push(axisGrowSelf)
+        var alignSelfDecl = getAlignSelfDecl(node, parent)
+        if (alignSelfDecl && !abs) declParts.push(alignSelfDecl)
 
-        /** 전폭: ap-abs 는 .ap-abs + --ap-w 가 width 담당 — 지연 규칙에 width:100% 넣으면 특이도로 absolute 박스가 깨짐 */
-        if (effFullWidth && !abs && !nodeHasApSectionImageSemantic(node.id, opts)) {
+        /** 전폭: flex-grow가 이미 있으면 width:100% 불필요 (flex가 전폭 담당). ap-abs는 --ap-w가 width 담당 */
+        var hasFlexGrow = axisGrowSelf && axisGrowSelf.indexOf("flex-grow") !== -1
+        if (effFullWidth && !abs && !nodeHasApSectionImageSemantic(node.id, opts) && !hasFlexGrow) {
             declParts.push("width:100%")
         }
 
@@ -768,6 +797,18 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             if (strokeDecl) declParts.push(strokeDecl)
             var radiusDecl = buildCornerRadiusDecl(node)
             if (radiusDecl) declParts.push(radiusDecl)
+            var shadowDecl = buildBoxShadowDecl(node)
+            if (shadowDecl) declParts.push(shadowDecl)
+            var blurDecl = buildBlurDecl(node)
+            if (blurDecl) declParts.push(blurDecl)
+            var opacityDecl = buildOpacityDecl(node)
+            if (opacityDecl) declParts.push(opacityDecl)
+            var overflowDecl = buildOverflowDecl(node)
+            if (overflowDecl) declParts.push(overflowDecl)
+            if (!bgDecl) {
+                var gradDecl = buildGradientDecl(node)
+                if (gradDecl) declParts.push(gradDecl)
+            }
             // min-height: Auto Layout+HUG 세로면 콘텐츠 높이 우선 → 프레임 고정 높이 min-height 생략
             // ・배경(fill/이미지): bgDecl · 테두리: strokeDecl · radius (박스 느낌)
             // ・직계 자식이 전부 absolute면 플로우 높이 없음 → Figma 프레임 높이로 잘림 방지
@@ -859,6 +900,12 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     if (res[1] && !isImageCandidate(ch, cache)) itemDeclParts.push(res[1])
                     var strokeDeclCh = buildStrokeDecl(ch)
                     if (strokeDeclCh) itemDeclParts.push(strokeDeclCh)
+                    var shadowDeclCh = buildBoxShadowDecl(ch)
+                    if (shadowDeclCh) itemDeclParts.push(shadowDeclCh)
+                    var blurDeclCh = buildBlurDecl(ch)
+                    if (blurDeclCh) itemDeclParts.push(blurDeclCh)
+                    var opacityDeclCh = buildOpacityDecl(ch)
+                    if (opacityDeclCh) itemDeclParts.push(opacityDeclCh)
                     var fillWidthCh = getFillFlexStartWidthDecl(ch, node)
                     var fillChPushed = !!(fillWidthCh && !chAbs && !nodeHasApSectionImageSemantic(ch.id, opts))
                     if (fillChPushed) itemDeclParts.push(fillWidthCh)
@@ -868,6 +915,8 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
                     }
                     var axisGrowCh = getFlexChildMainAxisGrowDecl(ch, node)
                     if (axisGrowCh && !chAbs && !nodeHasApSectionImageSemantic(ch.id, opts)) itemDeclParts.push(axisGrowCh)
+                    var alignSelfCh = getAlignSelfDecl(ch, node)
+                    if (alignSelfCh && !chAbs) itemDeclParts.push(alignSelfCh)
                     var itemDecl = itemDeclParts.join(";")
 
                     if (itemDecl && leafSel) {
@@ -1091,6 +1140,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
      */
     function runSectionPipeline(sectionNode, bg, visWrap, secNo, secClass, slideData, pairedDesktopSection) {
         var slideSectionMeta = null
+        if (visWrap !== "mo-only") sectionBgChildIds[secNo - 1] = bg.bgChildId || null
         var sectionSemantics = buildSectionSemanticClasses(
             sectionNode,
             geoStructure,
@@ -1478,6 +1528,7 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             exportedNodeIds: exportedNodeIds,
             ownImageNodeIds: ownImageNodeIds,
             sectionImageRenderOrderIds: sectionImageRenderOrderIds,
+            sectionBgChildIds: sectionBgChildIds,
         }
     })
 }

@@ -454,6 +454,38 @@ function moOverrideSelectorIsLive(sel, usedBySection) {
 }
 
 /** 래퍼(.ap-image .ap-section__image--XX)에 --ap-w/--ap-h만 넣음. 기존 .ap-image img 규칙이 var()로 활용 (ap-abs 래퍼는 생략) */
+/**
+ * CSS 후처리(병합·제거) 후 남은 ap-section__*--NN 을 섹션별로 연번 재정렬.
+ * desc--01,desc--03 → desc--01,desc--02 식으로 갭을 메움.
+ * 리턴: [{secId, from, to}] — applySectionScopedClassRenames 형식.
+ */
+function buildSequentialBemRenames(rules) {
+    var secBases = {}
+    for (var i = 0; i < rules.length; i++) {
+        var sel = rules[i] && rules[i].sel ? String(rules[i].sel) : ""
+        var sm = sel.match(/\.ap-section--(\d+)\s+\.(ap-section__[\w]+)(?:--([\d]{2}))/)
+        if (!sm) continue
+        var sec = sm[1], base = sm[2], num = sm[3] ? parseInt(sm[3], 10) : 0
+        if (!num) continue
+        var key = sec + "\x00" + base
+        if (!secBases[key]) secBases[key] = []
+        if (secBases[key].indexOf(num) < 0) secBases[key].push(num)
+    }
+    var renames = []
+    for (var k in secBases) {
+        var parts = k.split("\x00")
+        var sec = parts[0], base = parts[1]
+        var nums = secBases[k].sort(function (a, b) { return a - b })
+        for (var ni = 0; ni < nums.length; ni++) {
+            var expected = ni + 1
+            if (nums[ni] !== expected) {
+                renames.push({ secId: sec, from: base + "--" + pad2(nums[ni]), to: base + "--" + pad2(expected) })
+            }
+        }
+    }
+    return renames
+}
+
 function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapperIsApAbs, visibilityWrapper, clipParent) {
     if (!nodeId || wrapperIsApAbs) return
     var decl = getImageSizeDecl(node, clipParent)

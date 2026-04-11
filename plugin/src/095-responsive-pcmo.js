@@ -506,7 +506,8 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         var secTextByName = collectTextNodesByName(mSec)
         var sectionVideoOverrideDone = {}
         var sectionTextOverrideDone = {}
-        var deskSem = buildSectionSemanticClasses(dSec, (options && options.geoStructure) || null)
+        var pcBgChildId = options.pcSectionBgChildIds && options.pcSectionBgChildIds[s] != null ? options.pcSectionBgChildIds[s] : null
+        var deskSem = buildSectionSemanticClasses(dSec, (options && options.geoStructure) || null, pcBgChildId)
         var allowedMo = Array.isArray(options.allowedFonts)
             ? options.allowedFonts
                   .map(function (f) {
@@ -947,8 +948,39 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     var mergedCss = [base, sectionStyles, overrides].filter(function (x) {
         return x && String(x).trim()
     }).join("\n")
-    var styleBlock = "<style>" + compressCssForStyleTag(mergedCss) + "</style>\n\n"
+    // 최종 연번 리네임: PC+MO CSS 합친 뒤 갭(desc--01,desc--03 → desc--01,desc--02) 제거
     var articleHtml = pc.articleHtml || ""
+    var seqAllRules = []
+    mergedCss.replace(/\.ap-section--(\d+)\s+\.(ap-section__[\w]+)--([\d]{2})/g, function (_, sec, base, num) {
+        seqAllRules.push({ sel: ".ap-section--" + sec + " ." + base + "--" + num, secId: sec, base: base, num: parseInt(num, 10) })
+    })
+    var seqBases = {}
+    for (var sqi = 0; sqi < seqAllRules.length; sqi++) {
+        var sqk = seqAllRules[sqi].secId + "\x00" + seqAllRules[sqi].base
+        if (!seqBases[sqk]) seqBases[sqk] = []
+        if (seqBases[sqk].indexOf(seqAllRules[sqi].num) < 0) seqBases[sqk].push(seqAllRules[sqi].num)
+    }
+    var seqPairs = []
+    for (var sqb in seqBases) {
+        var sqParts = sqb.split("\x00")
+        var sqNums = seqBases[sqb].sort(function (a, b) { return a - b })
+        for (var sni = 0; sni < sqNums.length; sni++) {
+            if (sqNums[sni] !== sni + 1) {
+                var oldCls = sqParts[1] + "--" + pad2(sqNums[sni])
+                var newCls = sqParts[1] + "--" + pad2(sni + 1)
+                seqPairs.push({ from: oldCls, to: newCls })
+            }
+        }
+    }
+    if (seqPairs.length) {
+        for (var spi = 0; spi < seqPairs.length; spi++) {
+            var fromRe = new RegExp("\\." + seqPairs[spi].from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?=[\\s{>,]|$)", "g")
+            mergedCss = mergedCss.replace(fromRe, "." + seqPairs[spi].to)
+            var htmlFromRe = new RegExp("\\b" + seqPairs[spi].from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "g")
+            articleHtml = articleHtml.replace(htmlFromRe, seqPairs[spi].to)
+        }
+    }
+    var styleBlock = "<style>" + compressCssForStyleTag(mergedCss) + "</style>\n\n"
     var bp = Number(breakpoint) || 750
     var reApRasterImgSrc =
         /<img\s+([^>]*?)src="(assets\/images\/page_[a-zA-Z0-9_-]+_sec\d+_img\d+(?:(?:_pc|_mo)(?:_[a-z]{2})?|_[a-z]{2})?(?:_\d{6})?)\.(png|jpg|jpeg)"([^>]*)>/gi

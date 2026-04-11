@@ -91,20 +91,21 @@ function layoutChildDetails(node) {
     return parts.length ? parts.join("; ") : ""
 }
 
-/** width:fill + 부모 flex-start일 때만 width:100% 반환 (코드 생성용) */
+/** width:fill → Figma FILL은 부모 정렬과 무관하게 교차축 전폭. row 주축 FILL은 flex-grow로 처리 */
 function getFillFlexStartWidthDecl(node, parent) {
     if (!node || !parent || !isFlex(parent)) return ""
     if (node.layoutSizingHorizontal !== "FILL") return ""
     var pv = getLayoutVars(parent)
     var isColumn = pv.direction === "column"
-    if (isColumn && (pv.align === "" || pv.align === "flex-start")) return "width:100%"
-    if (!isColumn && (pv.justify === "" || pv.justify === "flex-start")) return "width:100%"
-    return ""
+    // column 교차축(가로) FILL → 항상 width:100%
+    if (isColumn) return "width:100%"
+    // row 주축 FILL → flex-grow로 공간 분배 (getFlexChildMainAxisGrowDecl에서 처리)
+    return "flex-grow:1;min-width:0"
 }
 
 /**
  * 부모 오토레이아웃 주축 방향으로 늘리는 자식: layoutGrow>0 또는 세로 FILL(column 부모).
- * row 부모에서 세로 FILL + 교차축 flex-start → height:100%.
+ * row 부모에서 세로 FILL → 부모 정렬과 무관하게 height:100% (stretch 제외 — 이미 기본).
  */
 function getFlexChildMainAxisGrowDecl(node, parent) {
     if (!node || !parent || !isFlex(parent)) return ""
@@ -123,13 +124,43 @@ function getFlexChildMainAxisGrowDecl(node, parent) {
     try {
         vFill = node.layoutSizingVertical === "FILL"
     } catch (e) {}
+    var hFill = false
+    try {
+        hFill = node.layoutSizingHorizontal === "FILL"
+    } catch (e) {}
     if (isColumn) {
         if (growN > 0) return "flex-grow:" + growN + ";min-height:0"
         if (vFill) return "flex-grow:1;min-height:0"
         return ""
     }
+    // row: 주축 grow
     if (growN > 0) return "flex-grow:" + growN + ";min-width:0"
-    if (vFill && pv.align === "flex-start") return "height:100%"
+    // row: 가로 FILL은 getFillFlexStartWidthDecl에서 flex-grow:1 처리 → 여기선 생략
+    // row: 세로 FILL → 부모 교차축 stretch(기본)이면 CSS 기본으로 충분, 그 외면 height:100%
+    if (vFill && pv.align !== "" && pv.align !== "stretch") return "height:100%"
+    return ""
+}
+
+/**
+ * Figma layoutAlign → CSS align-self (부모 교차축 기본값과 다를 때만).
+ * STRETCH는 생략 — width:100%/getTextFullWidthDecl/getFillFlexStartWidthDecl 등이 이미 처리.
+ * align-self:stretch 를 명시하면 명시적 width와 충돌할 수 있으므로 width 쪽에 위임.
+ */
+function getAlignSelfDecl(node, parent) {
+    if (!node || !parent || !isFlex(parent)) return ""
+    try {
+        if (isAbsoluteLike(node, parent)) return ""
+        if (!("layoutAlign" in node) || !node.layoutAlign || node.layoutAlign === "INHERIT") return ""
+        var a = String(node.layoutAlign).toUpperCase()
+        if (a === "STRETCH") return ""
+        var pv = getLayoutVars(parent)
+        if (a === "MIN" && pv.align === "flex-start") return ""
+        if (a === "CENTER" && pv.align === "center") return ""
+        if (a === "MAX" && pv.align === "flex-end") return ""
+        if (a === "MIN") return "align-self:flex-start"
+        if (a === "CENTER") return "align-self:center"
+        if (a === "MAX") return "align-self:flex-end"
+    } catch (e) {}
     return ""
 }
 
@@ -187,9 +218,11 @@ function sectionContainerNeedsFullWidthInColumnParent(frameNode, parent, section
 }
 
 /**
- * Hug 텍스트는 absoluteBoundingBox 가로가 글자 폭만 잡혀 부모 프레임과 숫자가 다름.
- * column flex 안에서 CENTER/RIGHT/JUSTIFIED면 부모 전폭 기준 정렬이 되려면 width:100% 필요.
- * 단, 부모 교차축이 CENTER(align-items:center)면 자식은 flex로 가로 중앙 배치되므로 width:100% 생략(전폭+text-align로 이중·깨짐 방지).
+ * column flex에서 텍스트가 부모 전폭 기준으로 줄바꿈·정렬되려면 width:100% 필요.
+ * 1) align-items:flex-start → content 폭이 되어 줄바꿈·정렬 기준이 달라짐 → 항상 필요
+ * 2) align-items:center/flex-end + text-align center/right/justified → 부모 전폭 기준 정렬 필요
+ *    (PC는 left인데 MO에서 center로 바뀌는 경우 MO 오버라이드에서 반영됨)
+ * 3) align-items:stretch → CSS 기본 전폭 → 불필요
  */
 function textNeedsFullWidthForAlignInColumnFlex(textNode, parent) {
     if (!textNode || textNode.type !== "TEXT" || !parent) return false
@@ -197,20 +230,19 @@ function textNeedsFullWidthForAlignInColumnFlex(textNode, parent) {
         if (!isFlex(parent)) return false
         var pv = getLayoutVars(parent)
         if (pv.direction !== "column") return false
-        var counterAxis = String(parent.counterAxisAlignItems || "").toUpperCase()
-        if (counterAxis === "CENTER") return false
-        var ta = String(textNode.textAlignHorizontal || "").toUpperCase()
-        if (ta !== "CENTER" && ta !== "RIGHT" && ta !== "JUSTIFIED") return false
         var isFill = false
         try {
             isFill = textNode.layoutSizingHorizontal === "FILL"
         } catch (e2) {}
         if (isFill) return false
-        var pBox = getAbs(parent)
-        var tBox = getAbs(textNode)
-        if (!pBox || !tBox || pBox.w == null || tBox.w == null) return false
-        if (r2(pBox.w) <= r2(tBox.w)) return false
-        return true
+        // stretch(기본)면 CSS 기본이 전폭 → 불필요
+        if (pv.align === "" || pv.align === "stretch") return false
+        // flex-start: 모든 텍스트에 width:100% (줄바꿈 기준 + 정렬 기준)
+        if (pv.align === "flex-start") return true
+        // center/flex-end: text-align이 center/right/justified면 부모 전폭 기준 정렬 필요
+        var ta = String(textNode.textAlignHorizontal || "").toUpperCase()
+        if (ta === "CENTER" || ta === "RIGHT" || ta === "JUSTIFIED") return true
+        return false
     } catch (e) {
         return false
     }
@@ -229,6 +261,12 @@ function getTextFullWidthDecl(node, textAbs, parent) {
     try {
         if (node.layoutSizingHorizontal === "FILL") byFill = true
     } catch (e) {}
+    // layoutAlign STRETCH → 부모 교차축 전폭 (align-self:stretch 대신 width:100%로 처리)
+    if (!byFill && parent && isFlex(parent)) {
+        try {
+            if (node.layoutAlign === "STRETCH") byFill = true
+        } catch (e) {}
+    }
     if (!byFill && parent && getSameWidthAsParentDecl(node, parent)) byFill = true
     if (!byFill && parent && textNeedsFullWidthForAlignInColumnFlex(node, parent)) byFill = true
     return byFill ? "width:100%" : ""

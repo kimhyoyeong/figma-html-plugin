@@ -121,6 +121,7 @@ figma.ui.onmessage = function (msg) {
                             fontHtmlFilterActive: fontHtmlFilterActiveMo,
                             pcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds,
                             moSectionImageRenderOrderIds: moPayload.sectionImageRenderOrderIds,
+                            pcSectionBgChildIds: payload.sectionBgChildIds || [],
                             moImages: moPayload.images || [],
                         })
                         var images = mergeImagesWithMoBackgroundFallback(code, payload.images || [], moPayload.images || [])
@@ -233,6 +234,7 @@ figma.ui.onmessage = function (msg) {
                                 fontHtmlFilterActive: fontHtmlFilterActiveZip,
                                 pcSectionImageRenderOrderIds: payload.sectionImageRenderOrderIds,
                                 moSectionImageRenderOrderIds: moPayload.sectionImageRenderOrderIds,
+                                pcSectionBgChildIds: payload.sectionBgChildIds || [],
                                 moImages: moPayload.images || [],
                             })
 

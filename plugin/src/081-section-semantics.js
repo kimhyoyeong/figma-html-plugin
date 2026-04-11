@@ -534,14 +534,26 @@ function disambiguateSectionSemantics(sectionNode, map) {
         var baseNm = clsStr.replace(/--\d{2}$/, "")
         if (baseNm === "ap-section__content" || baseNm === "ap-section__image") continue
         for (var k = 0; k < ids.length; k++) {
-            var newCls = k === 0 ? clsStr : baseNm + "--" + pad2(k + 1)
+            var newCls = baseNm + "--" + pad2(k + 1)
             var arrM = map[ids[k]]
             var idx = arrM.indexOf(clsStr)
             if (idx >= 0) arrM[idx] = newCls
         }
     }
-    renumberApSectionElemGlobally(sectionNode, map, "image")
-    renumberApSectionElemGlobally(sectionNode, map, "content")
+    // 모든 요소 타입에 대해 문서 순서 기준 연번 재정렬
+    var allBases = {}
+    for (var rid in map) {
+        if (!Object.prototype.hasOwnProperty.call(map, rid)) continue
+        var ra = map[rid] || []
+        for (var ri = 0; ri < ra.length; ri++) {
+            var rb = String(ra[ri] || "").replace(/--\d{2}$/, "")
+            if (rb && rb.indexOf("ap-section__") === 0) allBases[rb] = true
+        }
+    }
+    var elemParts = Object.keys(allBases).map(function (b) { return b.replace("ap-section__", "") })
+    for (var ei = 0; ei < elemParts.length; ei++) {
+        renumberApSectionElemGlobally(sectionNode, map, elemParts[ei])
+    }
 }
 
 /** 지연 CSS용: 섹션 스코프 안 시맨틱 클래스만 (ap-n 없음) */

@@ -297,6 +297,7 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
                     exportedNodeIds: exportedNodeIds,
                     ownImageNodeIds: ownImageNodeIds,
                     sectionImageRenderOrderIds: result && result.sectionImageRenderOrderIds ? result.sectionImageRenderOrderIds : [],
+                    sectionBgChildIds: result && result.sectionBgChildIds ? result.sectionBgChildIds : [],
                     images: cache.imageList || [],
                     imageNameByAssetKey: Object.assign(Object.create(null), cache.imageName || {}),
                     vectorTypes: VECTOR_TYPES,
