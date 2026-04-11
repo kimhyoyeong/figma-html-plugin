@@ -4,10 +4,10 @@
  * 경계: 문자열·inner HTML·줄바꿈/BR 슬롯. 폰트 로드·스타일 구간·허용 폰트 필터는 080.
  *
  * escapeHtml, textToHtmlWithBreaks — 특수문자·개행 → 안전한 HTML
+ * textToHtmlWithResponsiveBr, getResponsiveBrTrailing — brState 기반 반응형 BR(공백↔개행 교환 포함)
  * normalizeTextNewlinesForResponsive, textFlatForResponsiveCompare — PC/MO 텍스트 정규화·비교용 평탄화
- * newlineGapsForResponsive, appendResponsiveBrSlotHtml, buildResponsiveBrInnerFromPcMoChars — 개행 개수만 다를 때 pc-only/mo-only <br>
- * textSummaryAllowsResponsiveBrOverride — 단일 스타일 구간일 때만 MO 줄바꿈 오버라이드 허용
- * moTextNodeFromNameMap, buildResponsiveTextInnerByNodeIdMap — MO 텍스트를 이름/트리로 매칭해 노드 id → inner HTML
+ * newlineGapsForResponsive, appendResponsiveSepHtml, appendResponsiveBrSlotHtml — 가시 문자 간 구분자·BR 슬롯
+ * moTextNodeFromNameMap, buildResponsiveTextInnerByNodeIdMap — MO 텍스트를 이름/트리로 매칭해 노드 id → MO characters
  * buildTextPartInnerHtml — 스타일 구간별 ap-text__part span (--ap-part-* 는 블록 .ap-text 의 --ap-* 와 분리)
  * normTextAlign, getLineBreakPoints — Figma 정렬 → CSS, 줄바꿈 인덱스
  * indent, wrapChunksAsUlOrDiv — HTML 들여쓰기·리스트/프레임 래핑
@@ -108,43 +108,6 @@ function appendResponsiveBrSlotHtml(pcRun, moRun) {
     }
     return buf
 }
-/**
- * PC·MO 문자열이 개행(횟수)만 다를 때 inner HTML. 가시 문자열이 다르면 null → 호출부에서 PC만 textToHtmlWithBreaks.
- */
-function buildResponsiveBrInnerFromPcMoChars(pcText, moText) {
-    var pcN = normalizeTextNewlinesForResponsive(pcText)
-    var moN = normalizeTextNewlinesForResponsive(moText)
-    if (textFlatForResponsiveCompare(pcN).toLowerCase() !== textFlatForResponsiveCompare(moN).toLowerCase()) return null
-    var pcG = newlineGapsForResponsive(pcN)
-    var moG = newlineGapsForResponsive(moN)
-    var flat = pcG.flat
-    var out = ""
-    for (var gi = 0; gi <= flat.length; gi++) {
-        var k = pcG.gaps[gi] || 0
-        var j = moG.gaps[gi] || 0
-        out += appendResponsiveBrSlotHtml(k, j)
-        if (gi < flat.length) out += escapeHtml(flat.charAt(gi))
-    }
-    return out
-}
-/**
- * 하이브리드(PC+MO 루트 선택) 시: PC 코드 생성 직전에 호출.
- * 섹션·가시 자식 1:1 walk + 레이어 이름이 있으면 MO 문자열 우선(이름 대소문자 무시 보조).
- * 데스크톱 TEXT 노드 id → 반응형 줄바꿈 inner HTML.
- */
-function textSummaryAllowsResponsiveBrOverride(ts) {
-    if (!ts) return true
-    var parts = ts.parts
-    if (!parts || parts.length === 0) return true
-    if (parts.length !== 1) return false
-    var text = ts.text || ""
-    var tlen = text.length
-    if (tlen === 0) return true
-    var p = parts[0]
-    var from = Math.max(0, Math.min(tlen, Number(p.start) || 0))
-    var to = Math.max(0, Math.min(tlen, Number(p.end) || 0))
-    return from <= 0 && to >= tlen
-}
 function moTextNodeFromNameMap(byNameMo, layerName) {
     var key = String(layerName || "").trim()
     if (!key || !byNameMo) return null
@@ -188,8 +151,8 @@ function buildResponsiveTextInnerByNodeIdMap(desktopRoot, mobileRoot) {
                 if (mnByName) {
                     moStr = mnByName.characters != null ? String(mnByName.characters) : ""
                 }
-                var pcFlat = textFlatForResponsiveCompare(normalizeTextNewlinesForResponsive(pcStr))
-                var moFlat = textFlatForResponsiveCompare(normalizeTextNewlinesForResponsive(moStr))
+                var pcFlat = textFlatForResponsiveCompare(pcStr)
+                var moFlat = textFlatForResponsiveCompare(moStr)
                 if (pcFlat.toLowerCase() === moFlat.toLowerCase()) {
                     map[String(d.id)] = moStr
                 }
