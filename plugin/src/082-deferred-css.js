@@ -1,8 +1,17 @@
 /**
- * 082-deferred-css — 지연 CSS 누적·병합·BEM 정리·MO 셀렉터 필터·이미지 크기 var
+ * 082-deferred-css — 지연 CSS 누적·병합·BEM 정리·MO 셀렉터 필터·이미지 크기 var·연번 리네임
  *   구조 불일치(PC+MO) 시 096에서 `.pc-only .ap-section--NN …` / `.mo-only .ap-section--NN …` 형태로 누적
  *
- * 의존: 010 pad2, 070 getImageSizeDecl/cssInnerSel은 081·070 — pushDeferredImageImgSizeVars는 081 cssInner 이후
+ * pushDeferredStyle, dedupeCssDecl — 지연 스타일 누적·중복 제거
+ * consolidateDeferredStylesByIdenticalDecl — 동일 선언 병합
+ * canonicalizeMergedRulesToSingleRepresentativeClass — 동일 CSS 룰 대표 클래스 선택
+ * applySectionScopedClassRenames — 섹션별 클래스 리네임 (CSS+HTML)
+ * buildUsedApSectionBemFromArticleHtml — HTML에서 사용된 BEM 클래스 수집
+ * stripUnusedApSectionBemFromContentLines — 미사용 BEM 제거
+ * buildSequentialBemRenames — CSS 후처리 후 갭 난 BEM 번호 연번 정렬 (095에서 PC+MO 합친 뒤 사용)
+ * pushDeferredImageImgSizeVars — 이미지 --ap-w/--ap-h 지연 CSS
+ *
+ * 의존: 010 pad2, 070 getImageSizeDecl, 081 cssInnerSelForNode
  */
 // ----- Deferred CSS (빌드 컨텍스트에 sel+decl 누적, 최종 압축 전 병합) -----
 /** deferred 스타일 배열에 셀렉터별 선언 누적 (같은 sel이면 decl 병합) */

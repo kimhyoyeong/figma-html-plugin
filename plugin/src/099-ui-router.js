@@ -1,12 +1,27 @@
 /**
  * 099-ui-router — ui.html ↔ 메인 스레드 메시지 라우팅
  *
+ * sendImagesToUI — 이미지 청크 분할 전송 (RESULT_IMAGES_CHUNK + RESULT_IMAGES_END)
  * figma.ui.onmessage — RUN_ANALYZE/RUN_DESKTOP/RUN_MOBILE/EXPORT_ZIP, API 키 저장·로드 등.
  *   분석·ZIP 시 dumpTreeAsync, PC+MO 시 combinePcMoAsBreakpoint, 결과는 RESULT·RESULT_IMAGES_*·ZIP_* 로 UI 전달.
- *
- * 비대해지면 타입별 핸들러만 별 파일로 쪼개고, 여기서는 위임만 두는 편이 유지보수에 유리함.
  */
-// ----- 1. UI Router (ui.html → code.js) -----
+// ----- UI Router (ui.html ↔ code.js) -----
+/** 이미지 배열을 UI에 청크 전송 */
+function sendImagesToUI(images, ingestId) {
+    if (!images || !images.length) return
+    for (var i = 0; i < images.length; i++) {
+        var item = images[i]
+        figma.ui.postMessage({
+            type: "RESULT_IMAGES_CHUNK",
+            ingestId: ingestId,
+            index: i,
+            name: item.name,
+            dataUrl: item.dataUrl,
+        })
+    }
+    figma.ui.postMessage({ type: "RESULT_IMAGES_END", ingestId: ingestId })
+}
+
 figma.ui.onmessage = function (msg) {
     if (!msg) return
 

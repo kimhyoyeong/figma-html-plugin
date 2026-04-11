@@ -1,6 +1,13 @@
 /**
- * 067-image-system — 정책·포맷·export·에셋 캐시 (node.id 기반 이미지 캐시 없음)
- * disposeTempExportNode / removeOrphanedTempExportNodesFromDocument — 배경 fill 전용 임시 프레임(`__bg_fill_only__`) 정리
+ * 067-image-system — 이미지 파이프라인: 에셋 캐시·포맷 결정·export·투명도 분석
+ *
+ * createImageAssetStores, ensureImagePipelineOnCache, getAssetStore, getCachedAsset, setCachedAsset — 에셋 캐시
+ * disposeTempExportNode, removeOrphanedTempExportNodesFromDocument — 임시 프레임 정리
+ * structuralSourceHash, sourceHashForAssetKey, makeAssetKey, makePairedPcAssetKey* — 에셋 키 생성
+ * isJpegBytesImg, isPngBytesImg, isGifBytesImg, isWebpBytesImg, *TransparencyImg — 바이너리 포맷·투명도 감지
+ * decideImageKind, resolveRasterFormatOnceAsync — 이미지 종류·래스터 포맷 결정
+ * exportRasterAssetAsync, exportSvgAssetAsync, exportByKind — 실제 export
+ * pipelineEnsureImageAsync — 파이프라인 진입점 (종류 판별 → 포맷 → export → 캐시)
  */
 function createImageAssetStores() {
     return { preview: Object.create(null), export: Object.create(null), zip: Object.create(null) }
@@ -771,17 +778,3 @@ function pipelineEnsureImageAsync(node, ctx) {
     })
 }
 
-function sendImagesToUI(images, ingestId) {
-    if (!images || !images.length) return
-    for (var i = 0; i < images.length; i++) {
-        var item = images[i]
-        figma.ui.postMessage({
-            type: "RESULT_IMAGES_CHUNK",
-            ingestId: ingestId,
-            index: i,
-            name: item.name,
-            dataUrl: item.dataUrl,
-        })
-    }
-    figma.ui.postMessage({ type: "RESULT_IMAGES_END", ingestId: ingestId })
-}

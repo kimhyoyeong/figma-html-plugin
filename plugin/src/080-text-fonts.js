@@ -1,7 +1,12 @@
 /**
  * 080-text-fonts — 폰트 로드, TEXT 스타일 구간, ap-text CSS 변수, 허용 폰트 판별
  *
- * getTextSummaryAsync/Sync, getTextFontFamiliesSync, buildTextVarsDecl*(--ap-lh=줄간/글자크 배율), textFamiliesAllowedAsHtml 등.
+ * getTextSummaryAsync/Sync — TEXT 노드 → {fs,lh,ls,fw,ta,clr,textCase,textDecoration,parts} 스타일 객체
+ * mergeAdjacentSameStyleParts — Figma 세그먼트 분할 병합 (동일 스타일 인접 parts 통합)
+ * figTextDecorationToDecl — textDecoration → text-decoration CSS
+ * buildTextVarsDecl/Diff — ap-text CSS 변수 선언·PC/MO 차이
+ * textFamiliesAllowedAsHtml — UI 허용 폰트 목록 판별
+ * getTextFontFamiliesSync — 폰트 패밀리 목록 (동기)
  * 지연 CSS·에셋 경로·배경·섹션 시맨틱·폰트 래스터 시맨틱 승격은 082·083·085·081.
  */
 // ----- 텍스트 (폰트 로드, 스타일 구간, CSS 변수) -----

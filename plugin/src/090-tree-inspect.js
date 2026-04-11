@@ -1,12 +1,18 @@
 /**
- * 090-tree-inspect — 레이어 인스펙트 텍스트 덤프용 요약 + ROOT/섹션 해석
+ * 090-tree-inspect — 레이어 인스펙트 덤프 + flex 자식 레이아웃 선언 + ROOT/섹션 해석
  *
- * 경계: 덤프 한 줄 요약·PC/MO 매칭·섹션 후보 목록. 비동기 전체 빌드 루프는 097, HTML 생성은 096.
+ * 경계: 덤프 한 줄 요약·flex 자식 width/height/grow/align 선언·섹션 후보 목록.
+ * 비동기 전체 빌드 루프는 097, HTML 생성은 096.
  *
  * oneLineBase, dumpPadKey — 덤프 한 줄·키 패딩
  * bgDetails, flexDetails, layoutChildDetails — 배경·flex·자식 sizing 덤프 문자열
- * getFillFlexStartWidthDecl — FILL + flex-start일 때 width:100% 보조 선언
- * getFlexChildMainAxisGrowDecl — 부모 주축 기준 layoutGrow / 세로 FILL → flex-grow 등
+ * getFillFlexStartWidthDecl — FILL → column width:100% / row flex-grow:1
+ * getFlexChildMainAxisGrowDecl — 부모 주축 기준 layoutGrow / 세로 FILL → flex-grow·height
+ * getAlignSelfDecl — layoutAlign → align-self (STRETCH 제외, width 쪽에서 처리)
+ * getSameWidthAsParentDecl — 자식 바운딩 == 부모 바운딩 → width:100%
+ * sectionContainerNeedsFullWidthInColumnParent — container 시맨틱 + column flex-start → width:100%
+ * textNeedsFullWidthForAlignInColumnFlex — column flex에서 TEXT width:100% 필요 여부
+ * getTextFullWidthDecl — TEXT 전폭 판별 통합 (FILL / STRETCH / 같은폭 / column align)
  * resolveDesktopMobile — 선택 2개 시 가로 큰 쪽=PC, breakpoint=MO 폭
  * getSectionNodes — ROOT 직계 보이는 자식 = 섹션 후보 목록
  */

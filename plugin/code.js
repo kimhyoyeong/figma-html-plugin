@@ -188,6 +188,7 @@ function isCodeRasterNodeEffective(node, cache) {
  * getSlideViewportWidth — 슬라이드 영역 가로(섹션 폭으로 클램프)
  * getSlideItemPitch — 슬라이드 간격(아이템 폭+갭) 추정
  * collectMoSlideItemNodes — PC 기준으로 MO 슬라이드 노드 순서 맞춤
+ * roundSlidesPerView — raw slidesPerView → 정수 근사 또는 소수 2자리
  * computeSlidesPerView / computeSlidesPerViewMo — PC·MO 각각 한 화면에 몇 장 보일지
  * resolveSlideMeta — PC/MO slidesPerView를 한 객체로
  */
@@ -1017,18 +1018,23 @@ function containerAllVisibleChildrenAreAbsolute(node) {
 
 
 /**
- * 060-layout — Flex CSS 변수, 절대 좌표 선언, 채우기/스트로크/반지름, 섹션 높이
+ * 060-layout — Flex CSS 변수, 절대 좌표 선언, 채우기/스트로크/반지름/그림자/블러/투명도/오버플로/그래디언트, 섹션 높이
  *
- * 경계: CSS 선언 조립(레이아웃·칠·테두리). 노드 판별은 050, 최종 HTML 문자열은 096.
+ * 경계: CSS 선언 조립(레이아웃·칠·테두리·시각효과). 노드 판별은 050, 최종 HTML 문자열은 096.
  *
  * getLayoutVars, flexColumnSpaceBetweenNeedsMinHeight, applySectionSingleChildAlignOverride, buildFlexDecl, buildFlexPaddingDecl — ap-flex
- * buildAbsDecl, buildAbsDeclTextRaster, *Diff — 절대 위치·TEXT 래스터·PC/MO 차이
+ * formatAbsVarsDecl, absVarsSame, buildAbsDecl, buildAbsDeclTextRaster, *Diff — 절대 위치·TEXT 래스터·PC/MO 차이
  * getImageSizeDeclDiff, getVideoSizeDeclDiff — figure/비디오 크기 MO 오버라이드
  * toHex2, rgbToHex, hexToRgba, getFirstSolidColorFromPaints — 색 문자열
- * getFirstSolidFill, hasImageFill, hasVideoFill — fill 조회
+ * getFirstSolidFill, hasImageFill, hasVideoFill, getPrimaryImageFillHash — fill 조회
  * needsMinHeight, getPcSectionCanvasHeightDecls, getMediaSectionCanvasHeightDecl — 캔버스형 섹션 min-height
  * frameHasMinHeightVisualReason — 프레임에 시각적 이유로 min-height 줄지
  * getFirstSolidStroke, buildCornerRadiusDecl, buildStrokeDecl, buildStrokeDeclDiff — 테두리·모서리
+ * buildBoxShadowDecl — DROP_SHADOW/INNER_SHADOW → box-shadow CSS
+ * buildBlurDecl — LAYER_BLUR → filter:blur() CSS
+ * buildOpacityDecl — node.opacity → opacity CSS
+ * buildOverflowDecl — clipsContent → overflow:hidden CSS
+ * buildGradientDecl — GRADIENT_LINEAR/RADIAL → background:gradient() CSS
  */
 // ----- 4. Layout Utils (flex vars, abs decl) -----
 /**
@@ -2122,7 +2128,12 @@ function getImageSizeDecl(node, parent) {
 /**
  * 080-text-fonts — 폰트 로드, TEXT 스타일 구간, ap-text CSS 변수, 허용 폰트 판별
  *
- * getTextSummaryAsync/Sync, getTextFontFamiliesSync, buildTextVarsDecl*(--ap-lh=줄간/글자크 배율), textFamiliesAllowedAsHtml 등.
+ * getTextSummaryAsync/Sync — TEXT 노드 → {fs,lh,ls,fw,ta,clr,textCase,textDecoration,parts} 스타일 객체
+ * mergeAdjacentSameStyleParts — Figma 세그먼트 분할 병합 (동일 스타일 인접 parts 통합)
+ * figTextDecorationToDecl — textDecoration → text-decoration CSS
+ * buildTextVarsDecl/Diff — ap-text CSS 변수 선언·PC/MO 차이
+ * textFamiliesAllowedAsHtml — UI 허용 폰트 목록 판별
+ * getTextFontFamiliesSync — 폰트 패밀리 목록 (동기)
  * 지연 CSS·에셋 경로·배경·섹션 시맨틱·폰트 래스터 시맨틱 승격은 082·083·085·081.
  */
 // ----- 텍스트 (폰트 로드, 스타일 구간, CSS 변수) -----
@@ -3501,10 +3512,19 @@ function promoteRasterTextNodesToImageSemantics(sectionNode, map, allowedHtml, u
 
 
 /**
- * 082-deferred-css — 지연 CSS 누적·병합·BEM 정리·MO 셀렉터 필터·이미지 크기 var
+ * 082-deferred-css — 지연 CSS 누적·병합·BEM 정리·MO 셀렉터 필터·이미지 크기 var·연번 리네임
  *   구조 불일치(PC+MO) 시 096에서 `.pc-only .ap-section--NN …` / `.mo-only .ap-section--NN …` 형태로 누적
  *
- * 의존: 010 pad2, 070 getImageSizeDecl/cssInnerSel은 081·070 — pushDeferredImageImgSizeVars는 081 cssInner 이후
+ * pushDeferredStyle, dedupeCssDecl — 지연 스타일 누적·중복 제거
+ * consolidateDeferredStylesByIdenticalDecl — 동일 선언 병합
+ * canonicalizeMergedRulesToSingleRepresentativeClass — 동일 CSS 룰 대표 클래스 선택
+ * applySectionScopedClassRenames — 섹션별 클래스 리네임 (CSS+HTML)
+ * buildUsedApSectionBemFromArticleHtml — HTML에서 사용된 BEM 클래스 수집
+ * stripUnusedApSectionBemFromContentLines — 미사용 BEM 제거
+ * buildSequentialBemRenames — CSS 후처리 후 갭 난 BEM 번호 연번 정렬 (095에서 PC+MO 합친 뒤 사용)
+ * pushDeferredImageImgSizeVars — 이미지 --ap-w/--ap-h 지연 CSS
+ *
+ * 의존: 010 pad2, 070 getImageSizeDecl, 081 cssInnerSelForNode
  */
 // ----- Deferred CSS (빌드 컨텍스트에 sel+decl 누적, 최종 압축 전 병합) -----
 /** deferred 스타일 배열에 셀렉터별 선언 누적 (같은 sel이면 decl 병합) */
@@ -4236,8 +4256,15 @@ function guessMoRasterPathFromPcRasterPath(pcPathWithExt, ext) {
 }
 
 /**
- * 067-image-system — 정책·포맷·export·에셋 캐시 (node.id 기반 이미지 캐시 없음)
- * disposeTempExportNode / removeOrphanedTempExportNodesFromDocument — 배경 fill 전용 임시 프레임(`__bg_fill_only__`) 정리
+ * 067-image-system — 이미지 파이프라인: 에셋 캐시·포맷 결정·export·투명도 분석
+ *
+ * createImageAssetStores, ensureImagePipelineOnCache, getAssetStore, getCachedAsset, setCachedAsset — 에셋 캐시
+ * disposeTempExportNode, removeOrphanedTempExportNodesFromDocument — 임시 프레임 정리
+ * structuralSourceHash, sourceHashForAssetKey, makeAssetKey, makePairedPcAssetKey* — 에셋 키 생성
+ * isJpegBytesImg, isPngBytesImg, isGifBytesImg, isWebpBytesImg, *TransparencyImg — 바이너리 포맷·투명도 감지
+ * decideImageKind, resolveRasterFormatOnceAsync — 이미지 종류·래스터 포맷 결정
+ * exportRasterAssetAsync, exportSvgAssetAsync, exportByKind — 실제 export
+ * pipelineEnsureImageAsync — 파이프라인 진입점 (종류 판별 → 포맷 → export → 캐시)
  */
 function createImageAssetStores() {
     return { preview: Object.create(null), export: Object.create(null), zip: Object.create(null) }
@@ -5008,20 +5035,6 @@ function pipelineEnsureImageAsync(node, ctx) {
     })
 }
 
-function sendImagesToUI(images, ingestId) {
-    if (!images || !images.length) return
-    for (var i = 0; i < images.length; i++) {
-        var item = images[i]
-        figma.ui.postMessage({
-            type: "RESULT_IMAGES_CHUNK",
-            ingestId: ingestId,
-            index: i,
-            name: item.name,
-            dataUrl: item.dataUrl,
-        })
-    }
-    figma.ui.postMessage({ type: "RESULT_IMAGES_END", ingestId: ingestId })
-}
 
 /**
  * 084-image-render-order — 렌더 순서와 동일한 <img> 노드 id 수집·선행 export(에셋 경로/해시 디듀프는 083)
@@ -5972,14 +5985,20 @@ function buildSectionBackgroundAsync(sectionNode, cache, secNo) {
 }
 
 /**
- * 090-tree-inspect — 레이어 인스펙트 텍스트 덤프용 요약 + ROOT/섹션 해석
+ * 090-tree-inspect — 레이어 인스펙트 덤프 + flex 자식 레이아웃 선언 + ROOT/섹션 해석
  *
- * 경계: 덤프 한 줄 요약·PC/MO 매칭·섹션 후보 목록. 비동기 전체 빌드 루프는 097, HTML 생성은 096.
+ * 경계: 덤프 한 줄 요약·flex 자식 width/height/grow/align 선언·섹션 후보 목록.
+ * 비동기 전체 빌드 루프는 097, HTML 생성은 096.
  *
  * oneLineBase, dumpPadKey — 덤프 한 줄·키 패딩
  * bgDetails, flexDetails, layoutChildDetails — 배경·flex·자식 sizing 덤프 문자열
- * getFillFlexStartWidthDecl — FILL + flex-start일 때 width:100% 보조 선언
- * getFlexChildMainAxisGrowDecl — 부모 주축 기준 layoutGrow / 세로 FILL → flex-grow 등
+ * getFillFlexStartWidthDecl — FILL → column width:100% / row flex-grow:1
+ * getFlexChildMainAxisGrowDecl — 부모 주축 기준 layoutGrow / 세로 FILL → flex-grow·height
+ * getAlignSelfDecl — layoutAlign → align-self (STRETCH 제외, width 쪽에서 처리)
+ * getSameWidthAsParentDecl — 자식 바운딩 == 부모 바운딩 → width:100%
+ * sectionContainerNeedsFullWidthInColumnParent — container 시맨틱 + column flex-start → width:100%
+ * textNeedsFullWidthForAlignInColumnFlex — column flex에서 TEXT width:100% 필요 여부
+ * getTextFullWidthDecl — TEXT 전폭 판별 통합 (FILL / STRETCH / 같은폭 / column align)
  * resolveDesktopMobile — 선택 2개 시 가로 큰 쪽=PC, breakpoint=MO 폭
  * getSectionNodes — ROOT 직계 보이는 자식 = 섹션 후보 목록
  */
@@ -6578,6 +6597,40 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         })
 
         var pairW = pcMoChildPairsOrIndex(dKids, mKids)
+        // MO 순서가 PC와 다르면 order 오버라이드 추가 (PC/MO 각각의 원본 인덱스 기준)
+        if (pairW.length >= 2 && isFlex(mNode)) {
+            var pcIdxMap = {}, moIdxMap = {}
+            for (var pci = 0; pci < dKids.length; pci++) { if (dKids[pci] && dKids[pci].id) pcIdxMap[String(dKids[pci].id)] = pci }
+            for (var mci = 0; mci < mKids.length; mci++) { if (mKids[mci] && mKids[mci].id) moIdxMap[String(mKids[mci].id)] = mci }
+            // 각 pair의 PC 순서와 MO 순서를 수집
+            var orderPairs = []
+            for (var opi = 0; opi < pairW.length; opi++) {
+                var opD = pairW[opi][0], opM = pairW[opi][1]
+                if (!opD || !opD.id || !opM || !opM.id) continue
+                var pcPos = pcIdxMap[String(opD.id)]
+                var moPos = moIdxMap[String(opM.id)]
+                if (pcPos != null && moPos != null) orderPairs.push({ dId: String(opD.id), pcPos: pcPos, moPos: moPos })
+            }
+            // PC 순서대로 정렬 후, MO 순서가 동일한 ascending인지 확인
+            orderPairs.sort(function (a, b) { return a.pcPos - b.pcPos })
+            var needsOrder = false
+            for (var oci = 0; oci < orderPairs.length - 1; oci++) {
+                if (orderPairs[oci].moPos > orderPairs[oci + 1].moPos) { needsOrder = true; break }
+            }
+            if (needsOrder) {
+                // MO 순서대로 order 값 부여 (1-based)
+                var moSorted = orderPairs.slice().sort(function (a, b) { return a.moPos - b.moPos })
+                var moRank = {}
+                for (var mri = 0; mri < moSorted.length; mri++) moRank[moSorted[mri].dId] = mri + 1
+                for (var ori = 0; ori < orderPairs.length; ori++) {
+                    var rank = moRank[orderPairs[ori].dId]
+                    // PC 순서(ori+1)와 MO 순서(rank)가 같으면 생략
+                    if (rank === ori + 1) continue
+                    var ordSel = ".ap-section--" + secClass + " " + cssInnerSelForNode(orderPairs[ori].dId, moOpts, false)
+                    if (ordSel) pushMoMoRule(ordSel, "order:" + rank)
+                }
+            }
+        }
         for (var i = 0; i < pairW.length; i++) {
             var d = pairW[i][0]
             var m = pairW[i][1]
@@ -9115,12 +9168,27 @@ function dumpTreeAsync(root, projectName, allowedFonts, options) {
 /**
  * 099-ui-router — ui.html ↔ 메인 스레드 메시지 라우팅
  *
+ * sendImagesToUI — 이미지 청크 분할 전송 (RESULT_IMAGES_CHUNK + RESULT_IMAGES_END)
  * figma.ui.onmessage — RUN_ANALYZE/RUN_DESKTOP/RUN_MOBILE/EXPORT_ZIP, API 키 저장·로드 등.
  *   분석·ZIP 시 dumpTreeAsync, PC+MO 시 combinePcMoAsBreakpoint, 결과는 RESULT·RESULT_IMAGES_*·ZIP_* 로 UI 전달.
- *
- * 비대해지면 타입별 핸들러만 별 파일로 쪼개고, 여기서는 위임만 두는 편이 유지보수에 유리함.
  */
-// ----- 1. UI Router (ui.html → code.js) -----
+// ----- UI Router (ui.html ↔ code.js) -----
+/** 이미지 배열을 UI에 청크 전송 */
+function sendImagesToUI(images, ingestId) {
+    if (!images || !images.length) return
+    for (var i = 0; i < images.length; i++) {
+        var item = images[i]
+        figma.ui.postMessage({
+            type: "RESULT_IMAGES_CHUNK",
+            ingestId: ingestId,
+            index: i,
+            name: item.name,
+            dataUrl: item.dataUrl,
+        })
+    }
+    figma.ui.postMessage({ type: "RESULT_IMAGES_END", ingestId: ingestId })
+}
+
 figma.ui.onmessage = function (msg) {
     if (!msg) return
 

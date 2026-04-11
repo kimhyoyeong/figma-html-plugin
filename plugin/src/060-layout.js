@@ -1,16 +1,21 @@
 /**
- * 060-layout — Flex CSS 변수, 절대 좌표 선언, 채우기/스트로크/반지름, 섹션 높이
+ * 060-layout — Flex CSS 변수, 절대 좌표 선언, 채우기/스트로크/반지름/그림자/블러/투명도/오버플로/그래디언트, 섹션 높이
  *
- * 경계: CSS 선언 조립(레이아웃·칠·테두리). 노드 판별은 050, 최종 HTML 문자열은 096.
+ * 경계: CSS 선언 조립(레이아웃·칠·테두리·시각효과). 노드 판별은 050, 최종 HTML 문자열은 096.
  *
  * getLayoutVars, flexColumnSpaceBetweenNeedsMinHeight, applySectionSingleChildAlignOverride, buildFlexDecl, buildFlexPaddingDecl — ap-flex
- * buildAbsDecl, buildAbsDeclTextRaster, *Diff — 절대 위치·TEXT 래스터·PC/MO 차이
+ * formatAbsVarsDecl, absVarsSame, buildAbsDecl, buildAbsDeclTextRaster, *Diff — 절대 위치·TEXT 래스터·PC/MO 차이
  * getImageSizeDeclDiff, getVideoSizeDeclDiff — figure/비디오 크기 MO 오버라이드
  * toHex2, rgbToHex, hexToRgba, getFirstSolidColorFromPaints — 색 문자열
- * getFirstSolidFill, hasImageFill, hasVideoFill — fill 조회
+ * getFirstSolidFill, hasImageFill, hasVideoFill, getPrimaryImageFillHash — fill 조회
  * needsMinHeight, getPcSectionCanvasHeightDecls, getMediaSectionCanvasHeightDecl — 캔버스형 섹션 min-height
  * frameHasMinHeightVisualReason — 프레임에 시각적 이유로 min-height 줄지
  * getFirstSolidStroke, buildCornerRadiusDecl, buildStrokeDecl, buildStrokeDeclDiff — 테두리·모서리
+ * buildBoxShadowDecl — DROP_SHADOW/INNER_SHADOW → box-shadow CSS
+ * buildBlurDecl — LAYER_BLUR → filter:blur() CSS
+ * buildOpacityDecl — node.opacity → opacity CSS
+ * buildOverflowDecl — clipsContent → overflow:hidden CSS
+ * buildGradientDecl — GRADIENT_LINEAR/RADIAL → background:gradient() CSS
  */
 // ----- 4. Layout Utils (flex vars, abs decl) -----
 /**

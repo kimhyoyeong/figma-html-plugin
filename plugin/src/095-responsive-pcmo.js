@@ -312,6 +312,40 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         })
 
         var pairW = pcMoChildPairsOrIndex(dKids, mKids)
+        // MO 순서가 PC와 다르면 order 오버라이드 추가 (PC/MO 각각의 원본 인덱스 기준)
+        if (pairW.length >= 2 && isFlex(mNode)) {
+            var pcIdxMap = {}, moIdxMap = {}
+            for (var pci = 0; pci < dKids.length; pci++) { if (dKids[pci] && dKids[pci].id) pcIdxMap[String(dKids[pci].id)] = pci }
+            for (var mci = 0; mci < mKids.length; mci++) { if (mKids[mci] && mKids[mci].id) moIdxMap[String(mKids[mci].id)] = mci }
+            // 각 pair의 PC 순서와 MO 순서를 수집
+            var orderPairs = []
+            for (var opi = 0; opi < pairW.length; opi++) {
+                var opD = pairW[opi][0], opM = pairW[opi][1]
+                if (!opD || !opD.id || !opM || !opM.id) continue
+                var pcPos = pcIdxMap[String(opD.id)]
+                var moPos = moIdxMap[String(opM.id)]
+                if (pcPos != null && moPos != null) orderPairs.push({ dId: String(opD.id), pcPos: pcPos, moPos: moPos })
+            }
+            // PC 순서대로 정렬 후, MO 순서가 동일한 ascending인지 확인
+            orderPairs.sort(function (a, b) { return a.pcPos - b.pcPos })
+            var needsOrder = false
+            for (var oci = 0; oci < orderPairs.length - 1; oci++) {
+                if (orderPairs[oci].moPos > orderPairs[oci + 1].moPos) { needsOrder = true; break }
+            }
+            if (needsOrder) {
+                // MO 순서대로 order 값 부여 (1-based)
+                var moSorted = orderPairs.slice().sort(function (a, b) { return a.moPos - b.moPos })
+                var moRank = {}
+                for (var mri = 0; mri < moSorted.length; mri++) moRank[moSorted[mri].dId] = mri + 1
+                for (var ori = 0; ori < orderPairs.length; ori++) {
+                    var rank = moRank[orderPairs[ori].dId]
+                    // PC 순서(ori+1)와 MO 순서(rank)가 같으면 생략
+                    if (rank === ori + 1) continue
+                    var ordSel = ".ap-section--" + secClass + " " + cssInnerSelForNode(orderPairs[ori].dId, moOpts, false)
+                    if (ordSel) pushMoMoRule(ordSel, "order:" + rank)
+                }
+            }
+        }
         for (var i = 0; i < pairW.length; i++) {
             var d = pairW[i][0]
             var m = pairW[i][1]

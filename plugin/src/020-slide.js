@@ -7,6 +7,7 @@
  * getSlideViewportWidth — 슬라이드 영역 가로(섹션 폭으로 클램프)
  * getSlideItemPitch — 슬라이드 간격(아이템 폭+갭) 추정
  * collectMoSlideItemNodes — PC 기준으로 MO 슬라이드 노드 순서 맞춤
+ * roundSlidesPerView — raw slidesPerView → 정수 근사 또는 소수 2자리
  * computeSlidesPerView / computeSlidesPerViewMo — PC·MO 각각 한 화면에 몇 장 보일지
  * resolveSlideMeta — PC/MO slidesPerView를 한 객체로
  */
