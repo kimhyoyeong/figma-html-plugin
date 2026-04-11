@@ -6489,6 +6489,130 @@ function collectMoVideoNodesByPcLayerName(dSec, mSec) {
     walk(dSec, mSec)
     return map
 }
+
+/**
+ * buildOrderPlan — PC DOM 순서와 MO 의도 순서가 다를 때 order plan 생성.
+ * 매칭: 하위 구조 fingerprint + occurrence (이름·좌표 의존 없음)
+ * 대상: flex 부모, visible & non-absolute children, 구조 불일치 섹션 제외.
+ * 반환: { secClass: [{ pcNodeId, order }] }
+ */
+function buildOrderPlan(desktopRoot, mobileRoot, skipSecs) {
+    var plan = {}
+    if (!isContainer(desktopRoot) || !isContainer(mobileRoot)) return plan
+
+    var skipSet = Object.create(null)
+    if (skipSecs) for (var si = 0; si < skipSecs.length; si++) skipSet[String(skipSecs[si])] = true
+
+    /** 하위 구조 fingerprint — children 타입 트리를 정렬하여 순서 무관 비교 */
+    function structSig(node, depth) {
+        var t = (node && node.type) || "?"
+        if (depth <= 0 || !node || !isContainer(node)) return t
+        var kids = (node.children || []).filter(function (c) { return c && isVisible(c) })
+        if (!kids.length) return t + "[]"
+        var sigs = []
+        for (var i = 0; i < kids.length; i++) sigs.push(structSig(kids[i], depth - 1))
+        sigs.sort()
+        return t + "[" + sigs.join(",") + "]"
+    }
+
+    function visKids(node) {
+        var arr = []
+        if (!node || !node.children) return arr
+        for (var i = 0; i < node.children.length; i++) {
+            if (node.children[i] && isVisible(node.children[i])) arr.push(node.children[i])
+        }
+        return arr
+    }
+
+    /** fingerprint + occurrence 기준으로 PC/MO children 매칭 */
+    function matchByStructure(pcKids, moKids) {
+        var pcCounts = Object.create(null)
+        var pcEntries = []
+        for (var i = 0; i < pcKids.length; i++) {
+            var sig = structSig(pcKids[i], 2)
+            pcCounts[sig] = (pcCounts[sig] || 0) + 1
+            pcEntries.push({ node: pcKids[i], key: sig + "\0" + pcCounts[sig], idx: i })
+        }
+        var moCounts = Object.create(null)
+        var moByKey = Object.create(null)
+        for (var j = 0; j < moKids.length; j++) {
+            var msig = structSig(moKids[j], 2)
+            moCounts[msig] = (moCounts[msig] || 0) + 1
+            moByKey[msig + "\0" + moCounts[msig]] = { node: moKids[j], idx: j }
+        }
+        var pairs = []
+        for (var p = 0; p < pcEntries.length; p++) {
+            var match = moByKey[pcEntries[p].key]
+            if (match) pairs.push({ pcNode: pcEntries[p].node, moNode: match.node, pcIdx: pcEntries[p].idx, moIdx: match.idx })
+        }
+        return pairs
+    }
+
+    function walkForOrder(dNode, mNode, entries) {
+        var dKids = visKids(dNode)
+        var mKids = visKids(mNode)
+
+        if (isFlex(mNode)) {
+            var dFlow = []
+            for (var di = 0; di < dKids.length; di++) {
+                if (!isAbsolutePositioned(dKids[di])) dFlow.push(dKids[di])
+            }
+            var mFlow = []
+            for (var mi = 0; mi < mKids.length; mi++) {
+                if (!isAbsolutePositioned(mKids[mi])) mFlow.push(mKids[mi])
+            }
+            if (dFlow.length >= 2 && mFlow.length >= 2) {
+                var orderPairs = matchByStructure(dFlow, mFlow)
+                if (orderPairs.length >= 2) {
+                    orderPairs.sort(function (a, b) { return a.pcIdx - b.pcIdx })
+                    var needsOrder = false
+                    for (var ci = 0; ci < orderPairs.length - 1; ci++) {
+                        if (orderPairs[ci].moIdx > orderPairs[ci + 1].moIdx) { needsOrder = true; break }
+                    }
+                    if (needsOrder) {
+                        var moSorted = orderPairs.slice().sort(function (a, b) { return a.moIdx - b.moIdx })
+                        var rankMap = Object.create(null)
+                        for (var ri = 0; ri < moSorted.length; ri++) rankMap[String(moSorted[ri].pcNode.id)] = ri + 1
+                        for (var qi = 0; qi < orderPairs.length; qi++) {
+                            var pcId = String(orderPairs[qi].pcNode.id)
+                            entries.push({ pcNodeId: pcId, order: rankMap[pcId] })
+                        }
+                        console.log("[order-plan] needsOrder", {
+                            pcKids: dFlow.map(function (c, i) { return i + ":" + (c.name || "") + " sig=" + structSig(c, 2) }),
+                            moKids: mFlow.map(function (c, i) { return i + ":" + (c.name || "") + " sig=" + structSig(c, 2) }),
+                            result: entries.slice(-orderPairs.length)
+                        })
+                    }
+                }
+            }
+        }
+
+        var allPairs = matchByStructure(dKids, mKids)
+        for (var fi = 0; fi < allPairs.length; fi++) {
+            var pc = allPairs[fi].pcNode
+            var mo = allPairs[fi].moNode
+            if (pc.type === "FRAME" && isContainer(pc) && mo.type === "FRAME" && isContainer(mo)) {
+                walkForOrder(pc, mo, entries)
+            }
+        }
+    }
+
+    var dSecs = getSectionNodes(desktopRoot)
+    var mSecs = getSectionNodes(mobileRoot)
+    for (var s = 0; s < dSecs.length; s++) {
+        if (s >= mSecs.length) continue
+        var secClass = sectionClassPrefix(s + 1)
+        if (skipSet[secClass]) continue
+        var dSec = dSecs[s]
+        var mSec = mSecs[s]
+        if (!mSec || dSec.type !== mSec.type) continue
+        var entries = []
+        walkForOrder(dSec, mSec, entries)
+        if (entries.length) plan[secClass] = entries
+    }
+    return plan
+}
+
 /** PC HTML 기준 MO 미디어쿼리 오버라이드 (프레임/텍스트 walk는 pcMoChildPairsOrIndex, 이미지는 렌더 순서·슬롯) */
 function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
     options = options || {}
@@ -6834,6 +6958,14 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
         if (moOrder && moOrder.length) applyApSectionImageRenderOrderFromIds(mSem, moOrder)
         var moLookup = collectMoImageLookupMaps(mSec, mSem, moInheritLookupCache)
         walkPair(dSec, mSec, mSec, secClass, secImageByName, secTextByName, sectionTextOverrideDone, deskSem, secVideoByName, sectionVideoOverrideDone)
+        var secOrderPlan = options.orderPlan && options.orderPlan[secClass]
+        if (secOrderPlan) {
+            for (var oi = 0; oi < secOrderPlan.length; oi++) {
+                var ordEntry = secOrderPlan[oi]
+                var ordSel = ".ap-section--" + secClass + " " + cssInnerSelForNode(ordEntry.pcNodeId, deskMoOpts, false)
+                if (ordSel) pushMoMoRule(ordSel, "order:" + ordEntry.order)
+            }
+        }
         pushImageMoSizeOverridesForSection(dSec, secClass, deskMoOpts, deskSem, moLookup, secImageByName)
         // code-video: 인덱스 매칭이 어긋난 경우 레이어 name 기준으로 MO 비디오 aspect-ratio 등
         function pushVideoOverridesByName(dNode, secCls, vidByName, overrideDone) {
@@ -7234,6 +7366,8 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
     var moPathByPcStem = buildMoRasterPathByPcStemFromMoImageList(options.moImages || [])
     sectionStyles = rewriteMoOnlyRasterBgUrls(sectionStyles, moPathByPcStem)
 
+    var orderPlan = buildOrderPlan(desktopRoot, mobileRoot, skipMoWalkSecs)
+
     var overrides = buildMobileOverrides(
         desktopRoot,
         mobileRoot,
@@ -7241,6 +7375,7 @@ function combinePcMoAsBreakpoint(pcCode, desktopRoot, mobileRoot, breakpoint, op
         Object.assign({}, options, {
             usedApSectionBemBySection: usedBem,
             skipStructureMismatchSecs: skipMoWalkSecs,
+            orderPlan: orderPlan,
         }),
     )
     overrides = injectBgOverridesForMo(sectionStyles, overrides, skipMoWalkSecs, moPathByPcStem)
