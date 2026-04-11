@@ -449,14 +449,24 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
     }
 
     function buildTextNodeHtml(ts, node, textCls, dataIdAttr, depth) {
-        var partResult = buildTextPartInnerHtml(ts)
-        var innerHtml = typeof partResult === "string" ? partResult : partResult.inner
         var rid = node.id != null ? String(node.id) : ""
-        var resp
-        if (rid && cache.responsiveTextInnerByNodeId && textSummaryAllowsResponsiveBrOverride(ts)) {
-            resp = cache.responsiveTextInnerByNodeId[rid]
+        var moChars = rid && cache.responsiveTextInnerByNodeId ? cache.responsiveTextInnerByNodeId[rid] : undefined
+        var brState = null
+        if (moChars != null && ts) {
+            var _brPcN = normalizeTextNewlinesForResponsive(ts.text || "")
+            var _brMoN = normalizeTextNewlinesForResponsive(moChars)
+            var _brPcG = newlineGapsForResponsive(_brPcN)
+            var _brMoG = newlineGapsForResponsive(_brMoN)
+            if (_brPcG.flat.toLowerCase() === _brMoG.flat.toLowerCase()) {
+                var _brDiff = false
+                for (var _bi = 0; _bi <= _brPcG.flat.length; _bi++) {
+                    if ((_brPcG.gaps[_bi] || 0) !== (_brMoG.gaps[_bi] || 0)) { _brDiff = true; break }
+                }
+                if (_brDiff) brState = { pcGaps: _brPcG.gaps, moGaps: _brMoG.gaps, pcSpGaps: _brPcG.spGaps, moSpGaps: _brMoG.spGaps, visIdx: 0 }
+            }
         }
-        if (resp !== undefined && resp !== null) innerHtml = resp
+        var partResult = buildTextPartInnerHtml(ts, brState)
+        var innerHtml = typeof partResult === "string" ? partResult : partResult.inner
         var inlineStyle = ""
         if (inlinePcTextTypography && ts) {
             if (cache.pcTypoInlineDiffByNode && Object.prototype.hasOwnProperty.call(cache.pcTypoInlineDiffByNode, rid)) {

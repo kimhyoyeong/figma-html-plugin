@@ -25,31 +25,76 @@ function textToHtmlWithBreaks(s) {
     var t = String(s).replace(/\u2028/g, "\n").replace(/\u2029/g, "\n")
     return t.split(/\r?\n/).map(escapeHtml).join("<br>")
 }
+/** 반응형 BR: PC 텍스트 부분 문자열을 처리, brState.visIdx 기반 공백/pc-only/mo-only <br> 출력 */
+function textToHtmlWithResponsiveBr(s, brState) {
+    if (s == null) return ""
+    if (!brState) return textToHtmlWithBreaks(s)
+    var t = String(s).replace(/\u2028/g, "\n").replace(/\u2029/g, "\n")
+    var out = ""
+    for (var i = 0; i < t.length; i++) {
+        var ch = t.charAt(i)
+        if (ch === "\n" || ch === " " || ch === "\t") continue
+        out += appendResponsiveSepHtml(
+            brState.pcGaps[brState.visIdx] || 0,
+            brState.moGaps[brState.visIdx] || 0,
+            brState.pcSpGaps[brState.visIdx] || 0,
+            brState.moSpGaps[brState.visIdx] || 0
+        )
+        out += escapeHtml(ch)
+        brState.visIdx++
+    }
+    return out
+}
+/** brState 종료 후 마지막 가시 문자 뒤 trailing 출력 */
+function getResponsiveBrTrailing(brState) {
+    if (!brState) return ""
+    return appendResponsiveSepHtml(
+        brState.pcGaps[brState.visIdx] || 0,
+        brState.moGaps[brState.visIdx] || 0,
+        brState.pcSpGaps[brState.visIdx] || 0,
+        brState.moSpGaps[brState.visIdx] || 0
+    )
+}
 /** PC/MO 반응형 줄바꿈: LS/PS·CR 정규화 (본문 flat 비교용) */
 function normalizeTextNewlinesForResponsive(s) {
     if (s == null) return ""
     return String(s).replace(/\u2028/g, "\n").replace(/\u2029/g, "\n").replace(/\r\n/g, "\n").replace(/\r/g, "\n")
 }
-/** 개행 제거한 문자열만 비교(PC/MO 동일 문장 여부) */
+/** 공백·개행 모두 제거한 문자열 비교(PC/MO 동일 문장 여부) — 공백↔개행 교환 허용 */
 function textFlatForResponsiveCompare(s) {
-    return normalizeTextNewlinesForResponsive(s).replace(/\n/g, "")
+    return normalizeTextNewlinesForResponsive(s).replace(/[\s\n]+/g, "")
 }
-/** 각 문자 사이의 연속 \\n 개수(gaps)와 flat 문자열 — 반응형 BR 슬롯 계산용 */
+/** 각 가시 문자 사이의 연속 \\n 개수(gaps)·공백 개수(spGaps)와 flat 문자열 — 반응형 BR 슬롯 계산용 */
 function newlineGapsForResponsive(norm) {
     var gaps = []
+    var spGaps = []
     var flatParts = []
-    var run = 0
+    var nlRun = 0
+    var spRun = 0
     for (var i = 0; i < norm.length; i++) {
         var ch = norm.charAt(i)
-        if (ch === "\n") run++
+        if (ch === "\n") nlRun++
+        else if (ch === " " || ch === "\t") spRun++
         else {
-            gaps.push(run)
-            run = 0
+            gaps.push(nlRun)
+            spGaps.push(spRun)
+            nlRun = 0
+            spRun = 0
             flatParts.push(ch)
         }
     }
-    gaps.push(run)
-    return { flat: flatParts.join(""), gaps: gaps }
+    gaps.push(nlRun)
+    spGaps.push(spRun)
+    return { flat: flatParts.join(""), gaps: gaps, spGaps: spGaps }
+}
+/** 구분자 위치의 반응형 HTML: 공백↔개행 교환 시 공백 유지 + pc-only/mo-only BR */
+function appendResponsiveSepHtml(pcNl, moNl, pcSp, moSp) {
+    var hasBr = pcNl > 0 || moNl > 0
+    var hasSpace = pcSp > 0 || moSp > 0
+    var out = ""
+    if (hasSpace) out += " "
+    if (hasBr) out += appendResponsiveBrSlotHtml(pcNl, moNl)
+    return out
 }
 function appendResponsiveBrSlotHtml(pcRun, moRun) {
     var mx = Math.max(pcRun, moRun)
@@ -126,9 +171,10 @@ function buildResponsiveTextInnerByNodeIdMap(desktopRoot, mobileRoot) {
         var mKids = (mNode.children || []).filter(function (c) {
             return c && isVisible(c)
         })
-        for (var i = 0; i < dKids.length && i < mKids.length; i++) {
-            var d = dKids[i]
-            var m = mKids[i]
+        var pairs = pcMoChildPairsOrIndex(dKids, mKids)
+        for (var i = 0; i < pairs.length; i++) {
+            var d = pairs[i][0]
+            var m = pairs[i][1]
             if (d.type !== m.type) continue
             if (!d.id) {
                 if (d.type === "FRAME" && isContainer(d)) walkPair(d, m)
@@ -142,8 +188,11 @@ function buildResponsiveTextInnerByNodeIdMap(desktopRoot, mobileRoot) {
                 if (mnByName) {
                     moStr = mnByName.characters != null ? String(mnByName.characters) : ""
                 }
-                var inner = buildResponsiveBrInnerFromPcMoChars(pcStr, moStr)
-                if (inner != null) map[String(d.id)] = inner
+                var pcFlat = textFlatForResponsiveCompare(normalizeTextNewlinesForResponsive(pcStr))
+                var moFlat = textFlatForResponsiveCompare(normalizeTextNewlinesForResponsive(moStr))
+                if (pcFlat.toLowerCase() === moFlat.toLowerCase()) {
+                    map[String(d.id)] = moStr
+                }
             }
             if (d.type === "FRAME" && isContainer(d)) walkPair(d, m)
         }
@@ -160,11 +209,14 @@ function buildResponsiveTextInnerByNodeIdMap(desktopRoot, mobileRoot) {
     return map
 }
 /** mixed 텍스트: parts 있으면 ap-text__part span (--ap-part-fs/fw/clr/ls; 부모 p는 --ap-*). 모든 part가 동일하면 부모 style만 */
-function buildTextPartInnerHtml(ts) {
+function buildTextPartInnerHtml(ts, brState) {
     if (!ts) return ""
     var parts = ts.parts
     var text = ts.text || ""
-    if (!parts || parts.length === 0) return textToHtmlWithBreaks(text)
+    if (!parts || parts.length === 0) {
+        if (brState) return textToHtmlWithResponsiveBr(text, brState) + getResponsiveBrTrailing(brState)
+        return textToHtmlWithBreaks(text)
+    }
     var baseClr = (ts.clr || "").toLowerCase()
     var baseFs = ts.fs !== "" ? Number(ts.fs) || 0 : 0
     var baseFw = ts.fw !== "" ? Number(ts.fw) || 400 : 400
@@ -212,9 +264,9 @@ function buildTextPartInnerHtml(ts) {
         if (to <= from) continue
         if (from < pos) from = pos
         if (to <= from) continue
-        if (from > pos) out += textToHtmlWithBreaks(text.substring(pos, from))
-        var chunk = p.characters || text.substring(from, to)
-        var escaped = textToHtmlWithBreaks(chunk)
+        if (from > pos) out += (brState ? textToHtmlWithResponsiveBr(text.substring(pos, from), brState) : textToHtmlWithBreaks(text.substring(pos, from)))
+        var chunk = (brState ? null : p.characters) || text.substring(from, to)
+        var escaped = brState ? textToHtmlWithResponsiveBr(chunk, brState) : textToHtmlWithBreaks(chunk)
         var vars = []
         if (partClr[i] != null && partClr[i] !== commonClr) vars.push(partClr[i])
         if (partFs[i] != null && partFs[i] !== commonFs) vars.push(partFs[i])
@@ -239,7 +291,8 @@ function buildTextPartInnerHtml(ts) {
         }
         pos = to
     }
-    if (pos < text.length) out += textToHtmlWithBreaks(text.substring(pos))
+    if (pos < text.length) out += (brState ? textToHtmlWithResponsiveBr(text.substring(pos), brState) : textToHtmlWithBreaks(text.substring(pos)))
+    if (brState) out += getResponsiveBrTrailing(brState)
     return parentStyle ? { inner: out, parentStyle: parentStyle } : out
 }
 /** Figma textAlignHorizontal → CSS text-align 값 */
