@@ -357,7 +357,6 @@
       margin-left: auto;
       color: var(--ap-muted);
       font-size: var(--ap-fs-sm);
-      max-width: 42em;
       line-height: 1.45;
     }
 
@@ -464,7 +463,6 @@
       font-size: var(--ap-fs-sm);
       line-height: 1.45;
       color: var(--ap-muted);
-      max-width: 48em;
     }
 
     .previewToolbarTitle {
@@ -843,7 +841,6 @@
 
     .detailHead {
       padding-bottom: 10px;
-      margin-bottom: 10px;
       border-bottom: 1px solid var(--ap-border-subtle);
     }
 
@@ -865,12 +862,6 @@
 
     .detailFlags .badge {
       font-size: 10px;
-    }
-
-    .detail .kv {
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px solid var(--ap-border-subtle);
     }
 
     .detail .row {
@@ -1127,7 +1118,6 @@
     #aiRefineStatus {
       margin-left: 0;
       font-size: var(--ap-fs-sm);
-      max-width: min(100%, 22rem);
       line-height: 1.4;
     }
 
@@ -1291,7 +1281,7 @@
       </section>
 
       <div id="fontRow" class="fontRow is-collapsed">
-        <span class="fontRowLabel">폰트 (체크 = 텍스트 · 미체크 = 이미지)</span>
+        <span class="fontRowLabel">폰트 (텍스트 유지 / 이미지 변환) · 재분석</span>
         <div id="fontCheckboxes" class="fontCheckboxes"></div>
       </div>
 
@@ -1362,7 +1352,6 @@
           <div class="box">
             <div class="boxHd">
               <b>노드 상세</b>
-              <span class="muted" id="selPill">선택 없음</span>
             </div>
             <div class="boxBd">
               <div id="detail" class="detail">
@@ -1379,7 +1368,7 @@
       <div class="codePanelCol">
         <div class="mainViewHead">
           <h2 class="mainViewTitle">생성 코드 &amp; AI</h2>
-          <p class="mainViewDesc">보낸 HTML/CSS를 수정하거나, AI로 검수·alt/헤딩 반영을 실행합니다. Export ZIP은 상단 버튼을 사용하세요.</p>
+          <p class="mainViewDesc">보낸 HTML/CSS를 수정하거나, AI로 검수·alt/헤딩/CTA 버튼 반영을 실행합니다. Export ZIP은 상단 버튼을 사용하세요.</p>
         </div>
         <div class="codeToolbarRow">
           <button type="button" id="exportZip" class="gray">Export ZIP</button>
@@ -1389,8 +1378,8 @@
         <div id="aiRefineBar" class="aiRefineBar">
           <div class="aiRefineRow">
             <span class="aiRefineLabel">AI</span>
-            <button type="button" id="btnAiAudit" class="gray" title="SEO·접근성·시멘틱·alt·헤딩 검수 리포트">분석</button>
-            <button type="button" id="btnApplyAltProposals" class="gray" title="마지막 분석의 alt를 그대로 적용·헤딩은 동일 분석 headingAudit에 맞춰 패치">반영</button>
+            <button type="button" id="btnAiAudit" class="gray" title="SEO·접근성·시멘틱·alt·헤딩·CTA 버튼 검수 리포트">분석</button>
+            <button type="button" id="btnApplyAltProposals" class="gray" title="직전 분석 기반 alt·헤딩·CTA 버튼 패치 반영">반영</button>
             <span class="aiRefineSep">|</span>
             <select id="aiProvider" class="field field--provider">
               <option value="openai">OpenAI</option>
@@ -2392,7 +2381,7 @@
 
         $("#tree").innerHTML = "";
         $("#detail").innerHTML = "<div class='detailHead'><h3>에러</h3><div class='muted'>" + escapeHtml(msg.message || "") + "</div></div>";
-        $("#selPill").textContent = "선택 없음";
+        if ($("#selPill")) $("#selPill").textContent = "선택 없음";
         $("#treeMeta").textContent = "-";
 
         previewImages = [];
@@ -2557,13 +2546,13 @@
     function markSelected(sumEl) {
       document.querySelectorAll("summary.selected").forEach(function (x) { x.classList.remove("selected"); });
       sumEl.classList.add("selected");
-      $("#selPill").textContent = '선택: ' + (sumEl.dataset.type || "NODE") + ' "' + (sumEl.dataset.name || "") + '"';
+      if ($("#selPill")) $("#selPill").textContent = '선택: ' + (sumEl.dataset.type || "NODE") + ' "' + (sumEl.dataset.name || "") + '"';
     }
 
     function updateDetail(node) {
       if (!node) {
         $("#detail").innerHTML = "<div class='detailHead'><h3>노드 상세 정보</h3><div class='muted'>트리에서 항목을 클릭하면 상세 정보가 표시됩니다</div></div>";
-        $("#selPill").textContent = "선택 없음";
+        if ($("#selPill")) $("#selPill").textContent = "선택 없음";
         return;
       }
       var meta = parseMetaFromLabel(node.label || "");
@@ -5311,7 +5300,7 @@
         var n = countImgs(code);
         var nApi = countImgs(codeForApplyApi);
         setAiButtonsBusy(true);
-        setAiStatus("반영 중 · 헤딩 패치 · alt (직전 분석과 동일 규칙)…");
+        setAiStatus("반영 중 · 헤딩·CTA 버튼·alt 패치 (직전 분석 기반)…");
         var auditSnap = window.__apLastAnalysisReport;
         runAiApplyApi(codeForApplyApi, auditSnap)
           .then(function (obj) {

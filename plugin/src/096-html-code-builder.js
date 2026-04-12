@@ -1528,6 +1528,17 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             code = code + "\n" + swiperInitScript
         }
 
+        // 각주 윗첨자: 텍스트 뒤에 붙은 1) 2) 등을 <sup>로 감쌈. <style> 안은 건드리지 않음.
+        var _supStyleEnd = code.indexOf("</style>")
+        if (_supStyleEnd !== -1) {
+            var _supBody = code.substring(_supStyleEnd + 8)
+            // 텍스트 바로 뒤에 붙은 각주: 에센스1) → 에센스<sup>1)</sup>
+            _supBody = _supBody.replace(/([가-힣a-zA-Z0-9%])(\d+\))/g, "$1<sup>$2</sup>")
+            // 별도 span에 각주만 있는 경우: <span...>1)</span> → <span...><sup>1)</sup></span>
+            _supBody = _supBody.replace(/>(\d+\))<\/span>/g, "><sup>$1</sup></span>")
+            code = code.substring(0, _supStyleEnd + 8) + _supBody
+        }
+
         return {
             code: code,
             exportedNodeIds: exportedNodeIds,
