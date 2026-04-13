@@ -8936,6 +8936,11 @@ function buildCodeAsync(root, cache, sectionNodesParam, geoStructure, mobileRoot
             _supBody = _supBody.replace(/([가-힣a-zA-Z0-9%])(\d+\))/g, "$1<sup>$2</sup>")
             // 별도 span에 각주만 있는 경우: <span...>1)</span> → <span...><sup>1)</sup></span>
             _supBody = _supBody.replace(/>(\d+\))<\/span>/g, "><sup>$1</sup></span>")
+            // 각주만 ap-text__part span에 있을 때: <span class="ap-text__part" style="…"><sup>1)</sup></span> → <sup class="ap-text__part" style="…">1)</sup>
+            _supBody = _supBody.replace(
+                /<span class="ap-text__part" style="([^"]*)"><sup>([^<]*)<\/sup><\/span>/g,
+                '<sup class="ap-text__part" style="$1">$2</sup>'
+            )
             code = code.substring(0, _supStyleEnd + 8) + _supBody
         }
 
