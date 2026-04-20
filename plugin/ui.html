@@ -4510,6 +4510,54 @@
       return count;
     }
 
+    /**
+     * 태그 사이·속성 밖 공백만 토큰 구분으로 쓰고, 따옴표 안 문자열은 잘리지 않게 분할
+     * (style="padding: 0 10px" 등에서 기존 방식이 토큰을 쪼개 매칭 실패하던 문제 완화)
+     */
+    function splitHtmlTokensForFlexMatch(str) {
+      var parts = [];
+      var buf = "";
+      var q = null;
+      str = String(str || "");
+      for (var i = 0; i < str.length; i++) {
+        var c = str[i];
+        if (q) {
+          buf += c;
+          if (c === q) q = null;
+          continue;
+        }
+        if (c === '"' || c === "'") {
+          q = c;
+          buf += c;
+          continue;
+        }
+        if (/\s/.test(c)) {
+          if (buf.length) {
+            parts.push(buf);
+            buf = "";
+          }
+          continue;
+        }
+        buf += c;
+      }
+      if (buf.length) parts.push(buf);
+      return parts;
+    }
+
+    function buildFlexHtmlRegex(before) {
+      var norm = String(before || "").replace(/>\s*</g, "> <");
+      var parts = splitHtmlTokensForFlexMatch(norm).filter(function (p) {
+        return p.length;
+      });
+      if (!parts.length) return null;
+      var reStr = parts
+        .map(function (p) {
+          return p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        })
+        .join("\\s+");
+      return new RegExp(reStr, "g");
+    }
+
     /** 모델이 headingPatches.after 에 <<h2 처럼 '<' 를 중복 출력한 경우 */
     function sanitizeAiHeadingPatchAfterMarkup(s) {
       return String(s || "").replace(/<{2,}(?=h[1-6]\b)/gi, "<");
@@ -4539,44 +4587,54 @@
       }
       var out = String(html || "");
 
-      /** AI가 한 줄로 준 before를 줄바꿈·들여쓰기가 있는 실제 HTML에서도 찾을 수 있게 공백 유연 정규식 생성 */
-      function buildFlexWsRegex(str) {
-        var norm = String(str || "").replace(/>\s*</g, "> <").replace(/\s+/g, " ").trim();
-        var parts = norm.split(" ").filter(Boolean);
-        var reStr = parts.map(function (p) { return p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }).join("\\s+");
-        return new RegExp(reStr, "g");
-      }
-
       for (var k = 0; k < list.length; k++) {
         var before = list[k].before;
         var after = sanitizeAiHeadingPatchAfterMarkup(list[k].after);
+        var applied = false;
 
-        // 1) 정확히 일치 시도
-        var occ = countOccurrences(out, before);
-        if (occ === 1) {
-          var pos = out.indexOf(before);
-          out = out.slice(0, pos) + after + out.slice(pos + before.length);
-          stats.applied++;
-          continue;
+        function tryExact(needle) {
+          if (!needle) return false;
+          var occ = countOccurrences(out, needle);
+          if (occ === 0) return false;
+          var pos = out.indexOf(needle);
+          out = out.slice(0, pos) + after + out.slice(pos + needle.length);
+          return true;
         }
 
-        // 2) 공백 유연 매칭 fallback
-        var re = buildFlexWsRegex(before);
-        var matches = [];
-        var m;
-        while ((m = re.exec(out)) !== null) { matches.push(m); }
-        if (matches.length !== 1) continue;
+        // 1) 문자열 그대로(0회면 따옴표만 반대로 바꾼 한 가지 시도)
+        if (tryExact(before)) {
+          applied = true;
+        } else if (before.indexOf('"') >= 0) {
+          if (tryExact(before.replace(/"/g, "'"))) applied = true;
+        } else if (before.indexOf("'") >= 0) {
+          if (tryExact(before.replace(/'/g, '"'))) applied = true;
+        }
 
-        // 원본 매칭 구간을 after로 교체
-        out = out.slice(0, matches[0].index) + after + out.slice(matches[0].index + matches[0][0].length);
-        stats.applied++;
+        if (!applied) {
+          // 2) 공백 유연 매칭(따옴표 안 공백 보존 토큰화). 1회 초과면 첫 매칭만 적용(PC/MO 동일 블록 등)
+          var re = buildFlexHtmlRegex(before);
+          if (re) {
+            var matches = [];
+            var m;
+            while ((m = re.exec(out)) !== null) {
+              matches.push(m);
+            }
+            if (matches.length >= 1) {
+              var hit = matches[0];
+              out = out.slice(0, hit.index) + after + out.slice(hit.index + hit[0].length);
+              applied = true;
+            }
+          }
+        }
+
+        if (applied) stats.applied++;
       }
       return { html: stripRepeatedAngleBracketsBeforeHeadingOpens(out), stats: stats };
     }
 
     /**
      * linkBtnPatches 적용: headingPatches와 동일한 before/after 문자열 치환.
-     * before가 HTML에서 유일하게 1회만 존재해야 적용.
+     * 중복 구간은 첫 매칭만 치환(순차 적용으로 나머지는 다음 패치가 처리 가능).
      */
     function applyLinkBtnPatchesToCode(html, patches) {
       var list = (Array.isArray(patches) ? patches : []).filter(function (p) {
@@ -4589,46 +4647,48 @@
         );
       });
       var stats = { wanted: list.length, applied: 0 };
-      console.log("[linkBtn-apply] patches:", list.length, list);
       if (!list.length) return { html: String(html || ""), stats: stats };
       var out = String(html || "");
-
-      /** AI가 한 줄로 준 before를 줄바꿈·들여쓰기가 있는 실제 HTML에서도 찾을 수 있게 공백 유연 정규식 생성 */
-      function buildFlexWsRegex(str) {
-        var norm = String(str || "").replace(/>\s*</g, "> <").replace(/\s+/g, " ").trim();
-        var parts = norm.split(" ").filter(Boolean);
-        var reStr = parts.map(function (p) { return p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }).join("\\s+");
-        return new RegExp(reStr, "g");
-      }
 
       for (var k = 0; k < list.length; k++) {
         var before = list[k].before;
         var after = String(list[k].after);
+        var applied = false;
 
-        // 1) 정확히 일치 시도
-        var occ = countOccurrences(out, before);
-        if (occ === 1) {
-          var pos = out.indexOf(before);
-          out = out.slice(0, pos) + after + out.slice(pos + before.length);
-          stats.applied++;
-          console.log("[linkBtn-apply] patch " + k, "exact match applied");
-          continue;
+        function tryExact(needle) {
+          if (!needle) return false;
+          var occ = countOccurrences(out, needle);
+          if (occ === 0) return false;
+          var pos = out.indexOf(needle);
+          out = out.slice(0, pos) + after + out.slice(pos + needle.length);
+          return true;
         }
 
-        // 2) 공백 유연 매칭 fallback (AI는 한 줄, 실제 HTML은 줄바꿈+들여쓰기)
-        var re = buildFlexWsRegex(before);
-        var matches = [];
-        var m;
-        while ((m = re.exec(out)) !== null) { matches.push(m); }
-        console.log("[linkBtn-apply] patch " + k, { exactOcc: occ, flexMatches: matches.length });
-        if (matches.length !== 1) continue;
+        if (tryExact(before)) {
+          applied = true;
+        } else if (before.indexOf('"') >= 0) {
+          if (tryExact(before.replace(/"/g, "'"))) applied = true;
+        } else if (before.indexOf("'") >= 0) {
+          if (tryExact(before.replace(/'/g, '"'))) applied = true;
+        }
 
-        // 원본 텍스트에서 <div→<a href="#", </div>→</a> 태그만 변환 (줄바꿈·들여쓰기 보존)
-        var orig = matches[0][0];
-        var patched = orig.replace(/^(<)div\b/i, '$1a href="#"').replace(/<\/div>(\s*)$/i, '</a>$1');
-        out = out.slice(0, matches[0].index) + patched + out.slice(matches[0].index + orig.length);
-        stats.applied++;
-        console.log("[linkBtn-apply] patch " + k, "flex-ws match applied");
+        if (!applied) {
+          var re = buildFlexHtmlRegex(before);
+          if (re) {
+            var matches = [];
+            var m;
+            while ((m = re.exec(out)) !== null) {
+              matches.push(m);
+            }
+            if (matches.length >= 1) {
+              var hit = matches[0];
+              out = out.slice(0, hit.index) + after + out.slice(hit.index + hit[0].length);
+              applied = true;
+            }
+          }
+        }
+
+        if (applied) stats.applied++;
       }
       return { html: out, stats: stats };
     }
@@ -5387,17 +5447,17 @@
                 : "변경 없음 또는 스킵";
             if (headApply.stats.wanted > 0 && headApply.stats.applied === 0) {
               oneLine +=
-                " · 헤딩 패치 미적용(모델이 준 before와 코드가 한 치도 같지 않거나 동일 문구가 2회 이상)";
+                " · 헤딩 패치 미적용(모델 before·실제 HTML 불일치 등으로 치환 불가)";
             } else if (headApply.stats.applied > 0 && headApply.stats.applied < headApply.stats.wanted) {
               oneLine +=
                 " · 헤딩 " +
                 headApply.stats.applied +
                 "/" +
                 headApply.stats.wanted +
-                "건만 적용(나머지는 일치 위치 없음)";
+                "건만 적용(나머지는 일치 불가)";
             }
             if (btnApply.stats.wanted > 0 && btnApply.stats.applied === 0) {
-              oneLine += " · CTA 버튼 패치 미적용(before 불일치 또는 2회 이상 매칭)";
+              oneLine += " · CTA 버튼 패치 미적용(before·원문 불일치 등)";
             } else if (btnApply.stats.applied > 0 && btnApply.stats.applied < btnApply.stats.wanted) {
               oneLine += " · CTA 버튼 " + btnApply.stats.applied + "/" + btnApply.stats.wanted + "건만 적용";
             }
