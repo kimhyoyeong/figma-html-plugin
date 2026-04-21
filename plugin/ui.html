@@ -1070,6 +1070,37 @@
       gap: 10px;
     }
 
+    /** 분석 리포트(상) · 코드 에디터(하) 각 50% 높이 */
+    .codeAuditSplit {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .codeAuditSplit__report {
+      display: none;
+      flex: 1 1 0;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    .codeAuditSplit--has-report .codeAuditSplit__report {
+      display: flex;
+      border-bottom: 1px solid var(--ap-border-subtle);
+    }
+
+    .codeAuditSplit__editor {
+      flex: 1 1 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .codeAuditSplit:not(.codeAuditSplit--has-report) .codeAuditSplit__editor {
+      flex: 1 1 auto;
+    }
+
     .aiRefineRow {
       display: flex;
       flex-wrap: wrap;
@@ -1123,13 +1154,15 @@
 
     #aiAuditReport {
       display: none;
-      max-height: min(360px, 38vh);
+      flex: 1;
+      min-height: 0;
       overflow: auto;
       font-size: 11px;
       line-height: 1.45;
       border: 1px solid var(--ap-border-subtle);
       border-radius: var(--ap-radius-sm);
       padding: 10px;
+      margin: 0;
       background: var(--ap-input);
       color: var(--ap-text);
     }
@@ -1197,6 +1230,11 @@
     #panel-code textarea#codeOut {
       flex: 1;
       min-height: 0;
+      width: 100%;
+    }
+
+    .codeAuditSplit__editor textarea#codeOut {
+      flex: 1;
     }
 
     .previewToolbarHint {
@@ -1368,7 +1406,7 @@
       <div class="codePanelCol">
         <div class="mainViewHead">
           <h2 class="mainViewTitle">생성 코드 &amp; AI</h2>
-          <p class="mainViewDesc">보낸 HTML/CSS를 수정하거나, AI로 검수·alt/헤딩/CTA 버튼 반영을 실행합니다. Export ZIP은 상단 버튼을 사용하세요.</p>
+          <p class="mainViewDesc">보낸 HTML/CSS를 수정하거나, AI로 검수를 실행합니다. <b>반영</b>은 직전 분석 리포트를 코드에 직접 적용합니다. Export ZIP은 상단 버튼을 사용하세요.</p>
         </div>
         <div class="codeToolbarRow">
           <button type="button" id="exportZip" class="gray">Export ZIP</button>
@@ -1379,7 +1417,7 @@
           <div class="aiRefineRow">
             <span class="aiRefineLabel">AI</span>
             <button type="button" id="btnAiAudit" class="gray" title="SEO·접근성·시멘틱·alt·헤딩·CTA 버튼 검수 리포트">분석</button>
-            <button type="button" id="btnApplyAltProposals" class="gray" title="직전 분석 기반 alt·헤딩·CTA 버튼 패치 반영">반영</button>
+            <button type="button" id="btnApplyAltProposals" class="gray" disabled title="「분석」 직후 한 번만 사용 · 직전 검수 리포트를 코드에 반영">반영</button>
             <span class="aiRefineSep">|</span>
             <select id="aiProvider" class="field field--provider">
               <option value="openai">OpenAI</option>
@@ -1389,14 +1427,16 @@
             <select id="aiModel" class="field field--model"></select>
             <span id="aiRefineStatus" class="hint"></span>
           </div>
-          <div id="aiAuditReport"></div>
-          <!--<div class="aiRefineFootnote">
-            <b>분석</b> = SEO · 접근성 · 시멘틱 마크업 · alt · 헤딩 검수 리포트 /
-            <b>반영</b> = 마지막 분석의 alt 제안을 그대로 적용 · 헤딩은 동일 분석의 <code>headingAudit</code>에 맞춰 패치 생성
-          </div>-->
         </div>
 
-        <textarea id="codeOut" placeholder="선택 분석 후 섹션 코드가 표시됩니다"></textarea>
+        <div class="codeAuditSplit" id="codeAuditSplit">
+          <div class="codeAuditSplit__report" aria-label="분석 리포트">
+            <div id="aiAuditReport"></div>
+          </div>
+          <div class="codeAuditSplit__editor" aria-label="생성 코드">
+            <textarea id="codeOut" placeholder="선택 분석 후 섹션 코드가 표시됩니다"></textarea>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1637,102 +1677,6 @@
       "본문 안에서 확인 가능한 문제만 간결하게 보고해 주세요.\n" +
       "설명은 짧은 구·명사형으로 쓰고, '텍스트/로고/이미지' 류 접두어와 '~입니다·보입니다' 같은 종결은 쓰지 마세요.\n\n---\n";
 
-    // 반영(AP_AI_APPLY) system 머리 — expandApPlaceholders로 {{N_IMG}}, {{LANG}}
-    var AP_AI_APPLY_SYSTEM_BASE_LINES = [
-      "출력은 JSON 객체 하나만. HTML/CSS/마크다운 금지.",
-      "필수 키: altProposals (string[] 길이={{N_IMG}}), headingPatches ([{before,after}] 배열), linkBtnPatches ([{before,after}] 배열).",
-      "선택: applyNotes (string[], 한국어 짧은 요약). applyNotes는 명사형·구절만 — '텍스트/로고/이미지' 접두어와 '~입니다·보입니다' 종결 금지.",
-      "applyNotes는 한국어로 작성하고, altProposals는 페이지 실제 언어({{LANG}})로 작성한다.",
-      "입력 HTML에 없던 마크업을 **새로 생성하지 않는다**. 특히 `<img>`·`.ap-image` 직후에 `position:absolute`·`clip`·`width:1px` 등으로 숨긴 `<h1>`/`h2`/`h3>`를 덧붙이지 않는다(스크린리더 전용 중복 헤딩 금지).",
-      "headingPatches는 **이미 존재하는 문자열**을 `before`로 잡아 **최소 범위로 치환**할 때만 사용한다. 빈 삽입·임의 추가 노드 금지."
-    ];
-
-    // 반영: user에 직전 headingAudit 붙을 때 system에 추가
-    var AP_AI_APPLY_SYSTEM_AUDIT_HEADING_LINES = [
-      "user 메시지 하단에 직전 검수 headingAudit·linkBtnAudit JSON이 첨부되어 있다.",
-      "headingPatches는 그 판정(candidates.decision, recommendedLevel)·issues와 모순 없이 작성한다.",
-      "분석에서 heading이 아니라고 본 문구를 억지로 승격하지 않는다.",
-      "altProposals 배열은 클라이언트가 직전 검수 값으로 덮어쓸 수 있으나, 키는 반드시 포함하고 길이는 {{N_IMG}}개로 맞춘다(직전 검수 alt와 동일한 문자열을 그대로 넣어도 된다)."
-    ];
-
-    var AP_AI_APPLY_SYSTEM_LANG_LINE =
-      "페이지 언어: {{LANG}} — alt는 html lang 속성과 무관하게, 본문에 실제로 노출된 페이지 언어를 기준으로 작성한다.";
-
-    // 반영 규칙 레지스트리 ({{N_IMG}})
-    var AP_AI_APPLY_RULES = [
-      {
-        id: "alt",
-        lines: [
-          "[규칙: alt]",
-          "이 작업은 CMS 본문 조각(<style> + <article class=\"ap-post\">) 기준으로만 판단한다.",
-          "<img>는 문서 순서대로 총 {{N_IMG}}개.",
-          "직전 분석 결과(alts, altProposals)와 모순 없이 altProposals만 생성한다.",
-          "altProposals는 string[]이며, img DOM 순서와 정확히 {{N_IMG}}개를 반환한다.",
-          "altProposals는 반드시 페이지 실제 언어({{LANG}})로 작성한다. 리포트용 한국어 문장 톤을 섞지 않는다.",
-          "주변 문단·캡션 문장 전체를 복사하거나 요약해 넣지 않는다.",
-          "페이지에 없는 제품명·브랜드·라인명을 새로 지어내지 않는다.",
-          "이미지에서 확실하지 않으면 보수적으로 작성한다.",
-          "순수 장식 이미지는 빈 문자열을 허용한다."
-        ]
-      },
-      {
-        id: "heading",
-        lines: [
-          "[규칙: 헤딩]",
-          "`h1`~`h3`만 사용. `h4+` 및 숨김 `<h*>` 신규 삽입 금지.",
-          "<style> + <article class=\"ap-post\"> 범위만 수정한다.",
-          "직전 headingAudit와 반드시 일치하게 반영한다.",
-          "분석에서 not-heading으로 판단된 요소는 승격하지 않는다.",
-          "`.ap-section--01` 밖의 `<h1>`, `ap-section__desc*` 내부 `<h*>`, 문장형·질문형·슬로건 형태 텍스트는 분석 결과에 따라 강등 방향만 허용한다.",
-          "headingPatches는 기존 문자열 기준 최소 치환으로만 생성한다.",
-          "`before`는 실제 존재하고 유일하게 매칭되어야 한다.",
-          "`after`는 같은 위치에서 교체만 수행한다.",
-          "형제 노드 추가, img 뒤 숨김 `<h*>` 삽입 금지.",
-          "구조 변경이 큰 경우 패치를 생략할 수 있다."
-        ]
-      },
-      {
-        id: "linkBtn",
-        lines: [
-          "[규칙: 링크 버튼]",
-          "직전 분석 linkBtnAudit.candidates에서 decision:'btn'인 항목만 변환한다.",
-          "분석에서 not-btn으로 판단된 요소는 변환하지 않는다.",
-          "",
-          "[중요: CTA 버튼 변환 규칙]",
-          "- 변환 대상은 CTA 텍스트 노드가 아니라, linkBtnAudit에서 선택된 '시각적 버튼 프레임 래퍼'이다.",
-          "- 내부의 p/span/div 한 겹만 바꾸지 말고, 실제 배경/패딩/정렬을 가진 바깥 버튼 프레임 요소를 `<a href=\"#\">`로 변환한다.",
-          "- 내부 구조는 절대 바꾸지 않는다. class, style, 자식 노드 순서, 내부 텍스트는 그대로 유지한다.",
-          "",
-          "linkBtnPatches는 {before, after} 형식이다.",
-          "- before: 버튼 프레임 전체 요소 — 여는 `<div ...>` + 내부 콘텐츠 + `</div>`. HTML에서 유일하게 1회만 매칭되어야 한다.",
-          "- after: 여는 `<div ...>`를 `<a href=\"#\" ...>`로, 닫는 `</div>`를 `</a>`로만 바꾼다. 나머지 전부 동일.",
-          "- 이미 <a> 태그이면 건드리지 않는다.",
-          "",
-          "[예시]",
-          "before:",
-          "  <div class=\"ap-section__group\"><p class=\"ap-text\">자세히보기</p></div>",
-          "after:",
-          "  <a href=\"#\" class=\"ap-section__group\"><p class=\"ap-text\">자세히보기</p></a>",
-          "→ 바깥 프레임의 <div>→<a>, </div>→</a>만 변경. 내부 그대로.",
-          "",
-          "[재탐색 보완]",
-          "- linkBtnAudit이 비어 있어도, CTA 텍스트 + 버튼형 박스 스타일이 함께 보이면 재탐색 후 linkBtnPatches를 생성할 수 있다.",
-          "- 재탐색 기준: 짧은 CTA 텍스트 + <div> 래퍼 + 배경/패딩/정렬 스타일 + 이미 <a> 아님 + ap-btn 없음.",
-          "",
-          "[중요]",
-          "- CTA로 보이는 요소가 존재하면 최소 1개 이상 변환 시도한다.",
-          "- linkBtnPatches를 빈 배열로 반환하는 경우는 CTA가 진짜 없는 경우만 허용한다."
-        ]
-      }
-    ];
-
-    var AP_AI_APPLY_USER_PROMPT_PREFIX =
-      "아래 HTML/CSS에 대해 시스템 지시를 수행하고 JSON만 출력.\n\n---\n";
-
-    // 반영 API: 직전 headingAudit + linkBtnAudit user 접두 안내
-    var AP_AI_APPLY_USER_HEADING_AUDIT_SUFFIX_PREFIX =
-      "\n\n---\n직전 분석(동일 본문) headingAudit·linkBtnAudit JSON. 위 HTML에 headingPatches·linkBtnPatches를 만들 때 반드시 이 판정과 일관되게.\n";
-
     // 분석: 비전 첨부 시 system 덧붙임
     var AP_AI_ANALYSIS_VISION_SYSTEM_APPEND =
       "\n\n[시각 입력 필수 활용] user 메시지 하단 멀티파트에서 슬롯 안내 텍스트(예: DOM img[n]) 직후에 오는 image_url JPEG가 해당 img[n]과 1:1이다(안내에 썸네일 없음·JPEG 실패면 그 슬롯은 텍스트만). article.ap-post 의 <img> DOM 순서를 그대로 따른다. " +
@@ -1901,37 +1845,6 @@
         }
       },
       required: ["summary", "seo", "a11y", "semantics", "alts", "headingAudit", "altProposals", "linkBtnAudit"]
-    };
-
-    var AP_GEMINI_APPLY_RESPONSE_JSON_SCHEMA = {
-      type: "object",
-      properties: {
-        altProposals: { type: "array", items: { type: "string" } },
-        headingPatches: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              before: { type: "string" },
-              after: { type: "string" }
-            },
-            required: ["before", "after"]
-          }
-        },
-        linkBtnPatches: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              before: { type: "string" },
-              after: { type: "string" }
-            },
-            required: ["before", "after"]
-          }
-        },
-        applyNotes: { type: "array", items: { type: "string" } }
-      },
-      required: ["altProposals", "headingPatches", "linkBtnPatches"]
     };
 
     // 멀티모달 user: {{MAX_EDGE}}, {{API_DETAIL}}, {{VISION_MAX}}, {{TRUNCATED}}
@@ -3261,9 +3174,11 @@
 
     window.__apLastAuditAltProposals = null;
     window.__apLastAuditReport = null;
-    /** 분석 직후 스냅샷(반영 시 alt·헤딩 가이드 정합용). 반영 후에도 유지. */
+    /** 직전 검수 완료 시 스냅샷 —「반영」 처리 후 null 로 초기화 */
     window.__apLastAnalysisReport = null;
     window.__apLastAnalysisImgCount = null;
+    /** 직전 「분석」 성공 후 아직 「반영」 안 함 — true일 때만 반영 버튼 활성 */
+    window.__apApplyReady = false;
 
     // ----- 공통 유틸 -----
     function getCodeEl() {
@@ -3365,12 +3280,12 @@
       st.classList.toggle("is-analyzing", busy);
     }
 
-    /** 분석/반영 중 둘 다 잠금(한쪽만 로딩처럼 보이지 않게) */
+    /** 분석/반영 중 잠금 + 반영은 「분석」 직후 한 번만 가능(__apApplyReady) */
     function setAiButtonsBusy(busy) {
       var a = $("#btnAiAudit");
       var b = $("#btnApplyAltProposals");
       if (a) a.disabled = !!busy;
-      if (b) b.disabled = !!busy;
+      if (b) b.disabled = !!busy || !window.__apApplyReady;
     }
 
     /** 분석 리포트 score를 0~10 눈금으로 맞춤(모델이 70 등으로 줄 때 대비). 반영 가산은 이 값 기준. */
@@ -3497,13 +3412,17 @@
       window.__apLastAuditReport = null;
       window.__apLastAnalysisReport = null;
       window.__apLastAnalysisImgCount = null;
+      window.__apApplyReady = false;
       var rep = $("#aiAuditReport");
       if (rep) {
         rep.innerHTML = "";
         rep.classList.remove("is-visible");
         rep.classList.remove("ap-apply-mode");
       }
+      var split = document.getElementById("codeAuditSplit");
+      if (split) split.classList.remove("codeAuditSplit--has-report");
       setAiStatus("");
+      setAiButtonsBusy(false);
     }
 
     function ensureCodeExists() {
@@ -3680,46 +3599,6 @@
       if (counts.korean > 0) return "Korean";
       if (counts.english > 0) return "English";
       return "Korean";
-    }
-
-    function buildApApplySystemPrompt(htmlCode, opts) {
-      opts = opts || {};
-      var parts = AP_AI_APPLY_SYSTEM_BASE_LINES.slice();
-      if (opts.auditHeadingContext) {
-        parts = parts.concat(AP_AI_APPLY_SYSTEM_AUDIT_HEADING_LINES);
-      }
-      for (var r = 0; r < AP_AI_APPLY_RULES.length; r++) {
-        parts = parts.concat(AP_AI_APPLY_RULES[r].lines);
-      }
-      parts.push(AP_AI_APPLY_SYSTEM_LANG_LINE);
-      return expandApPlaceholders(parts.join("\n"), htmlCode);
-    }
-
-    /** 반영 호출 시 직전 분석 headingAudit만 전달(토큰 절약). */
-    function buildApplyAuditHeadingPayload(auditObj) {
-      if (!auditObj || typeof auditObj !== "object") return "";
-      var ha = auditObj.headingAudit;
-      var lb = auditObj.linkBtnAudit;
-      if ((!ha || typeof ha !== "object") && (!lb || typeof lb !== "object")) return "";
-      try {
-        var payload = {};
-        if (ha && typeof ha === "object") {
-          payload.headingAudit = {
-            outline: ha.outline,
-            issues: ha.issues,
-            candidates: ha.candidates
-          };
-        }
-        if (lb && typeof lb === "object" && Array.isArray(lb.candidates) && lb.candidates.length) {
-          payload.linkBtnAudit = { candidates: lb.candidates };
-        }
-        if (auditObj.summary && auditObj.summary.oneLine) {
-          payload.summaryOneLine = auditObj.summary.oneLine;
-        }
-        return JSON.stringify(payload);
-      } catch (e) {
-        return "";
-      }
     }
 
     function expandApPlaceholders(template, htmlCode) {
@@ -4422,20 +4301,6 @@
       );
     }
 
-    function runAiApplyApi(htmlCode, auditForHeading) {
-      var headingPayload = buildApplyAuditHeadingPayload(auditForHeading);
-      var userSuffix =
-        headingPayload && AP_AI_APPLY_USER_HEADING_AUDIT_SUFFIX_PREFIX + headingPayload;
-      return runAiJsonApi(
-        htmlCode,
-        buildApApplySystemPrompt(htmlCode, { auditHeadingContext: !!headingPayload }),
-        AP_AI_APPLY_USER_PROMPT_PREFIX,
-        userSuffix || "",
-        null,
-        { responseJsonSchema: AP_GEMINI_APPLY_RESPONSE_JSON_SCHEMA, maxOutputTokens: 16384 }
-      );
-    }
-
     function escapeAttr(s) {
       return String(s || "")
         .replace(/&/g, "&amp;")
@@ -4691,6 +4556,234 @@
         if (applied) stats.applied++;
       }
       return { html: out, stats: stats };
+    }
+
+    /** `<` 위치부터 해당 요소 전체 끝 인덱스(닫는 태그 직후). */
+    function skipElementFromOpenBracket(html, lt) {
+      var rest = html.slice(lt);
+      var om = rest.match(/^<\s*([\w:-]+)/i);
+      if (!om) return lt + 1;
+      var onm = om[1].toLowerCase();
+      var gt = html.indexOf(">", lt);
+      if (gt === -1) return html.length;
+      var openSeg = html.slice(lt, gt + 1);
+      if (/\/\s*>$/.test(openSeg)) return gt + 1;
+      var end = findClosingTagEndPos(html, gt + 1, onm);
+      return end === -1 ? gt + 1 : end;
+    }
+
+    /** linkBtnAudit.wrapperTag 시작부터 대응 닫는 태그까지(substring). */
+    function findClosingTagEndPos(html, innerStartPos, tagName) {
+      tagName = String(tagName || "").toLowerCase();
+      var depth = 1;
+      var i = innerStartPos;
+      var n = html.length;
+      while (i < n && depth > 0) {
+        var lt = html.indexOf("<", i);
+        if (lt === -1) return -1;
+        var rest = html.slice(lt);
+        if (rest.indexOf("<!--") === 0) {
+          var ce = html.indexOf("-->", lt);
+          if (ce === -1) return -1;
+          i = ce + 3;
+          continue;
+        }
+        var cl = rest.match(/^<\/\s*([\w:-]+)\s*>/i);
+        if (cl) {
+          var cnm = String(cl[1]).toLowerCase();
+          i = lt + cl[0].length;
+          if (cnm === tagName) {
+            depth--;
+            if (depth === 0) return i;
+          }
+          continue;
+        }
+        var ol = rest.match(/^<\s*([\w:-]+)/i);
+        if (ol) {
+          var onm = String(ol[1]).toLowerCase();
+          var gt = html.indexOf(">", lt);
+          if (gt === -1) return -1;
+          var openSeg = html.slice(lt, gt + 1);
+          if (onm === tagName) {
+            if (/\/\s*>$/.test(openSeg)) {
+              i = gt + 1;
+            } else {
+              depth++;
+              i = lt + 1;
+            }
+          } else {
+            i = skipElementFromOpenBracket(html, lt);
+          }
+          continue;
+        }
+        i = lt + 1;
+      }
+      return -1;
+    }
+
+    function extractBalancedOuterHtmlByOpenTag(html, openTagStr) {
+      html = String(html || "");
+      openTagStr = String(openTagStr || "");
+      var start = html.indexOf(openTagStr);
+      if (start === -1) return null;
+      var tm = openTagStr.match(/^<\s*([\w:-]+)/i);
+      if (!tm) return null;
+      var tname = tm[1].toLowerCase();
+      if (/^a$/i.test(tname)) return null;
+      var innerStart = start + openTagStr.length;
+      var end = findClosingTagEndPos(html, innerStart, tname);
+      if (end === -1) return null;
+      return html.slice(start, end);
+    }
+
+    /** linkBtnAudit.wrapperTag 가 소스와 따옴표/공백만 다를 때 — 태그+class(+CTA 텍스트)로 원문 substring 탐색 */
+    function findLinkBtnOuterHtmlInSource(html, candidate) {
+      var open = String(candidate && candidate.wrapperTag || "").trim();
+      var strict = extractBalancedOuterHtmlByOpenTag(html, open);
+      if (strict) return strict;
+      var tm = open.match(/^<\s*([\w:-]+)/i);
+      if (!tm) return null;
+      var tag = tm[1].toLowerCase();
+      if (tag === "a") return null;
+      var classM = open.match(/\bclass\s*=\s*["']([^"']*)["']/i);
+      if (!classM) return null;
+      var classes = classM[1].trim().split(/\s+/).filter(Boolean);
+      var textHint = String(candidate.text || "").trim();
+      var esc = function (s) {
+        return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      };
+      var firstChunkForTag = null;
+      for (var ci = 0; ci < classes.length; ci++) {
+        var cls = classes[ci];
+        if (!cls) continue;
+        var re = new RegExp("<\\s*" + esc(tag) + "\\b[^>]*\\b" + esc(cls) + "\\b[^>]*>", "gi");
+        var mm;
+        while ((mm = re.exec(html)) !== null) {
+          var st = mm.index;
+          var olen = mm[0].length;
+          var ed = findClosingTagEndPos(html, st + olen, tag);
+          if (ed === -1) continue;
+          var chunk = html.slice(st, ed);
+          if (!firstChunkForTag) firstChunkForTag = chunk;
+          if (!textHint || chunk.indexOf(textHint) !== -1) return chunk;
+        }
+      }
+      return firstChunkForTag;
+    }
+
+    /** 바깥 요소만 <a href="#"> 로 (opening tag name → </name> 짝). */
+    function outerElementToAnchorLink(outer, tagName) {
+      tagName = String(tagName || "div").toLowerCase();
+      var openRe = new RegExp("^<\\s*" + tagName + "([^>]*)>", "i");
+      var m = outer.match(openRe);
+      if (!m) return null;
+      var attrs = m[1] || "";
+      var closeRe = new RegExp("<\\s*/\\s*" + tagName + "\\s*>\\s*$", "i");
+      var body = outer.slice(m[0].length);
+      var mc = body.match(closeRe);
+      if (!mc) return null;
+      var inner = body.slice(0, body.length - mc[0].length);
+      return "<a href=\"#\"" + attrs + ">" + inner + "</a>";
+    }
+
+    /** 단일 루트 요소의 태그명만 교체(before/after 패치용). */
+    function replaceOuterRootTagName(outer, fromTag, toTag) {
+      fromTag = String(fromTag || "").toLowerCase();
+      toTag = String(toTag || "").toLowerCase();
+      var openRe = new RegExp("^<\\s*" + fromTag + "([^>]*)>", "i");
+      var m = outer.match(openRe);
+      if (!m) return null;
+      var attrs = m[1] || "";
+      var closeRe = new RegExp("<\\s*/\\s*" + fromTag + "\\s*>\\s*$", "i");
+      var body = outer.slice(m[0].length);
+      var mc = body.match(closeRe);
+      if (!mc) return null;
+      var inner = body.slice(0, body.length - mc[0].length);
+      return "<" + toTag + attrs + ">" + inner + "</" + toTag + ">";
+    }
+
+    /** 직전 검수 headingAudit.candidates → applyHeadingPatchesToCode 용 패치(승격: p|span|div → h1–h3). */
+    function buildHeadingPatchesFromHeadingAudit(htmlCode, headingAudit) {
+      var patches = [];
+      var seen = Object.create(null);
+      if (!headingAudit || typeof headingAudit !== "object") return patches;
+      var candidates = Array.isArray(headingAudit.candidates) ? headingAudit.candidates : [];
+      var doc = parseAuditDocument(htmlCode);
+      var root = doc.querySelector("article.ap-post");
+      if (!root) return patches;
+      for (var i = 0; i < candidates.length; i++) {
+        var c = candidates[i];
+        if (!c) continue;
+        var dec = String(c.decision || "");
+        var lev = String(c.recommendedLevel || "").toLowerCase();
+        if (dec !== "title" && dec !== "subtitle") continue;
+        if (!/^h[123]$/.test(lev)) continue;
+        var sel = String(c.selectorHint || "").trim();
+        if (!sel) continue;
+        var el;
+        try {
+          el = root.querySelector(sel);
+        } catch (e) {
+          continue;
+        }
+        if (!el) continue;
+        var tag = el.tagName.toLowerCase();
+        if (tag === lev) continue;
+        if (tag !== "p" && tag !== "span" && tag !== "div") continue;
+        var before = el.outerHTML;
+        var after = replaceOuterRootTagName(before, tag, lev);
+        if (!after || before === after) continue;
+        if (seen[before]) continue;
+        seen[before] = true;
+        patches.push({ before: before, after: after });
+      }
+      return patches;
+    }
+
+    /** 직전 검수 linkBtnAudit.candidates(decision:btn) → 바깥 래퍼 div/section 등을 <a href="#"> 로. */
+    function buildLinkBtnPatchesFromLinkAudit(htmlCode, linkBtnAudit) {
+      var patches = [];
+      var seen = Object.create(null);
+      var html = String(htmlCode || "");
+      if (!linkBtnAudit || typeof linkBtnAudit !== "object") return patches;
+      var candidates = Array.isArray(linkBtnAudit.candidates) ? linkBtnAudit.candidates : [];
+      for (var i = 0; i < candidates.length; i++) {
+        var c = candidates[i];
+        if (!c || String(c.decision) !== "btn") continue;
+        var open = String(c.wrapperTag || "").trim();
+        if (!open || /^<\s*a\b/i.test(open)) continue;
+        var tm = open.match(/^<\s*([\w:-]+)/i);
+        if (!tm) continue;
+        var tname = tm[1].toLowerCase();
+        var outer = findLinkBtnOuterHtmlInSource(html, c);
+        if (!outer) continue;
+        var after = outerElementToAnchorLink(outer, tname);
+        if (!after || outer === after) continue;
+        if (seen[outer]) continue;
+        seen[outer] = true;
+        patches.push({ before: outer, after: after });
+      }
+      return patches;
+    }
+
+    /** 분석 리포트만으로 반영용 객체(반영 단계 AI 미호출). */
+    function buildApplyObjectFromAnalysisSnapshot(htmlCode, auditSnap, nImgDom, nImgFrag) {
+      var obj = {
+        altProposals: Array.isArray(auditSnap.altProposals) ? auditSnap.altProposals.slice() : [],
+        headingPatches: buildHeadingPatchesFromHeadingAudit(htmlCode, auditSnap.headingAudit),
+        linkBtnPatches: buildLinkBtnPatchesFromLinkAudit(htmlCode, auditSnap.linkBtnAudit),
+        applyNotes: ["분석 리포트 기준 직접 패치"]
+      };
+      if (
+        auditSnap &&
+        Array.isArray(auditSnap.altProposals) &&
+        auditSnap.altProposals.length === nImgFrag &&
+        window.__apLastAnalysisImgCount === nImgFrag &&
+        nImgDom === nImgFrag
+      ) {
+        obj.altProposals = auditSnap.altProposals.slice();
+      }
+      return obj;
     }
 
     /**
@@ -5266,14 +5359,18 @@
       el.innerHTML = inner;
       el.classList.toggle("is-visible", !!inner.trim());
       el.classList.toggle("ap-apply-mode", !!(obj && obj._apApplyMode));
+      var split = document.getElementById("codeAuditSplit");
+      if (split) split.classList.toggle("codeAuditSplit--has-report", !!inner.trim());
     }
 
     function runAiAudit() {
       if (!ensureApiKeyExists()) return;
       if (!ensureCodeExists()) return;
+      // 항상 현재 코드 탭의 HTML/CSS(× 감싸진 감사 블록 제거) 기준으로 검수 — 재분석도 동일
       var code = stripEmbeddedAuditReport(getCodeValue());
       var codeForAudit = extractCmsPartForAudit(code);
       var nImgInFragment = countImgs(codeForAudit);
+      window.__apApplyReady = false;
       setAiButtonsBusy(true);
       setAiStatus("검수 리포트 생성 중…");
 
@@ -5330,15 +5427,18 @@
           window.__apLastAuditAltProposals = Array.isArray(obj.altProposals) ? obj.altProposals : null;
           window.__apLastAnalysisReport = obj;
           window.__apLastAnalysisImgCount = nImgInFragment;
+          window.__apApplyReady = true;
           renderAuditReport(obj);
 
           var summary = obj && obj.summary ? obj.summary : {};
           var statusDone =
             "검수 완료" +
-            (summary.score != null ? " · score " + String(summary.score) : "");
+            (summary.score != null ? " · score " + String(summary.score) : "") +
+            " · 「반영」으로 코드에 적용 가능";
           setAiStatus(statusDone);
         })
         .catch(function (e) {
+          window.__apApplyReady = false;
           setAiStatus("검수 실패: " + friendlyAiApiErrorMessage(e));
         })
         .then(function () {
@@ -5352,32 +5452,32 @@
     var btnApplyAlt = $("#btnApplyAltProposals");
     if (btnApplyAlt) {
       btnApplyAlt.onclick = function () {
-        if (!ensureApiKeyExists()) return;
         if (!ensureCodeExists()) return;
+        if (!window.__apApplyReady) {
+          setAiStatus("반영: 먼저 「분석」을 완료하세요.");
+          return;
+        }
+        var auditSnap = window.__apLastAnalysisReport;
+        if (!auditSnap || typeof auditSnap !== "object") {
+          setAiStatus("반영 실패: 검수 데이터 없음. 「분석」을 다시 실행하세요.");
+          window.__apApplyReady = false;
+          setAiButtonsBusy(false);
+          return;
+        }
         var code = stripEmbeddedAuditReport(getCodeValue());
         var codeForApplyApi = extractCmsPartForAudit(code);
         if (!String(codeForApplyApi).trim()) codeForApplyApi = code;
         var n = countImgs(code);
         var nApi = countImgs(codeForApplyApi);
         setAiButtonsBusy(true);
-        setAiStatus("반영 중 · 헤딩·CTA 버튼·alt 패치 (직전 분석 기반)…");
-        var auditSnap = window.__apLastAnalysisReport;
-        runAiApplyApi(codeForApplyApi, auditSnap)
-          .then(function (obj) {
+        setAiStatus("반영 중 · 직전 분석 리포트를 코드에 적용…");
+        var obj = buildApplyObjectFromAnalysisSnapshot(codeForApplyApi, auditSnap, n, nApi);
+        Promise.resolve()
+          .then(function () {
             var code0 = code;
             if (!Array.isArray(obj.altProposals)) obj.altProposals = [];
             if (!Array.isArray(obj.headingPatches)) obj.headingPatches = [];
             if (!Array.isArray(obj.linkBtnPatches)) obj.linkBtnPatches = [];
-            var auditSnap = window.__apLastAnalysisReport;
-            if (
-              auditSnap &&
-              Array.isArray(auditSnap.altProposals) &&
-              auditSnap.altProposals.length === nApi &&
-              window.__apLastAnalysisImgCount === nApi &&
-              n === nApi
-            ) {
-              obj.altProposals = auditSnap.altProposals.slice();
-            }
             var patches = obj.headingPatches;
             var headApply = applyHeadingPatchesToCode(code, patches);
             code = headApply.html;
@@ -5447,7 +5547,7 @@
                 : "변경 없음 또는 스킵";
             if (headApply.stats.wanted > 0 && headApply.stats.applied === 0) {
               oneLine +=
-                " · 헤딩 패치 미적용(모델 before·실제 HTML 불일치 등으로 치환 불가)";
+                " · 헤딩 패치 미적용(분석 리포트 selector·마크업과 불일치 등)";
             } else if (headApply.stats.applied > 0 && headApply.stats.applied < headApply.stats.wanted) {
               oneLine +=
                 " · 헤딩 " +
@@ -5461,10 +5561,13 @@
             } else if (btnApply.stats.applied > 0 && btnApply.stats.applied < btnApply.stats.wanted) {
               oneLine += " · CTA 버튼 " + btnApply.stats.applied + "/" + btnApply.stats.wanted + "건만 적용";
             }
-            setAiStatus("반영 완료 · " + oneLine);
+            window.__apApplyReady = false;
+            window.__apLastAnalysisReport = null;
+            window.__apLastAnalysisImgCount = null;
+            setAiStatus("반영 완료 · " + oneLine + " · 다시 적용하려면 「분석」");
           })
           .catch(function (e) {
-            setAiStatus("반영 실패: " + friendlyAiApiErrorMessage(e));
+            setAiStatus("반영 실패: " + String((e && e.message) || e));
           })
           .then(function () {
             setAiButtonsBusy(false);
