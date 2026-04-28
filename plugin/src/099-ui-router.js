@@ -140,7 +140,15 @@ figma.ui.onmessage = function (msg) {
                             moImages: moPayload.images || [],
                         })
                         var images = mergeImagesWithMoBackgroundFallback(code, payload.images || [], moPayload.images || [])
-                        return {payload: payload, code: code, images: images, mobileDataTree: moPayload.dataTree, separateViews: separateViews, hybridMismatchSecs: (secMatch && secMatch.mismatchSecs) ? secMatch.mismatchSecs : []}
+                        return {
+                            payload: payload,
+                            code: code,
+                            images: images,
+                            mobileDataTree: moPayload.dataTree,
+                            separateViews: separateViews,
+                            hybridMismatchSecs: secMatch && secMatch.mismatchSecs ? secMatch.mismatchSecs : [],
+                            structureMatchSections: secMatch && secMatch.matches ? secMatch.matches : [],
+                        }
                     })
                 })
             })
@@ -161,6 +169,7 @@ figma.ui.onmessage = function (msg) {
                     mobileDataTree: out.mobileDataTree,
                     separateViews: out.separateViews,
                     hybridMismatchSecs: out.hybridMismatchSecs,
+                    structureMatchSections: out.structureMatchSections || [],
                     moBreakpoint: breakpoint,
                 })
                 try {

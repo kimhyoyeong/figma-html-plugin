@@ -1961,6 +1961,8 @@
     var previewViewMode = "pc";
     var separateViews = false;
     var hybridMismatchSecs = [];
+    /** RESULT.structureMatchSections 캐시 — hybrid 배지 + logStructureMismatchToConsole */
+    var structureMatchSections = [];
     var selectedNode = null;
     var vectorTypes = ["VECTOR", "BOOLEAN_OPERATION", "STAR", "LINE", "ELLIPSE", "POLYGON", "RECTANGLE"];
 
@@ -2069,6 +2071,87 @@
         .replace(/"/g, "&quot;");
     }
 
+    /** PC+MO 분석 후 구조 불일치를 DevTools 콘솔에만 읽기 쉽게 출력 (플러그인 UI 우클릭 → 검사 → Console) */
+    function logStructureMismatchToConsole(sections) {
+      if (typeof console === "undefined" || !sections || !sections.length) return;
+      var bad = sections.filter(function (r) {
+        return r && !r.match && r.nodeMismatches && r.nodeMismatches.length;
+      });
+      if (!bad.length) return;
+
+      function pathBreak(s) {
+        return String(s || "")
+          .split(" → ")
+          .join("\n      → ");
+      }
+
+      var fat = "══════════════════════════════════════════════════════════════════════";
+      var thin = "──────────────────────────────────────────────────────────────────────";
+
+      try {
+        console.group("%c PC / MO 구조 불일치 %c(" + bad.length + "개 섹션)", "color:#fecaca;font-weight:bold;font-size:13px;", "color:#94a3b8;font-weight:normal;font-size:12px;");
+      } catch (eG) {
+        console.log("\n" + fat);
+      }
+      console.log("%c※ 이 로그는 플러그인 UI(iframe)의 DevTools → Console 에 표시됩니다.", "color:#64748b;font-size:11px;");
+      console.log(fat);
+
+      var tableRows = [];
+      for (var si = 0; si < bad.length; si++) {
+        var secRow = bad[si];
+        console.log(
+          "%c Section " + secRow.sec + " %c " + (secRow.reason || "시그니처 불일치"),
+          "color:#fb923c;font-weight:700;",
+          "color:#cbd5e1;font-weight:400;",
+        );
+        console.log(thin);
+        var rows = secRow.nodeMismatches || [];
+        for (var ri = 0; ri < rows.length; ri++) {
+          var row = rows[ri];
+          console.log(
+            "  %c▸ " + (row.reason || "") + "%c   depth " + (row.depth != null ? row.depth : ""),
+            "color:#f1f5f9;font-weight:600;",
+            "color:#64748b;font-weight:400;",
+          );
+          console.log("%c  PC 경로", "color:#7dd3fc;font-weight:600;", "\n      " + pathBreak(row.pcPath));
+          console.log("%c  MO 경로", "color:#86efac;font-weight:600;", "\n      " + pathBreak(row.moPath));
+          if (row.pcTip || row.moTip) {
+            console.log("  %c비교 노드%c  " + (row.pcTip || "—") + "  ↔  " + (row.moTip || "—"), "color:#94a3b8;", "color:#e2e8f0;");
+          }
+          if (row.pcKids && row.pcKids.length) {
+            console.log("%c  PC 보이는 자식 (" + row.pcKids.length + ")", "color:#94a3b8;font-weight:600;");
+            console.log("      " + row.pcKids.map(function (k) { return "· " + k; }).join("\n      "));
+          }
+          if (row.moKids && row.moKids.length) {
+            console.log("%c  MO 보이는 자식 (" + row.moKids.length + ")", "color:#94a3b8;font-weight:600;");
+            console.log("      " + row.moKids.map(function (k) { return "· " + k; }).join("\n      "));
+          }
+          tableRows.push({
+            section: secRow.sec,
+            reason: row.reason,
+            depth: row.depth,
+            pcPath: row.pcPath,
+            moPath: row.moPath,
+          });
+          if (ri < rows.length - 1) console.log("");
+        }
+        if (si < bad.length - 1) console.log("\n");
+      }
+
+      console.log(fat);
+      if (tableRows.length) {
+        console.log("%c요약 표 (복사·필터에 유리)", "color:#94a3b8;font-size:11px;font-weight:600;");
+        try {
+          console.table(tableRows);
+        } catch (eT) {}
+      }
+      try {
+        console.groupEnd();
+      } catch (eGe) {
+        console.log(fat + "\n");
+      }
+    }
+
     function setStatusText(t) {
       var st = $("#dataStatus");
       if (!st) return;
@@ -2130,6 +2213,11 @@
         }
         separateViews = !!msg.separateViews;
         hybridMismatchSecs = msg.hybridMismatchSecs && Array.isArray(msg.hybridMismatchSecs) ? msg.hybridMismatchSecs : [];
+        structureMatchSections =
+          msg.structureMatchSections && Array.isArray(msg.structureMatchSections) ? msg.structureMatchSections.slice() : [];
+        var structureMismatchSecCount = structureMatchSections.filter(function (r) {
+          return r && !r.match && r.nodeMismatches && r.nodeMismatches.length;
+        }).length;
         if (msg.vectorTypes && msg.vectorTypes.length) vectorTypes = msg.vectorTypes;
 
         usedFonts = Array.isArray(msg.usedFonts) ? msg.usedFonts.slice() : [];
@@ -2163,15 +2251,17 @@
         }
 
         renderDataTree(dataTree);
+        logStructureMismatchToConsole(structureMatchSections);
         updatePreviewToolbar();
         var sectionCount = dataTree && dataTree.sections ? dataTree.sections.length : 0;
         var statusBase = sectionCount > 0 ? ("완료 · 섹션 " + sectionCount + "개") : "완료 · 섹션 0개 (보이는 자식 없음)";
+        var structHint = structureMismatchSecCount > 0 ? " · 구조 불일치 " + structureMismatchSecCount + "섹션 (UI DevTools 콘솔)" : "";
         setStatusText(
-          separateViews
+          (separateViews
             ? statusBase + " · 레이어 구조가 다르면 PC/MO를 각각 표시합니다"
             : mobileDataTree
               ? statusBase + " · PC+MO @media 오버라이드 포함"
-              : statusBase
+              : statusBase) + structHint
         );
       }
 
@@ -2283,6 +2373,7 @@
         resultImagesByIngest = Object.create(null);
         separateViews = false;
         hybridMismatchSecs = [];
+        structureMatchSections = [];
         selectedNode = null;
         usedFonts = [];
         syncFontState([], false);
@@ -2416,6 +2507,14 @@
       return n;
     }
 
+    /** dataTree path[0]은 1-based 섹션 번호 → hybridMismatchSecs·ap-section--NN과 동일 "01" 형식 */
+    function secClassFromDataTreePath(path) {
+      if (!path || path.length < 1) return "";
+      var n = Math.max(1, Math.floor(Number(path[0]) || 0));
+      if (!n) return "";
+      return (n < 10 ? "0" : "") + String(n);
+    }
+
     function normNameForMatch(s) {
       var t = String(s || "").trim();
       if (t.length >= 2 && ((t.charAt(0) === "'" && t.charAt(t.length - 1) === "'") || (t.charAt(0) === '"' && t.charAt(t.length - 1) === '"')))
@@ -2534,9 +2633,19 @@
           html += row("상태", "레이어 구조가 달라 매칭 불가");
           html += "</div>";
         } else {
+          var secClassForStruct = secClassFromDataTreePath(node.path);
+          var isStructMismatchSec = hybridMismatchSecs && hybridMismatchSecs.indexOf(secClassForStruct) >= 0;
           var moNode = getNodeByPath(mobileDataTree, node.path);
           if (moNode) {
-            html += "<div class='kv detailKvMo'><h4 class='detailKvMoTitle--matched'>MO (매칭)</h4>";
+            var moDetailTitle = isStructMismatchSec ? "MO (인덱스 경로만 동일)" : "MO (매칭)";
+            var moDetailTitleClass = isStructMismatchSec ? "detailKvMoTitle--unmatched" : "detailKvMoTitle--matched";
+            html += "<div class='kv detailKvMo'><h4 class='" + moDetailTitleClass + "'>" + escapeHtml(moDetailTitle) + "</h4>";
+            if (isStructMismatchSec) {
+              html += row(
+                "안내",
+                "이 섹션은 PC/MO 트리 구조 검사에서 불일치입니다. 아래는 MO 덤프에서 PC와 같은 인덱스 path의 노드이며, 구조 매칭 짝과 다를 수 있습니다.",
+              );
+            }
             var hasMoContent = false;
             if (moNode.textMeta) {
               var tm2 = moNode.textMeta;
@@ -2565,6 +2674,10 @@
               });
             }
             if (!hasMoContent) html += row("상태", "인덱스 매칭 (레이어 순서 동일)");
+            html += "</div>";
+          } else if (isStructMismatchSec) {
+            html += "<div class='kv detailKvMo'><h4 class='detailKvMoTitle--unmatched'>MO</h4>";
+            html += row("상태", "구조 불일치 섹션: 이 인덱스 path에 해당하는 MO 노드가 없습니다.");
             html += "</div>";
           }
         }

@@ -2,8 +2,8 @@
  * 095-responsive-pcmo — PC HTML + @media로 MO 스타일·배경·picture 병합
  *
  * 구조 불일치 시 096이 `.pc-only .ap-section--NN` / `.mo-only .ap-section--NN` 지연 규칙 출력 — parseCodeIntoParts·injectBgOverridesForMo 가 래퍼+자손 선택자 인식.
- * buildMobileOverrides — 레이아웃·프레임 walk 시 형제는 `img`/`txt` 이름 우선 짝 + 나머지 이름 정렬 짝(순서만 바뀐 섹션 허용); 이미지 크기는 렌더순서·슬롯·sourceNodeId
- * getSectionStructureMatch — 동일 짝 규칙으로 구조 일치 판정(code-video·code-raster 슬롯은 하위 무시)
+ * buildMobileOverrides — 레이아웃·프레임 walk 시 형제는 **문서 순(visible 자식 인덱스)** 1:1 짝; 이미지 크기는 렌더순서·슬롯·sourceNodeId
+ * getSectionStructureMatch — 동일 짝 규칙으로 구조 일치 판정(code-video·code-slide·code-raster 슬롯은 하위 무시). 반환 matches[] 항목에 nodeMismatches[] 첫 불일치 행(pcPath/moPath 트리 경로) 포함
  * parseCodeIntoParts — 산출 HTML에서 base/section 스타일/article 분리
  * injectBgOverridesForMo — sectionStyles의 --bg-img를 MO용 _mo 경로로 @media에 병합
  * rewriteMoOnlyRasterBgUrls — .mo-only 규칙 안 배경 URL만 MO 파일명·확장자에 맞춤
@@ -30,102 +30,17 @@ function dbgSecNodeLabel(n) {
     return (n.type || "?") + ' "' + nm + '" ' + String(n.id || "")
 }
 
-// ----- 6. Section Utils (배경은 buildSectionBackgroundAsync) -----
-/**
- * PC/MO visible 형제 짝: `img`·`txt` 레이어명(대소문자 무시) 동수면 시각 좌표로 짝, `txt`는 양쪽에 같은 개수일 때만 짝.
- * 나머지: 한쪽이라도 **같은 레이어명이 형제 중 2회 이상**이면 이름 정렬이 PC·MO 기준축을 어긋나게 하므로 **문서 순 인덱스 짝**만 사용.
- * 그 외에만 이름(동명이면 생성 순 idx) 정렬 후 짝. `img` 개수 불일치 등이면 null → 호출부에서 인덱스 짝 fallback.
- */
-function pairVisibleSiblingsFlexible(dk, mk) {
-    if (!dk || !mk || dk.length !== mk.length) return null
-    function lowerName(n) {
-        return String(n && n.name || "").trim().toLowerCase()
-    }
-    function remainderHasDuplicateLayerName(nodes) {
-        var counts = Object.create(null)
-        for (var ri = 0; ri < nodes.length; ri++) {
-            var k = lowerName(nodes[ri])
-            if (k === "") k = "\0"
-            counts[k] = (counts[k] || 0) + 1
-            if (counts[k] > 1) return true
-        }
-        return false
-    }
-    function pluckByName(nodes, tag) {
-        var hit = []
-        var rest = []
-        for (var i = 0; i < nodes.length; i++) {
-            if (lowerName(nodes[i]) === tag) hit.push(nodes[i])
-            else rest.push(nodes[i])
-        }
-        return {hit: hit, rest: rest}
-    }
-    function sortNodesVisual(nodes) {
-        return nodes
-            .map(function (n, idx) {
-                var k = idx
-                try {
-                    var b = getAbs(n)
-                    if (b) k = (Number(b.x) || 0) * 1e9 + (Number(b.y) || 0) + idx * 1e-6
-                } catch (eVis) {}
-                return {n: n, k: k}
-            })
-            .sort(function (a, b) {
-                return a.k - b.k
-            })
-            .map(function (x) {
-                return x.n
-            })
-    }
-    function sortNodesByNameStable(nodes) {
-        return nodes
-            .map(function (n, idx) {
-                var ln = lowerName(n)
-                return {n: n, k: (ln || "\0") + "\x01" + idx}
-            })
-            .sort(function (a, b) {
-                return a.k.localeCompare(b.k)
-            })
-            .map(function (x) {
-                return x.n
-            })
-    }
-    var pairs = []
-    var dR = dk.slice()
-    var mR = mk.slice()
-    var dImg = pluckByName(dR, "img")
-    var mImg = pluckByName(mR, "img")
-    if (dImg.hit.length !== mImg.hit.length) return null
-    var dIs = sortNodesVisual(dImg.hit)
-    var mIs = sortNodesVisual(mImg.hit)
-    for (var ii = 0; ii < dIs.length; ii++) pairs.push([dIs[ii], mIs[ii]])
-    dR = dImg.rest
-    mR = mImg.rest
-    if (dR.length !== mR.length) return null
-
-    var dTxt = pluckByName(dR, "txt")
-    var mTxt = pluckByName(mR, "txt")
-    if (dTxt.hit.length === mTxt.hit.length && dTxt.hit.length > 0) {
-        var dTs = sortNodesVisual(dTxt.hit)
-        var mTs = sortNodesVisual(mTxt.hit)
-        for (var ti = 0; ti < dTs.length; ti++) pairs.push([dTs[ti], mTs[ti]])
-        dR = dTxt.rest
-        mR = mTxt.rest
-    }
-    if (dR.length !== mR.length) return null
-    if (remainderHasDuplicateLayerName(dR) || remainderHasDuplicateLayerName(mR)) {
-        for (var zi = 0; zi < dR.length; zi++) pairs.push([dR[zi], mR[zi]])
-    } else {
-        var dN = sortNodesByNameStable(dR)
-        var mN = sortNodesByNameStable(mR)
-        for (var ji = 0; ji < dN.length; ji++) pairs.push([dN[ji], mN[ji]])
-    }
-    return pairs
+/** 구조 매칭 트리 경로용 짧은 라벨 (섹션 루트 → … 누적) */
+function nodeTrailBrief(n) {
+    if (!n) return "(null)"
+    var nm = String(n.name || "").trim() || "(unnamed)"
+    if (nm.length > 36) nm = nm.slice(0, 34) + "…"
+    return (n.type || "?") + ' "' + nm + '" #' + String(n.id || "")
 }
 
+// ----- 6. Section Utils (배경은 buildSectionBackgroundAsync) -----
+/** PC/MO visible 형제: 항상 **문서 순서(필터 후 i번째 ↔ i번째)**. 레이어 순서를 맞춘 PC/MO만 구조·오버라이드·상속 walk가 일관됨. */
 function pcMoChildPairsOrIndex(dKids, mKids) {
-    var flex = pairVisibleSiblingsFlexible(dKids, mKids)
-    if (flex) return flex
     var out = []
     for (var i = 0; i < dKids.length && i < mKids.length; i++) out.push([dKids[i], mKids[i]])
     return out
@@ -332,7 +247,7 @@ function buildOrderPlan(desktopRoot, mobileRoot, skipSecs) {
     return plan
 }
 
-/** PC HTML 기준 MO 미디어쿼리 오버라이드 (프레임/텍스트 walk는 pcMoChildPairsOrIndex, 이미지는 렌더 순서·슬롯) */
+/** PC HTML 기준 MO 미디어쿼리 오버라이드 (프레임/텍스트 walk는 문서 순 pcMoChildPairsOrIndex, 이미지는 렌더 순서·슬롯) */
 function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
     options = options || {}
     var exportedSet = options.exportedNodeIds || null
@@ -759,13 +674,14 @@ function buildMobileOverrides(desktopRoot, mobileRoot, breakpoint, options) {
     return lines.join("\n")
 }
 
-/** PC/MO 섹션 구조 매칭. allMatch, mismatchSecs[], matches[] (숨김 제외한 섹션 목록 기준) */
+/** PC/MO 섹션 구조 매칭. allMatch, mismatchSecs[], matches[] (각 match 항목에 nodeMismatches: 첫 불일치 지점 행 배열) */
 function getSectionStructureMatch(desktopRoot, mobileRoot) {
     var out = {allMatch: false, matches: [], mismatchSecs: []}
 
     if (!desktopRoot || !mobileRoot || !isContainer(desktopRoot) || !isContainer(mobileRoot)) return out
 
     var currentSecForStructLog = ""
+    var sectionNodeMismatches = []
 
     function visibleChildren(n) {
         var arr = []
@@ -777,34 +693,51 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
         return arr
     }
 
-    function dbgSecMismatch(reason, dNode, mNode, depth, extra) {
+    function dbgSecMismatch(reason, dNode, mNode, depth, extra, pcPathTo, moPathTo) {
+        sectionNodeMismatches.push(
+            Object.assign(
+                {
+                    reason: reason,
+                    depth: depth,
+                    pcPath: String(pcPathTo || ""),
+                    moPath: String(moPathTo || ""),
+                    pcTip: dbgSecNodeLabel(dNode),
+                    moTip: dbgSecNodeLabel(mNode),
+                },
+                extra || {},
+            ),
+        )
         if (DEBUG_LOG_SECTION_STRUCTURE_MATCH) {
-            dbgSecStruct("sec " + currentSecForStructLog + " · " + reason, Object.assign({ depth: depth, PC: dbgSecNodeLabel(dNode), MO: dbgSecNodeLabel(mNode) }, extra || {}))
+            dbgSecStruct("sec " + currentSecForStructLog + " · " + reason, Object.assign({ depth: depth, PC: dbgSecNodeLabel(dNode), MO: dbgSecNodeLabel(mNode), pcPath: pcPathTo, moPath: moPathTo }, extra || {}))
         }
         return false
     }
 
     /**
      * PC·MO 트리를 각각 해시(nodeSig)하면 MO에 code-video/code-raster 명이 없을 때만 하위 구조가 전부 시그니처에 남아 불일치가 난다.
-     * 형제는 pcMoChildPairsOrIndex(img·txt 이름·나머지 정렬). 한쪽이라도 code-video·Video fill·code-raster면 그 서브트리는 일치로 본다.
+     * 형제는 pcMoChildPairsOrIndex(문서 순 인덱스 짝). 한쪽이라도 code-video·Video fill·code-slide·code-raster면 그 서브트리는 일치로 본다.
+     * pcPathTo / moPathTo: 섹션 루트부터 현재 비교 노드까지의 경로(노드 단위 진단용).
      */
-    function pairedStructureMatch(dNode, mNode, depth) {
+    function pairedStructureMatch(dNode, mNode, depth, pcPathTo, moPathTo) {
         depth = depth || 0
+        pcPathTo = pcPathTo != null ? String(pcPathTo) : ""
+        moPathTo = moPathTo != null ? String(moPathTo) : ""
         if (!dNode || !mNode) {
             if (!dNode && !mNode) return true
-            return dbgSecMismatch("한쪽 노드 null", dNode, mNode, depth, {})
+            return dbgSecMismatch("한쪽 노드 null", dNode, mNode, depth, {}, pcPathTo, moPathTo)
         }
         if (!isVisible(dNode) || !isVisible(mNode)) {
-            return dbgSecMismatch("visible 불일치", dNode, mNode, depth, { pcVis: isVisible(dNode), moVis: isVisible(mNode) })
+            return dbgSecMismatch("visible 불일치", dNode, mNode, depth, { pcVis: isVisible(dNode), moVis: isVisible(mNode) }, pcPathTo, moPathTo)
         }
         if (isVideoSlotByNameOrFill(dNode) || isVideoSlotByNameOrFill(mNode)) return true
+        if (isSlideNode(dNode) || isSlideNode(mNode)) return true
         if (isCodeRasterNode(dNode) || isCodeRasterNode(mNode)) return true
         var dt = dNode.type || "UNKNOWN"
         var mt = mNode.type || "UNKNOWN"
-        if (dt !== mt) return dbgSecMismatch("type 불일치", dNode, mNode, depth, { pcType: dt, moType: mt })
+        if (dt !== mt) return dbgSecMismatch("type 불일치", dNode, mNode, depth, { pcType: dt, moType: mt }, pcPathTo, moPathTo)
         var dCont = isContainer(dNode)
         var mCont = isContainer(mNode)
-        if (dCont !== mCont) return dbgSecMismatch("container 여부 불일치", dNode, mNode, depth, { pcCont: dCont, moCont: mCont })
+        if (dCont !== mCont) return dbgSecMismatch("container 여부 불일치", dNode, mNode, depth, { pcCont: dCont, moCont: mCont }, pcPathTo, moPathTo)
         if (!dCont) return true
         if (depth >= 3) return true
         var dk = visibleChildren(dNode)
@@ -815,19 +748,15 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
                 moCount: mk.length,
                 pcKids: dk.map(dbgSecNodeLabel),
                 moKids: mk.map(dbgSecNodeLabel),
-            })
+            }, pcPathTo, moPathTo)
         }
         var plist = pcMoChildPairsOrIndex(dk, mk)
         for (var ci = 0; ci < plist.length; ci++) {
-            if (!pairedStructureMatch(plist[ci][0], plist[ci][1], depth + 1)) {
-                dbgSecStruct("sec " + currentSecForStructLog + " · 자식 쌍 재귀 실패(위 MISMATCH 원인)", {
-                    depth: depth,
-                    childIndex: ci,
-                    pcChild: dbgSecNodeLabel(plist[ci][0]),
-                    moChild: dbgSecNodeLabel(plist[ci][1]),
-                })
-                return false
-            }
+            var cd = plist[ci][0]
+            var cm = plist[ci][1]
+            var pcDown = pcPathTo ? pcPathTo + " → " + nodeTrailBrief(cd) : nodeTrailBrief(cd)
+            var moDown = moPathTo ? moPathTo + " → " + nodeTrailBrief(cm) : nodeTrailBrief(cm)
+            if (!pairedStructureMatch(cd, cm, depth + 1, pcDown, moDown)) return false
         }
         return true
     }
@@ -848,27 +777,48 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
         var match = false
         var reason = ""
 
+        sectionNodeMismatches = []
         if (!d || !m) {
             match = false
             reason = !d ? "PC 섹션 없음" : "MO 섹션 없음"
             dbgSecStruct("섹션 누락", { sec: secNo, reason: reason })
+            sectionNodeMismatches.push({
+                reason: reason,
+                depth: 0,
+                pcPath: d ? nodeTrailBrief(d) : "(PC 섹션 없음)",
+                moPath: m ? nodeTrailBrief(m) : "(MO 섹션 없음)",
+                pcTip: d ? dbgSecNodeLabel(d) : "",
+                moTip: m ? dbgSecNodeLabel(m) : "",
+            })
         } else {
             currentSecForStructLog = secNo
-            match = pairedStructureMatch(d, m, 0)
+            match = pairedStructureMatch(d, m, 0, nodeTrailBrief(d), nodeTrailBrief(m))
             currentSecForStructLog = ""
             if (!match) reason = "시그니처 불일치"
+            if (DEBUG_LOG_SECTION_STRUCTURE_MATCH && sectionNodeMismatches.length) {
+                dbgSecStruct("노드 단위 불일치(이 섹션)", { sec: secNo, rows: sectionNodeMismatches })
+                try {
+                    console.table(sectionNodeMismatches)
+                } catch (teTbl) {}
+            }
         }
 
-        out.matches.push({sec: secNo, match: match, reason: reason})
+        out.matches.push({ sec: secNo, match: match, reason: reason, nodeMismatches: sectionNodeMismatches.slice() })
         if (!match) {
             out.mismatchSecs.push(secNo)
             allMatch = false
-            dbgSecStruct("→ hybridMismatchSecs 추가", { sec: secNo, reason: reason })
+            dbgSecStruct("→ hybridMismatchSecs 추가", { sec: secNo, reason: reason, nodeMismatches: sectionNodeMismatches })
         }
     }
 
     out.allMatch = !!allMatch
-    dbgSecStruct("요약", { allMatch: out.allMatch, mismatchSecs: out.mismatchSecs, matches: out.matches })
+    dbgSecStruct("요약", {
+        allMatch: out.allMatch,
+        mismatchSecs: out.mismatchSecs,
+        matches: out.matches.map(function (row) {
+            return { sec: row.sec, match: row.match, reason: row.reason, nodeMismatches: row.nodeMismatches }
+        }),
+    })
     return out
 }
 
