@@ -4039,6 +4039,18 @@ function pushDeferredImageImgSizeVars(ctx, secClass, nodeId, node, opts, wrapper
  * 경로는 assetKey(067에서 secNo·노드 id 포함)당 1개만. 내용/figma imageHash만으로 다른 노드에 경로를 재사용하지 않음.
  */
 var ASSETS_IMAGES_PREFIX = "assets/images/"
+
+/** true면 `getOrAssignImagePath` 호출·분기 로그 (Figma → Plugins → Development → Open console). 확인 후 false 권장 */
+var DEBUG_LOG_IMAGE_PATH_ASSIGN = false
+
+function dbgImgPath(msg, detail) {
+    if (!DEBUG_LOG_IMAGE_PATH_ASSIGN) return
+    try {
+        if (detail != null) console.log("[imgPath]", msg, detail)
+        else console.log("[imgPath]", msg)
+    } catch (e0) {}
+}
+
 function normalizeProjectName(s) {
     s = String(s || "").trim()
     if (!s) return "project"
@@ -4104,12 +4116,43 @@ function moAssetKeyToPcAssetKeyByVariant(moKey) {
     return String(moKey || "").replace(/^([^:]+:)mo(:)/, "$1pc$2")
 }
 
+/**
+ * PC dump 시 저장된 키는 parent clip export(:pclip)·FRAME 크기 등으로 해시가 달라질 수 있는데,
+ * makePairedPcAssetKeyForInheritedPathLookup은 clip/rasterExportSource 없이 짜서 정확 키가 안 맞는 경우가 있다.
+ * 같은 preview:pc:…:sN: 접두 + :n:nodeId 를 가진 맵 키로 PC 경로를 찾는다.
+ */
+function inheritedPcPathScanByPcNodeIdInMap(map, pairedPcAssetKey) {
+    if (!map || !pairedPcAssetKey) return ""
+    var pk = String(pairedPcAssetKey)
+    var mN = /:n:([0-9]+_[0-9]+)(?=:pclip:|$)/.exec(pk)
+    if (!mN) return ""
+    var needle = ":n:" + mN[1]
+    var prefixM = /^(preview:pc:[^:]+:[^:]+:s\d+:)/.exec(pk)
+    var prefix = prefixM ? prefixM[1] : ""
+    var cands = []
+    for (var k in map) {
+        if (!Object.prototype.hasOwnProperty.call(map, k)) continue
+        if (prefix && k.indexOf(prefix) !== 0) continue
+        if (k.indexOf(needle) < 0) continue
+        if (!map[k]) continue
+        cands.push(k)
+    }
+    if (!cands.length) return ""
+    if (cands.length === 1) return map[cands[0]]
+    cands.sort(function (a, b) {
+        return b.length - a.length
+    })
+    return map[cands[0]]
+}
+
 function inheritedPcPathForPairedKey(cache, pairedPcAssetKey) {
     if (!cache || !cache.inheritedPcImageName || !pairedPcAssetKey) return ""
     var map = cache.inheritedPcImageName
     if (map[pairedPcAssetKey]) return map[pairedPcAssetKey]
     var toggled = String(pairedPcAssetKey).replace(/:png:/, ":__FMT__:").replace(/:jpg:/, ":png:").replace(/:__FMT__:/, ":jpg:")
     if (toggled !== pairedPcAssetKey && map[toggled]) return map[toggled]
+    var scanned = inheritedPcPathScanByPcNodeIdInMap(map, pairedPcAssetKey)
+    if (scanned) return scanned
     return ""
 }
 
@@ -4154,6 +4197,7 @@ function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
         var reusedPath = cache.imageName[opts.reuseAssetKey]
         var ak = assetKey != null ? String(assetKey) : ""
         if (ak && reusedPath) cache.imageName[ak] = reusedPath
+        dbgImgPath("reuseAssetKey branch", { reuseKey: String(opts.reuseAssetKey).slice(0, 80), ak: ak.slice(0, 80), reusedPath: reusedPath })
         return reusedPath
     }
 
@@ -4161,10 +4205,24 @@ function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
     if (!key) return ""
 
     var secEarly = Number(secNo) || 1
+    var keyShort = key.length > 140 ? key.slice(0, 60) + "…" + key.slice(-70) : key
+    var dataLen = dataUrl ? String(dataUrl).trim().length : 0
+    var hadKey = Object.prototype.hasOwnProperty.call(cache.imageName, key)
+    dbgImgPath("enter", {
+        sec: secEarly,
+        key: keyShort,
+        dataLen: dataLen,
+        suffix: cache.imageSuffix || "",
+        skipExport: !!opts.skipExport,
+        pairedPcKey: opts.pairedPcAssetKey ? String(opts.pairedPcAssetKey).slice(0, 100) : "",
+        hadKey: hadKey,
+        prevPath: hadKey ? cache.imageName[key] : undefined,
+    })
 
     if (!Object.prototype.hasOwnProperty.call(cache.imageName, key)) {
         if (!dataUrl || !String(dataUrl).trim()) {
             cache.imageName[key] = ""
+            dbgImgPath("EARLY empty dataUrl (path locked to \"\")", { key: keyShort })
             return ""
         }
         var ext = getDataUrlExt(dataUrl)
@@ -4175,9 +4233,13 @@ function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
             var pcPathLook = inheritedPcPathForPairedKey(cache, pcKey)
             if (pcPathLook) {
                 assignedPath = pcExportPathToMoExportPath(pcPathLook, ext)
+                dbgImgPath("MO inherited PC path", { pcKey: String(pcKey).slice(0, 100), pcPathLook: pcPathLook, assignedPath: assignedPath })
             } else if (opts.pairedPcAssetKey) {
-                cache.imageName[key] = ""
-                return ""
+                dbgImgPath("MO pairedPcKey no exact inherited path (fall through to imgNN or retry scan next call)", {
+                    pcKey: String(pcKey).slice(0, 120),
+                    hasMap: !!cache.inheritedPcImageName,
+                    mapHasPcKey: !!(cache.inheritedPcImageName && cache.inheritedPcImageName[pcKey]),
+                })
             }
         }
 
@@ -4204,13 +4266,18 @@ function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
         }
 
         cache.imageName[key] = assignedPath
+        dbgImgPath("first assign", { key: keyShort, assignedPath: assignedPath })
+    } else if (hadKey && dataLen > 0 && (!cache.imageName[key] || !String(cache.imageName[key]).trim())) {
+        dbgImgPath("WARN cached path empty but dataUrl now non-empty (cannot re-assign)", { key: keyShort, prevPath: cache.imageName[key], dataLen: dataLen })
     }
 
     var pathOut = cache.imageName[key] || ""
     var skipExportFinal = opts.skipExport || !!(dataUrl && cache.imageSuffix === "_mo" && dataUrl.indexOf("image/svg+xml") >= 0)
+    var willList = !!(pathOut && dataUrl && !skipExportFinal)
     if (pathOut && dataUrl && !skipExportFinal) {
         ensureImageInListOnce(cache, pathOut, dataUrl)
     }
+    dbgImgPath("exit", { key: keyShort, pathOut: pathOut, willList: willList, skipExportFinal: skipExportFinal })
     return pathOut
 }
 
@@ -6311,6 +6378,25 @@ function getSectionNodes(root) {
  * apSlidePcImgAttr — 슬라이드 안 이미지는 picture 변환 생략 표시
  * combinePcMoAsBreakpoint — 위 요소 합쳐 최종 HTML 문자열
  */
+
+/** true면 `getSectionStructureMatch` 상세 로그 (Figma → Plugins → Development → Open console) */
+var DEBUG_LOG_SECTION_STRUCTURE_MATCH = true
+
+function dbgSecStruct(msg, detail) {
+    if (!DEBUG_LOG_SECTION_STRUCTURE_MATCH) return
+    try {
+        if (detail != null) console.log("[ap-sec-struct]", msg, detail)
+        else console.log("[ap-sec-struct]", msg)
+    } catch (e0) {}
+}
+
+function dbgSecNodeLabel(n) {
+    if (!n) return "(null)"
+    var nm = String(n.name || "").trim()
+    if (nm.length > 48) nm = nm.slice(0, 46) + "…"
+    return (n.type || "?") + ' "' + nm + '" ' + String(n.id || "")
+}
+
 // ----- 6. Section Utils (배경은 buildSectionBackgroundAsync) -----
 /**
  * PC/MO visible 형제 짝: `img`·`txt` 레이어명(대소문자 무시) 동수면 시각 좌표로 짝, `txt`는 양쪽에 같은 개수일 때만 짝.
@@ -7046,6 +7132,8 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
 
     if (!desktopRoot || !mobileRoot || !isContainer(desktopRoot) || !isContainer(mobileRoot)) return out
 
+    var currentSecForStructLog = ""
+
     function visibleChildren(n) {
         var arr = []
         if (!n || !n.children) return arr
@@ -7056,30 +7144,57 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
         return arr
     }
 
+    function dbgSecMismatch(reason, dNode, mNode, depth, extra) {
+        if (DEBUG_LOG_SECTION_STRUCTURE_MATCH) {
+            dbgSecStruct("sec " + currentSecForStructLog + " · " + reason, Object.assign({ depth: depth, PC: dbgSecNodeLabel(dNode), MO: dbgSecNodeLabel(mNode) }, extra || {}))
+        }
+        return false
+    }
+
     /**
      * PC·MO 트리를 각각 해시(nodeSig)하면 MO에 code-video/code-raster 명이 없을 때만 하위 구조가 전부 시그니처에 남아 불일치가 난다.
      * 형제는 pcMoChildPairsOrIndex(img·txt 이름·나머지 정렬). 한쪽이라도 code-video·Video fill·code-raster면 그 서브트리는 일치로 본다.
      */
     function pairedStructureMatch(dNode, mNode, depth) {
         depth = depth || 0
-        if (!dNode || !mNode) return !dNode && !mNode
-        if (!isVisible(dNode) || !isVisible(mNode)) return false
+        if (!dNode || !mNode) {
+            if (!dNode && !mNode) return true
+            return dbgSecMismatch("한쪽 노드 null", dNode, mNode, depth, {})
+        }
+        if (!isVisible(dNode) || !isVisible(mNode)) {
+            return dbgSecMismatch("visible 불일치", dNode, mNode, depth, { pcVis: isVisible(dNode), moVis: isVisible(mNode) })
+        }
         if (isVideoSlotByNameOrFill(dNode) || isVideoSlotByNameOrFill(mNode)) return true
         if (isCodeRasterNode(dNode) || isCodeRasterNode(mNode)) return true
         var dt = dNode.type || "UNKNOWN"
         var mt = mNode.type || "UNKNOWN"
-        if (dt !== mt) return false
+        if (dt !== mt) return dbgSecMismatch("type 불일치", dNode, mNode, depth, { pcType: dt, moType: mt })
         var dCont = isContainer(dNode)
         var mCont = isContainer(mNode)
-        if (dCont !== mCont) return false
+        if (dCont !== mCont) return dbgSecMismatch("container 여부 불일치", dNode, mNode, depth, { pcCont: dCont, moCont: mCont })
         if (!dCont) return true
         if (depth >= 3) return true
         var dk = visibleChildren(dNode)
         var mk = visibleChildren(mNode)
-        if (dk.length !== mk.length) return false
+        if (dk.length !== mk.length) {
+            return dbgSecMismatch("가시 자식 개수 불일치", dNode, mNode, depth, {
+                pcCount: dk.length,
+                moCount: mk.length,
+                pcKids: dk.map(dbgSecNodeLabel),
+                moKids: mk.map(dbgSecNodeLabel),
+            })
+        }
         var plist = pcMoChildPairsOrIndex(dk, mk)
         for (var ci = 0; ci < plist.length; ci++) {
-            if (!pairedStructureMatch(plist[ci][0], plist[ci][1], depth + 1)) return false
+            if (!pairedStructureMatch(plist[ci][0], plist[ci][1], depth + 1)) {
+                dbgSecStruct("sec " + currentSecForStructLog + " · 자식 쌍 재귀 실패(위 MISMATCH 원인)", {
+                    depth: depth,
+                    childIndex: ci,
+                    pcChild: dbgSecNodeLabel(plist[ci][0]),
+                    moChild: dbgSecNodeLabel(plist[ci][1]),
+                })
+                return false
+            }
         }
         return true
     }
@@ -7091,6 +7206,8 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
     var count = Math.max(dSecs.length, mSecs.length)
     var allMatch = dSecs.length === mSecs.length
 
+    dbgSecStruct("섹션 개수", { PC: dSecs.length, MO: mSecs.length, allMatchCount: allMatch })
+
     for (var i = 0; i < count; i++) {
         var secNo = sectionClassPrefix(i + 1) // 01,02...
         var d = dSecs[i]
@@ -7101,8 +7218,11 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
         if (!d || !m) {
             match = false
             reason = !d ? "PC 섹션 없음" : "MO 섹션 없음"
+            dbgSecStruct("섹션 누락", { sec: secNo, reason: reason })
         } else {
+            currentSecForStructLog = secNo
             match = pairedStructureMatch(d, m, 0)
+            currentSecForStructLog = ""
             if (!match) reason = "시그니처 불일치"
         }
 
@@ -7110,10 +7230,12 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
         if (!match) {
             out.mismatchSecs.push(secNo)
             allMatch = false
+            dbgSecStruct("→ hybridMismatchSecs 추가", { sec: secNo, reason: reason })
         }
     }
 
     out.allMatch = !!allMatch
+    dbgSecStruct("요약", { allMatch: out.allMatch, mismatchSecs: out.mismatchSecs, matches: out.matches })
     return out
 }
 

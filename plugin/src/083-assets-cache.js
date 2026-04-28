@@ -3,6 +3,18 @@
  * 경로는 assetKey(067에서 secNo·노드 id 포함)당 1개만. 내용/figma imageHash만으로 다른 노드에 경로를 재사용하지 않음.
  */
 var ASSETS_IMAGES_PREFIX = "assets/images/"
+
+/** true면 `getOrAssignImagePath` 호출·분기 로그 (Figma → Plugins → Development → Open console). 확인 후 false 권장 */
+var DEBUG_LOG_IMAGE_PATH_ASSIGN = false
+
+function dbgImgPath(msg, detail) {
+    if (!DEBUG_LOG_IMAGE_PATH_ASSIGN) return
+    try {
+        if (detail != null) console.log("[imgPath]", msg, detail)
+        else console.log("[imgPath]", msg)
+    } catch (e0) {}
+}
+
 function normalizeProjectName(s) {
     s = String(s || "").trim()
     if (!s) return "project"
@@ -68,12 +80,43 @@ function moAssetKeyToPcAssetKeyByVariant(moKey) {
     return String(moKey || "").replace(/^([^:]+:)mo(:)/, "$1pc$2")
 }
 
+/**
+ * PC dump 시 저장된 키는 parent clip export(:pclip)·FRAME 크기 등으로 해시가 달라질 수 있는데,
+ * makePairedPcAssetKeyForInheritedPathLookup은 clip/rasterExportSource 없이 짜서 정확 키가 안 맞는 경우가 있다.
+ * 같은 preview:pc:…:sN: 접두 + :n:nodeId 를 가진 맵 키로 PC 경로를 찾는다.
+ */
+function inheritedPcPathScanByPcNodeIdInMap(map, pairedPcAssetKey) {
+    if (!map || !pairedPcAssetKey) return ""
+    var pk = String(pairedPcAssetKey)
+    var mN = /:n:([0-9]+_[0-9]+)(?=:pclip:|$)/.exec(pk)
+    if (!mN) return ""
+    var needle = ":n:" + mN[1]
+    var prefixM = /^(preview:pc:[^:]+:[^:]+:s\d+:)/.exec(pk)
+    var prefix = prefixM ? prefixM[1] : ""
+    var cands = []
+    for (var k in map) {
+        if (!Object.prototype.hasOwnProperty.call(map, k)) continue
+        if (prefix && k.indexOf(prefix) !== 0) continue
+        if (k.indexOf(needle) < 0) continue
+        if (!map[k]) continue
+        cands.push(k)
+    }
+    if (!cands.length) return ""
+    if (cands.length === 1) return map[cands[0]]
+    cands.sort(function (a, b) {
+        return b.length - a.length
+    })
+    return map[cands[0]]
+}
+
 function inheritedPcPathForPairedKey(cache, pairedPcAssetKey) {
     if (!cache || !cache.inheritedPcImageName || !pairedPcAssetKey) return ""
     var map = cache.inheritedPcImageName
     if (map[pairedPcAssetKey]) return map[pairedPcAssetKey]
     var toggled = String(pairedPcAssetKey).replace(/:png:/, ":__FMT__:").replace(/:jpg:/, ":png:").replace(/:__FMT__:/, ":jpg:")
     if (toggled !== pairedPcAssetKey && map[toggled]) return map[toggled]
+    var scanned = inheritedPcPathScanByPcNodeIdInMap(map, pairedPcAssetKey)
+    if (scanned) return scanned
     return ""
 }
 
@@ -118,6 +161,7 @@ function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
         var reusedPath = cache.imageName[opts.reuseAssetKey]
         var ak = assetKey != null ? String(assetKey) : ""
         if (ak && reusedPath) cache.imageName[ak] = reusedPath
+        dbgImgPath("reuseAssetKey branch", { reuseKey: String(opts.reuseAssetKey).slice(0, 80), ak: ak.slice(0, 80), reusedPath: reusedPath })
         return reusedPath
     }
 
@@ -125,10 +169,24 @@ function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
     if (!key) return ""
 
     var secEarly = Number(secNo) || 1
+    var keyShort = key.length > 140 ? key.slice(0, 60) + "…" + key.slice(-70) : key
+    var dataLen = dataUrl ? String(dataUrl).trim().length : 0
+    var hadKey = Object.prototype.hasOwnProperty.call(cache.imageName, key)
+    dbgImgPath("enter", {
+        sec: secEarly,
+        key: keyShort,
+        dataLen: dataLen,
+        suffix: cache.imageSuffix || "",
+        skipExport: !!opts.skipExport,
+        pairedPcKey: opts.pairedPcAssetKey ? String(opts.pairedPcAssetKey).slice(0, 100) : "",
+        hadKey: hadKey,
+        prevPath: hadKey ? cache.imageName[key] : undefined,
+    })
 
     if (!Object.prototype.hasOwnProperty.call(cache.imageName, key)) {
         if (!dataUrl || !String(dataUrl).trim()) {
             cache.imageName[key] = ""
+            dbgImgPath("EARLY empty dataUrl (path locked to \"\")", { key: keyShort })
             return ""
         }
         var ext = getDataUrlExt(dataUrl)
@@ -139,9 +197,13 @@ function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
             var pcPathLook = inheritedPcPathForPairedKey(cache, pcKey)
             if (pcPathLook) {
                 assignedPath = pcExportPathToMoExportPath(pcPathLook, ext)
+                dbgImgPath("MO inherited PC path", { pcKey: String(pcKey).slice(0, 100), pcPathLook: pcPathLook, assignedPath: assignedPath })
             } else if (opts.pairedPcAssetKey) {
-                cache.imageName[key] = ""
-                return ""
+                dbgImgPath("MO pairedPcKey no exact inherited path (fall through to imgNN or retry scan next call)", {
+                    pcKey: String(pcKey).slice(0, 120),
+                    hasMap: !!cache.inheritedPcImageName,
+                    mapHasPcKey: !!(cache.inheritedPcImageName && cache.inheritedPcImageName[pcKey]),
+                })
             }
         }
 
@@ -168,13 +230,18 @@ function getOrAssignImagePath(cache, assetKey, dataUrl, secNo, opts) {
         }
 
         cache.imageName[key] = assignedPath
+        dbgImgPath("first assign", { key: keyShort, assignedPath: assignedPath })
+    } else if (hadKey && dataLen > 0 && (!cache.imageName[key] || !String(cache.imageName[key]).trim())) {
+        dbgImgPath("WARN cached path empty but dataUrl now non-empty (cannot re-assign)", { key: keyShort, prevPath: cache.imageName[key], dataLen: dataLen })
     }
 
     var pathOut = cache.imageName[key] || ""
     var skipExportFinal = opts.skipExport || !!(dataUrl && cache.imageSuffix === "_mo" && dataUrl.indexOf("image/svg+xml") >= 0)
+    var willList = !!(pathOut && dataUrl && !skipExportFinal)
     if (pathOut && dataUrl && !skipExportFinal) {
         ensureImageInListOnce(cache, pathOut, dataUrl)
     }
+    dbgImgPath("exit", { key: keyShort, pathOut: pathOut, willList: willList, skipExportFinal: skipExportFinal })
     return pathOut
 }
 

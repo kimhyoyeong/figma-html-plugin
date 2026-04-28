@@ -11,6 +11,25 @@
  * apSlidePcImgAttr — 슬라이드 안 이미지는 picture 변환 생략 표시
  * combinePcMoAsBreakpoint — 위 요소 합쳐 최종 HTML 문자열
  */
+
+/** true면 `getSectionStructureMatch` 상세 로그 (Figma → Plugins → Development → Open console) */
+var DEBUG_LOG_SECTION_STRUCTURE_MATCH = true
+
+function dbgSecStruct(msg, detail) {
+    if (!DEBUG_LOG_SECTION_STRUCTURE_MATCH) return
+    try {
+        if (detail != null) console.log("[ap-sec-struct]", msg, detail)
+        else console.log("[ap-sec-struct]", msg)
+    } catch (e0) {}
+}
+
+function dbgSecNodeLabel(n) {
+    if (!n) return "(null)"
+    var nm = String(n.name || "").trim()
+    if (nm.length > 48) nm = nm.slice(0, 46) + "…"
+    return (n.type || "?") + ' "' + nm + '" ' + String(n.id || "")
+}
+
 // ----- 6. Section Utils (배경은 buildSectionBackgroundAsync) -----
 /**
  * PC/MO visible 형제 짝: `img`·`txt` 레이어명(대소문자 무시) 동수면 시각 좌표로 짝, `txt`는 양쪽에 같은 개수일 때만 짝.
@@ -746,6 +765,8 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
 
     if (!desktopRoot || !mobileRoot || !isContainer(desktopRoot) || !isContainer(mobileRoot)) return out
 
+    var currentSecForStructLog = ""
+
     function visibleChildren(n) {
         var arr = []
         if (!n || !n.children) return arr
@@ -756,30 +777,57 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
         return arr
     }
 
+    function dbgSecMismatch(reason, dNode, mNode, depth, extra) {
+        if (DEBUG_LOG_SECTION_STRUCTURE_MATCH) {
+            dbgSecStruct("sec " + currentSecForStructLog + " · " + reason, Object.assign({ depth: depth, PC: dbgSecNodeLabel(dNode), MO: dbgSecNodeLabel(mNode) }, extra || {}))
+        }
+        return false
+    }
+
     /**
      * PC·MO 트리를 각각 해시(nodeSig)하면 MO에 code-video/code-raster 명이 없을 때만 하위 구조가 전부 시그니처에 남아 불일치가 난다.
      * 형제는 pcMoChildPairsOrIndex(img·txt 이름·나머지 정렬). 한쪽이라도 code-video·Video fill·code-raster면 그 서브트리는 일치로 본다.
      */
     function pairedStructureMatch(dNode, mNode, depth) {
         depth = depth || 0
-        if (!dNode || !mNode) return !dNode && !mNode
-        if (!isVisible(dNode) || !isVisible(mNode)) return false
+        if (!dNode || !mNode) {
+            if (!dNode && !mNode) return true
+            return dbgSecMismatch("한쪽 노드 null", dNode, mNode, depth, {})
+        }
+        if (!isVisible(dNode) || !isVisible(mNode)) {
+            return dbgSecMismatch("visible 불일치", dNode, mNode, depth, { pcVis: isVisible(dNode), moVis: isVisible(mNode) })
+        }
         if (isVideoSlotByNameOrFill(dNode) || isVideoSlotByNameOrFill(mNode)) return true
         if (isCodeRasterNode(dNode) || isCodeRasterNode(mNode)) return true
         var dt = dNode.type || "UNKNOWN"
         var mt = mNode.type || "UNKNOWN"
-        if (dt !== mt) return false
+        if (dt !== mt) return dbgSecMismatch("type 불일치", dNode, mNode, depth, { pcType: dt, moType: mt })
         var dCont = isContainer(dNode)
         var mCont = isContainer(mNode)
-        if (dCont !== mCont) return false
+        if (dCont !== mCont) return dbgSecMismatch("container 여부 불일치", dNode, mNode, depth, { pcCont: dCont, moCont: mCont })
         if (!dCont) return true
         if (depth >= 3) return true
         var dk = visibleChildren(dNode)
         var mk = visibleChildren(mNode)
-        if (dk.length !== mk.length) return false
+        if (dk.length !== mk.length) {
+            return dbgSecMismatch("가시 자식 개수 불일치", dNode, mNode, depth, {
+                pcCount: dk.length,
+                moCount: mk.length,
+                pcKids: dk.map(dbgSecNodeLabel),
+                moKids: mk.map(dbgSecNodeLabel),
+            })
+        }
         var plist = pcMoChildPairsOrIndex(dk, mk)
         for (var ci = 0; ci < plist.length; ci++) {
-            if (!pairedStructureMatch(plist[ci][0], plist[ci][1], depth + 1)) return false
+            if (!pairedStructureMatch(plist[ci][0], plist[ci][1], depth + 1)) {
+                dbgSecStruct("sec " + currentSecForStructLog + " · 자식 쌍 재귀 실패(위 MISMATCH 원인)", {
+                    depth: depth,
+                    childIndex: ci,
+                    pcChild: dbgSecNodeLabel(plist[ci][0]),
+                    moChild: dbgSecNodeLabel(plist[ci][1]),
+                })
+                return false
+            }
         }
         return true
     }
@@ -791,6 +839,8 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
     var count = Math.max(dSecs.length, mSecs.length)
     var allMatch = dSecs.length === mSecs.length
 
+    dbgSecStruct("섹션 개수", { PC: dSecs.length, MO: mSecs.length, allMatchCount: allMatch })
+
     for (var i = 0; i < count; i++) {
         var secNo = sectionClassPrefix(i + 1) // 01,02...
         var d = dSecs[i]
@@ -801,8 +851,11 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
         if (!d || !m) {
             match = false
             reason = !d ? "PC 섹션 없음" : "MO 섹션 없음"
+            dbgSecStruct("섹션 누락", { sec: secNo, reason: reason })
         } else {
+            currentSecForStructLog = secNo
             match = pairedStructureMatch(d, m, 0)
+            currentSecForStructLog = ""
             if (!match) reason = "시그니처 불일치"
         }
 
@@ -810,10 +863,12 @@ function getSectionStructureMatch(desktopRoot, mobileRoot) {
         if (!match) {
             out.mismatchSecs.push(secNo)
             allMatch = false
+            dbgSecStruct("→ hybridMismatchSecs 추가", { sec: secNo, reason: reason })
         }
     }
 
     out.allMatch = !!allMatch
+    dbgSecStruct("요약", { allMatch: out.allMatch, mismatchSecs: out.mismatchSecs, matches: out.matches })
     return out
 }
 
